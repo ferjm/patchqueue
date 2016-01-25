@@ -7,12 +7,14 @@ diff --git a/dom/sync/PSyncManager.ipdl b/dom/sync/PSyncManager.ipdl
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/PSyncManager.ipdl
-@@ -0,0 +1,25 @@
+@@ -0,0 +1,27 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 +
 +include protocol PBackground;
++
++include SyncIPCTypes;
 +
 +using struct nsID from "nsID.h";
 +
@@ -24,11 +26,11 @@ new file mode 100644
 +  manager PBackground;
 +
 +parent: // child -> parent messages
-+  Register(nsID requestId, nsString tag);
++  Request(nsID aRequestId, SyncOp aOp);
 +  __delete__();
 +
 +child: // parent -> child messages
-+  RegisterResult(nsID requestId);
++  Response(nsID requestId);
 +};
 +
 +} // namespace dom
@@ -36,7 +38,7 @@ new file mode 100644
 diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
 --- a/dom/sync/SyncManager.cpp
 +++ b/dom/sync/SyncManager.cpp
-@@ -1,16 +1,16 @@
+@@ -1,16 +1,17 @@
  /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
  /* vim: set ts=8 sts=2 et sw=2 tw=80: */
  /* This Source Code Form is subject to the terms of the Mozilla Public
@@ -46,6 +48,7 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
  #include "SyncManager.h"
 -
 +#include "SyncManagerChild.h"
++#include "SyncTypes.h"
  #include "mozilla/dom/Promise.h"
  #include "mozilla/dom/PromiseWorkerProxy.h"
  #include "mozilla/dom/SyncManagerBinding.h"
@@ -54,7 +57,7 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
  #include "mozilla/ipc/PBackgroundChild.h"
  #include "mozilla/Preferences.h"
  #include "nsIGlobalObject.h"
-@@ -19,16 +19,86 @@
+@@ -19,16 +20,86 @@
  namespace mozilla {
  
  using namespace ipc;
@@ -141,7 +144,7 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
                                  nsIPrincipal* aPrincipal,
                                  ErrorResult& aRv)
  {
-@@ -58,21 +128,41 @@ SyncManager::CreateOnWorker(WorkerPrivat
+@@ -58,21 +129,41 @@ SyncManager::CreateOnWorker(WorkerPrivat
  
    RefPtr<SyncManager> ref = new SyncManager(nullptr, principalInfo);
    return ref.forget();
@@ -185,7 +188,7 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
  {
    return SyncManagerBinding::Wrap(aCx, this, aGivenProto);
  }
-@@ -95,42 +185,97 @@ SyncManager::PrefEnabled(JSContext* aCx,
+@@ -95,42 +186,100 @@ SyncManager::PrefEnabled(JSContext* aCx,
    WorkerPrivate* workerPrivate = GetWorkerPrivateFromContext(aCx);
    if (!workerPrivate) {
      return false;
@@ -269,7 +272,9 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
 -  }
 -
 -  return p.forget();
-+  nsAutoPtr<SyncOp> op(new SyncOp(SyncOp::Register, nsString(aTag)));
++  const SyncRegisterArgs args((nsString(aTag)));
++  nsAutoPtr<SyncOp> op(new SyncOp(uint32_t(SyncOpType::Register),
++                       SyncOpArgs(args)));
 +  return ExecuteOp(op.forget(), aRv);
  }
  
@@ -282,7 +287,8 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
 -  }
 -
 -  return p.forget();
-+  nsAutoPtr<SyncOp> op(new SyncOp(SyncOp::GetTags));
++  nsAutoPtr<SyncOp> op(new SyncOp(uint32_t(SyncOpType::GetTags), 
++                       SyncOpArgs(SyncGetTagsArgs())));
 +  return ExecuteOp(op.forget(), aRv);
  }
  
@@ -310,7 +316,7 @@ diff --git a/dom/sync/SyncManager.h b/dom/sync/SyncManager.h
  #ifndef mozilla_dom_SyncManager_h
  #define mozilla_dom_SyncManager_h
  
-+#include "SyncTypes.h"
++#include "mozilla/dom/SyncIPCTypes.h"
 +
 +#include "nsIIPCBackgroundChildCreateCallback.h"
 +#include "nsIObserver.h"
@@ -493,13 +499,13 @@ new file mode 100644
 +  nsresult rv = StorePendingRequest(aPromise, requestId);
 +  NS_ENSURE_SUCCESS(rv, rv);
 +
-+  Unused << SendRegister(requestId, nsString(aOp->mRegisterArgs));
++//  Unused << SendRegister(requestId, nsString(aOp->mRegisterArgs));
 +
 +  return NS_OK;
 +}
 +
 +bool
-+SyncManagerChild::RecvRegisterResult(const nsID& aRequestId)
++SyncManagerChild::RecvResponse(const nsID& aRequestId)
 +{
 +  Promise* p = GetPendingRequest(aRequestId);
 +  if (!p) {
@@ -556,7 +562,7 @@ new file mode 100644
 +
 +  nsresult ExecuteOp(Promise* aPromise, SyncOp* aOp);
 +
-+  virtual bool RecvRegisterResult(const nsID& aRequestId) override;
++  virtual bool RecvResponse(const nsID& aRequestId) override;
 +
 +private:
 +  explicit SyncManagerChild();
@@ -581,7 +587,7 @@ diff --git a/dom/sync/SyncManagerParent.cpp b/dom/sync/SyncManagerParent.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncManagerParent.cpp
-@@ -0,0 +1,52 @@
+@@ -0,0 +1,55 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -589,6 +595,7 @@ new file mode 100644
 + * You can obtain one at http://mozilla.org/MPL/2.0/. */
 +
 +#include "SyncManagerParent.h"
++#include "SyncTypes.h"
 +
 +#include "mozilla/unused.h"
 +#include "mozilla/ipc/BackgroundParent.h"
@@ -614,18 +621,20 @@ new file mode 100644
 +  AssertIsOnBackgroundThread();
 +}
 +
-+bool SyncManagerParent::RecvRegister(const nsID& aRequestId,
-+                                     const nsString& aTag)
++bool SyncManagerParent::RecvRequest(const nsID& aRequestId,
++                                    const SyncOp& aOp)
 +{
-+  Unused << SendRegisterResult(aRequestId);
++  switch(SyncOpType(aOp.mType())) {
++    case SyncOpType::Register:
++    {
++      Unused << SendResponse(aRequestId);
++      break;
++    }
++    default:
++      break;
++  }
 +  return true;
 +}
-+
-+/*bool SyncManagerParent::RecvGetTags(const nsID& aRequestId,
-+ *                                    InfallibleTArray<nsString>* aTags)
-+{
-+  return true;
-+}*/
 +
 +bool SyncManagerParent::Recv__delete__()
 +{
@@ -638,7 +647,7 @@ diff --git a/dom/sync/SyncManagerParent.h b/dom/sync/SyncManagerParent.h
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncManagerParent.h
-@@ -0,0 +1,46 @@
+@@ -0,0 +1,44 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -649,6 +658,7 @@ new file mode 100644
 +#define mozilla_dom_SyncManagerParent_h
 +
 +#include "mozilla/dom/PSyncManagerParent.h"
++#include "mozilla/dom/SyncIPCTypes.h"
 +
 +#include "nsID.h"
 +
@@ -665,11 +675,8 @@ new file mode 100644
 +  friend class mozilla::ipc::BackgroundParentImpl;
 +
 +public:
-+  virtual bool RecvRegister(const nsID& aRequestId,
-+                            const nsString& aTag) override;
-+
-+//  virtual bool RecvGetTags(const nsID& aRequestId,
-+//                           InfallibleTArray<nsString>* aTags) override;
++  virtual bool RecvRequest(const nsID& aRequestId,
++                           const SyncOp& aOp) override;
 +
 +  virtual bool Recv__delete__() override;
 +private:
@@ -689,7 +696,7 @@ diff --git a/dom/sync/SyncTypes.h b/dom/sync/SyncTypes.h
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncTypes.h
-@@ -0,0 +1,38 @@
+@@ -0,0 +1,24 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -704,25 +711,11 @@ new file mode 100644
 +namespace mozilla {
 +namespace dom {
 +
-+typedef nsString SyncOpRegisterArgs;
-+
-+struct SyncOp {
-+  enum SyncOpType {
-+    Register = 0,
-+    GetTags
-+  } mType;
-+
-+  nsString mRegisterArgs;
-+
-+  SyncOp(SyncOpType aType, nsString aArgs)
-+    : mType(aType)
-+    , mRegisterArgs(aArgs)
-+  {}
-+
-+  SyncOp(SyncOpType aType)
-+    : mType(aType)
-+  {}
-+};
++enum class SyncOpType : uint32_t
++{
++  Register = 0,
++  GetTags
++} mType;
 +
 +} // namespace dom
 +} // namespace mozilla
@@ -731,7 +724,7 @@ new file mode 100644
 diff --git a/dom/sync/moz.build b/dom/sync/moz.build
 --- a/dom/sync/moz.build
 +++ b/dom/sync/moz.build
-@@ -1,19 +1,26 @@
+@@ -1,19 +1,27 @@
  # vim: set filetype=python:
  # This Source Code Form is subject to the terms of the Mozilla Public
  # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -751,7 +744,8 @@ diff --git a/dom/sync/moz.build b/dom/sync/moz.build
 +]
 +
 +IPDL_SOURCES += [
-+    'PSyncManager.ipdl'
++    'PSyncManager.ipdl',
++    'SyncIPCTypes.ipdlh'
  ]
  
  LOCAL_INCLUDES += [
