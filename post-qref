@@ -1,2 +1,4 @@
 #!/bin/bash
-echo 'Hello'
+git add .
+git commit -m "qref -> auto push"
+git push
