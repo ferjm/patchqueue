@@ -7,7 +7,7 @@ diff --git a/dom/sync/PSyncManager.ipdl b/dom/sync/PSyncManager.ipdl
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/PSyncManager.ipdl
-@@ -0,0 +1,26 @@
+@@ -0,0 +1,25 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -25,7 +25,6 @@ new file mode 100644
 +
 +parent: // child -> parent messages
 +  Register(nsID requestId, nsString tag);
-+
 +  __delete__();
 +
 +child: // parent -> child messages
