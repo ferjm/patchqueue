@@ -1,0 +1,27 @@
+# HG changeset patch
+# User Fabrice Desré <fabrice@mozilla.com>
+# Parent  9bb1872a676cfc39fd9419fb5d7310bd80258d56
+Bug 1211401 - Implement chrome.runtime.sendMessage on b2g r=billm
+
+diff --git a/toolkit/components/extensions/ExtensionContent.jsm b/toolkit/components/extensions/ExtensionContent.jsm
+--- a/toolkit/components/extensions/ExtensionContent.jsm
++++ b/toolkit/components/extensions/ExtensionContent.jsm
+@@ -81,17 +81,17 @@ var api = context => {
+           message = args[0];
+         } else if (args.length == 2) {
+           [message, responseCallback] = args;
+         } else {
+           [extensionId, message, options, responseCallback] = args;
+         }
+ 
+         let recipient = extensionId ? {extensionId} : {extensionId: context.extensionId};
+-        context.messenger.sendMessage(context.messageManager, message, recipient, responseCallback);
++        context.messenger.sendMessage(Services.cpmm, message, recipient, responseCallback);
+       },
+     },
+ 
+     extension: {
+       getURL: function(url) {
+         return context.extension.baseURI.resolve(url);
+       },
+ 

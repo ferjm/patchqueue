@@ -1,0 +1,1993 @@
+# HG changeset patch
+# User Phil Booth <pmbooth@gmail.com>
+
+Bug 1227527 - Implement basic FxA device registration
+
+---
+ b2g/components/test/unit/test_fxaccounts.js        |  10 +
+ services/fxaccounts/FxAccounts.jsm                 | 184 +++++++-
+ services/fxaccounts/FxAccountsClient.jsm           | 112 ++++-
+ services/fxaccounts/FxAccountsCommon.js            |  19 +-
+ services/fxaccounts/FxAccountsWebChannel.jsm       |   4 +-
+ .../fxaccounts/tests/xpcshell/test_accounts.js     | 127 +++++-
+ .../xpcshell/test_accounts_device_registration.js  | 465 +++++++++++++++++++++
+ services/fxaccounts/tests/xpcshell/test_client.js  | 193 ++++++++-
+ .../fxaccounts/tests/xpcshell/test_credentials.js  |   4 +-
+ .../tests/xpcshell/test_loginmgr_storage.js        |  24 +-
+ .../tests/xpcshell/test_oauth_grant_client.js      |   5 +-
+ .../xpcshell/test_oauth_grant_client_server.js     |   2 +-
+ .../tests/xpcshell/test_oauth_token_storage.js     |  11 +-
+ .../fxaccounts/tests/xpcshell/test_oauth_tokens.js |  13 +-
+ services/fxaccounts/tests/xpcshell/test_profile.js |   8 +-
+ .../tests/xpcshell/test_storage_manager.js         |  25 +-
+ services/fxaccounts/tests/xpcshell/xpcshell.ini    |   2 +
+ services/sync/modules/constants.js                 |   3 +
+ services/sync/modules/engines/clients.js           |  26 +-
+ services/sync/modules/util.js                      |  14 +
+ testing/profiles/prefs_b2g_unittest.js             |   1 +
+ testing/profiles/prefs_general.js                  |   3 +
+ 22 files changed, 1178 insertions(+), 77 deletions(-)
+ create mode 100644 services/fxaccounts/tests/xpcshell/test_accounts_device_registration.js
+
+diff --git a/b2g/components/test/unit/test_fxaccounts.js b/b2g/components/test/unit/test_fxaccounts.js
+index 1cc8a1c..5de0d65 100644
+--- a/b2g/components/test/unit/test_fxaccounts.js
++++ b/b2g/components/test/unit/test_fxaccounts.js
+@@ -24,6 +24,7 @@ const ORIGINAL_SENDCUSTOM = SystemAppProxy._sendCustomEvent;
+ do_register_cleanup(function() {
+   Services.prefs.setCharPref("identity.fxaccounts.auth.uri", ORIGINAL_AUTH_URI);
+   SystemAppProxy._sendCustomEvent = ORIGINAL_SENDCUSTOM;
++  Services.prefs.clearUserPref("identity.fxaccounts.skipDeviceRegistration");
+ });
+ 
+ // Make profile available so that fxaccounts can store user data
+@@ -39,6 +40,9 @@ function run_test() {
+ }
+ 
+ add_task(function test_overall() {
++  // FxA device registration throws from this context
++  Services.prefs.setBoolPref("identity.fxaccounts.skipDeviceRegistration", true);
++
+   do_check_neq(FxAccountsMgmtService, null);
+ });
+ 
+@@ -105,6 +109,9 @@ add_test(function test_invalidEmailCase_signIn() {
+   // Point the FxAccountsClient's hawk rest request client to the mock server
+   Services.prefs.setCharPref("identity.fxaccounts.auth.uri", server.baseURI);
+ 
++  // FxA device registration throws from this context
++  Services.prefs.setBoolPref("identity.fxaccounts.skipDeviceRegistration", true);
++
+   // Receive a mozFxAccountsChromeEvent message
+   function onMessage(subject, topic, data) {
+     let message = subject.wrappedJSObject;
+@@ -164,6 +171,9 @@ add_test(function test_invalidEmailCase_signIn() {
+ add_test(function testHandleGetAssertionError_defaultCase() {
+   do_test_pending();
+ 
++  // FxA device registration throws from this context
++  Services.prefs.setBoolPref("identity.fxaccounts.skipDeviceRegistration", true);
++
+   FxAccountsManager.getAssertion(null).then(
+     success => {
+       // getAssertion should throw with invalid audience
+diff --git a/services/fxaccounts/FxAccounts.jsm b/services/fxaccounts/FxAccounts.jsm
+index b349570..afe62ab 100644
+--- a/services/fxaccounts/FxAccounts.jsm
++++ b/services/fxaccounts/FxAccounts.jsm
+@@ -30,6 +30,9 @@ XPCOMUtils.defineLazyModuleGetter(this, "FxAccountsOAuthGrantClient",
+ XPCOMUtils.defineLazyModuleGetter(this, "FxAccountsProfile",
+   "resource://gre/modules/FxAccountsProfile.jsm");
+ 
++XPCOMUtils.defineLazyModuleGetter(this, "Utils",
++  "resource://services-sync/util.js");
++
+ // All properties exposed by the public FxAccounts API.
+ var publicProperties = [
+   "accountStatus",
+@@ -37,6 +40,7 @@ var publicProperties = [
+   "getAccountsSignInURI",
+   "getAccountsSignUpURI",
+   "getAssertion",
++  "getDeviceId",
+   "getKeys",
+   "getSignedInUser",
+   "getOAuthToken",
+@@ -51,6 +55,7 @@ var publicProperties = [
+   "resendVerificationEmail",
+   "setSignedInUser",
+   "signOut",
++  "updateDeviceRegistration",
+   "whenVerified"
+ ];
+ 
+@@ -490,7 +495,9 @@ FxAccountsInternal.prototype = {
+       // We're telling the caller that this is durable now (although is that
+       // really something we should commit to? Why not let the write happen in
+       // the background? Already does for updateAccountData ;)
+-      return currentAccountState.promiseInitialized.then(() => {
++      return currentAccountState.promiseInitialized.then(() =>
++        this.updateDeviceRegistration()
++      ).then(() => {
+         Services.telemetry.getHistogramById("FXA_CONFIGURED").add(1);
+         this.notifyObservers(ONLOGIN_NOTIFICATION);
+         if (!this.isUserEmailVerified(credentials)) {
+@@ -539,6 +546,26 @@ FxAccountsInternal.prototype = {
+     }).then(result => currentState.resolve(result));
+   },
+ 
++  getDeviceId() {
++    return this.currentAccountState.getUserAccountData()
++      .then(data => {
++        if (data) {
++          if (data.isDeviceStale || !data.deviceId) {
++            // A previous device registration attempt failed or there is no
++            // device id. Either way, we should register the device with FxA
++            // before returning the id to the caller.
++            return this._registerOrUpdateDevice(data);
++          }
++
++          // Return the device id that we already registered with the server.
++          return data.deviceId;
++        }
++
++        // Without a signed-in user, there can be no device id.
++        return null;
++      });
++  },
++
+   /**
+    * Resend the verification email fot the currently signed-in user.
+    *
+@@ -605,10 +632,15 @@ FxAccountsInternal.prototype = {
+     let currentState = this.currentAccountState;
+     let sessionToken;
+     let tokensToRevoke;
++    let deviceId;
+     return currentState.getUserAccountData().then(data => {
+-      // Save the session token for use in the call to signOut below.
+-      sessionToken = data && data.sessionToken;
+-      tokensToRevoke = data && data.oauthTokens;
++      // Save the session token, tokens to revoke and the
++      // device id for use in the call to signOut below.
++      if (data) {
++        sessionToken = data.sessionToken;
++        tokensToRevoke = data.oauthTokens;
++        deviceId = data.deviceId;
++      }
+       return this._signOutLocal();
+     }).then(() => {
+       // FxAccountsManager calls here, then does its own call
+@@ -620,7 +652,7 @@ FxAccountsInternal.prototype = {
+           // This can happen in the background and shouldn't block
+           // the user from signing out. The server must tolerate
+           // clients just disappearing, so this call should be best effort.
+-          return this._signOutServer(sessionToken);
++          return this._signOutServer(sessionToken, deviceId);
+         }).catch(err => {
+           log.error("Error during remote sign out of Firefox Accounts", err);
+         }).then(() => {
+@@ -652,11 +684,22 @@ FxAccountsInternal.prototype = {
+     });
+   },
+ 
+-  _signOutServer: function signOutServer(sessionToken) {
+-    // For now we assume the service being logged out from is Sync - we might
+-    // need to revisit this when this FxA code is used in a context that
+-    // isn't Sync.
+-    return this.fxAccountsClient.signOut(sessionToken, {service: "sync"});
++  _signOutServer(sessionToken, deviceId) {
++    // For now we assume the service being logged out from is Sync, so
++    // we must tell the server to either destroy the device or sign out
++    // (if no device exists). We might need to revisit this when this
++    // FxA code is used in a context that isn't Sync.
++
++    const options = { service: "sync" };
++
++    if (deviceId) {
++      log.debug("destroying device and session");
++      return this.fxAccountsClient.signOutAndDestroyDevice(sessionToken, deviceId, options)
++        .then(() => this.currentAccountState.updateUserAccountData({ deviceId: null }));
++    }
++
++    log.debug("destroying session");
++    return this.fxAccountsClient.signOut(sessionToken, options);
+   },
+ 
+   /**
+@@ -1334,6 +1377,127 @@ FxAccountsInternal.prototype = {
+       }
+     ).catch(err => Promise.reject(this._errorToErrorClass(err)));
+   },
++
++  // Attempt to update the auth server with whatever device details are stored
++  // in the account data. Returns a promise that always resolves, never rejects.
++  // If the promise resolves to a value, that value is the device id.
++  updateDeviceRegistration() {
++    return this.getSignedInUser().then(signedInUser => {
++      if (signedInUser) {
++        return this._registerOrUpdateDevice(signedInUser);
++      }
++    }).catch(error => this._logErrorAndSetStaleDeviceFlag(error));
++  },
++
++  _registerOrUpdateDevice(signedInUser) {
++    try {
++      // Allow tests to skip device registration because:
++      //   1. It makes remote requests to the auth server.
++      //   2. _getDeviceName does not work from xpcshell.
++      //   3. The B2G tests fail when attempting to import services-sync/util.js.
++      if (Services.prefs.getBoolPref("identity.fxaccounts.skipDeviceRegistration")) {
++        return Promise.resolve();
++      }
++    } catch(ignore) {}
++
++    return Promise.resolve().then(() => {
++      const deviceName = this._getDeviceName();
++
++      if (signedInUser.deviceId) {
++        log.debug("updating existing device details");
++        return this.fxAccountsClient.updateDevice(
++          signedInUser.sessionToken, signedInUser.deviceId, deviceName);
++      }
++
++      log.debug("registering new device details");
++      return this.fxAccountsClient.registerDevice(
++        signedInUser.sessionToken, deviceName, this._getDeviceType());
++    }).then(device =>
++      this.currentAccountState.updateUserAccountData({
++        deviceId: device.id,
++        isDeviceStale: null
++      }).then(() => device.id)
++    ).catch(error => this._handleDeviceError(error, signedInUser.sessionToken));
++  },
++
++  _getDeviceName() {
++    return Utils.getDeviceName();
++  },
++
++  _getDeviceType() {
++    return Utils.getDeviceType();
++  },
++
++  _handleDeviceError(error, sessionToken) {
++    return Promise.resolve().then(() => {
++      if (error.code === 400) {
++        if (error.errno === ERRNO_UNKNOWN_DEVICE) {
++          return this._recoverFromUnknownDevice();
++        }
++
++        if (error.errno === ERRNO_DEVICE_SESSION_CONFLICT) {
++          return this._recoverFromDeviceSessionConflict(error, sessionToken);
++        }
++      }
++
++      return this._logErrorAndSetStaleDeviceFlag(error);
++    }).catch(() => {});
++  },
++
++  _recoverFromUnknownDevice() {
++    // FxA did not recognise the device id. Handle it by clearing the device
++    // id on the account data. At next sync or next sign-in, registration is
++    // retried and should succeed.
++    log.warn("unknown device id, clearing the local device data");
++    return this.currentAccountState.updateUserAccountData({ deviceId: null })
++      .catch(error => this._logErrorAndSetStaleDeviceFlag(error));
++  },
++
++  _recoverFromDeviceSessionConflict(error, sessionToken) {
++    // FxA has already associated this session with a different device id.
++    // Perhaps we were beaten in a race to register. Handle the conflict:
++    //   1. Fetch the list of devices for the current user from FxA.
++    //   2. Look for ourselves in the list.
++    //   3. If we find a match, set the correct device id and the stale device
++    //      flag on the account data and return the correct device id. At next
++    //      sync or next sign-in, registration is retried and should succeed.
++    //   4. If we don't find a match, log the original error.
++    log.warn("device session conflict, attempting to ascertain the correct device id");
++    return this.fxAccountsClient.getDeviceList(sessionToken)
++      .then(devices => {
++        const matchingDevices = devices.filter(device => device.isCurrentDevice);
++        const length = matchingDevices.length;
++        if (length === 1) {
++          const deviceId = matchingDevices[0].id
++          return this.currentAccountState.updateUserAccountData({
++            deviceId,
++            isDeviceStale: true
++          }).then(() => deviceId);
++        }
++        if (length > 1) {
++          log.error("insane server state, " + length + " devices for this session");
++        }
++        return this._logErrorAndSetStaleDeviceFlag(error);
++      }).catch(secondError => {
++        log.error("failed to recover from device-session conflict", secondError);
++        this._logErrorAndSetStaleDeviceFlag(error)
++      });
++  },
++
++  _logErrorAndSetStaleDeviceFlag(error) {
++    // Device registration should never cause other operations to fail.
++    // If we've reached this point, just log the error and set the stale
++    // device flag on the account data. At next sync or next sign-in,
++    // registration will be retried.
++    log.error("device registration failed", error);
++    return this.currentAccountState.updateUserAccountData({
++      isDeviceStale: true
++    }).catch(secondError => {
++      log.error(
++        "failed to set stale device flag, device registration won't be retried",
++        secondError);
++    }).then(() => {});
++  }
+ };
+ 
+ 
+diff --git a/services/fxaccounts/FxAccountsClient.jsm b/services/fxaccounts/FxAccountsClient.jsm
+index 001c7757..07ce690 100644
+--- a/services/fxaccounts/FxAccountsClient.jsm
++++ b/services/fxaccounts/FxAccountsClient.jsm
+@@ -204,7 +204,7 @@ this.FxAccountsClient.prototype = {
+   signOut: function (sessionTokenHex, options = {}) {
+     let path = "/session/destroy";
+     if (options.service) {
+-      path += "?service=" + options.service;
++      path += "?service=" + encodeURIComponent(options.service);
+     }
+     return this._request(path, "POST",
+       deriveHawkCredentials(sessionTokenHex, "sessionToken"));
+@@ -359,6 +359,116 @@ this.FxAccountsClient.prototype = {
+     );
+   },
+ 
++  /**
++   * Register a new device
++   *
++   * @method registerDevice
++   * @param  sessionTokenHex
++   *         Session token obtained from signIn
++   * @param  name
++   *         Device name
++   * @param  type
++   *         Device type (mobile|desktop)
++   * @return Promise
++   *         Resolves to an object:
++   *         {
++   *           id: Device identifier
++   *           createdAt: Creation time (milliseconds since epoch)
++   *           name: Name of device
++   *           type: Type of device (mobile|desktop)
++   *         }
++   */
++  registerDevice(sessionTokenHex, name, type) {
++    let path = "/account/device";
++
++    let creds = deriveHawkCredentials(sessionTokenHex, "sessionToken");
++    let body = { name, type };
++
++    return this._request(path, "POST", creds, body);
++  },
++
++  /**
++   * Update the session or name for an existing device
++   *
++   * @method updateDevice
++   * @param  sessionTokenHex
++   *         Session token obtained from signIn
++   * @param  id
++   *         Device identifier
++   * @param  name
++   *         Device name
++   * @return Promise
++   *         Resolves to an object:
++   *         {
++   *           id: Device identifier
++   *           name: Device name
++   *         }
++   */
++  updateDevice(sessionTokenHex, id, name) {
++    let path = "/account/device";
++
++    let creds = deriveHawkCredentials(sessionTokenHex, "sessionToken");
++    let body = { id, name };
++
++    return this._request(path, "POST", creds, body);
++  },
++
++  /**
++   * Delete a device and its associated session token, signing the user
++   * out of the server.
++   *
++   * @method signOutAndDestroyDevice
++   * @param  sessionTokenHex
++   *         Session token obtained from signIn
++   * @param  id
++   *         Device identifier
++   * @param  [options]
++   *         Options object
++   * @param  [options.service]
++   *         `service` query parameter
++   * @return Promise
++   *         Resolves to an empty object:
++   *         {}
++   */
++  signOutAndDestroyDevice(sessionTokenHex, id, options={}) {
++    let path = "/account/device/destroy";
++
++    if (options.service) {
++      path += "?service=" + encodeURIComponent(options.service);
++    }
++
++    let creds = deriveHawkCredentials(sessionTokenHex, "sessionToken");
++    let body = { id };
++
++    return this._request(path, "POST", creds, body);
++  },
++
++  /**
++   * Get a list of currently registered devices
++   *
++   * @method getDeviceList
++   * @param  sessionTokenHex
++   *         Session token obtained from signIn
++   * @return Promise
++   *         Resolves to an array of objects:
++   *         [
++   *           {
++   *             id: Device id
++   *             isCurrentDevice: Boolean indicating whether the item
++   *                              represents the current device
++   *             name: Device name
++   *             type: Device type (mobile|desktop)
++   *           },
++   *           ...
++   *         ]
++   */
++  getDeviceList(sessionTokenHex) {
++    let path = "/account/devices";
++    let creds = deriveHawkCredentials(sessionTokenHex, "sessionToken");
++
++    return this._request(path, "GET", creds, {});
++  },
++
+   _clearBackoff: function() {
+       this.backoffError = null;
+   },
+diff --git a/services/fxaccounts/FxAccountsCommon.js b/services/fxaccounts/FxAccountsCommon.js
+index 37bcb25..78d3704 100644
+--- a/services/fxaccounts/FxAccountsCommon.js
++++ b/services/fxaccounts/FxAccountsCommon.js
+@@ -124,6 +124,10 @@ exports.ERRNO_INCORRECT_LOGIN_METHOD         = 117;
+ exports.ERRNO_INCORRECT_KEY_RETRIEVAL_METHOD = 118;
+ exports.ERRNO_INCORRECT_API_VERSION          = 119;
+ exports.ERRNO_INCORRECT_EMAIL_CASE           = 120;
++exports.ERRNO_ACCOUNT_LOCKED                 = 121;
++exports.ERRNO_ACCOUNT_UNLOCKED               = 122;
++exports.ERRNO_UNKNOWN_DEVICE                 = 123;
++exports.ERRNO_DEVICE_SESSION_CONFLICT        = 124;
+ exports.ERRNO_SERVICE_TEMP_UNAVAILABLE       = 201;
+ exports.ERRNO_PARSE                          = 997;
+ exports.ERRNO_NETWORK                        = 998;
+@@ -150,7 +154,10 @@ exports.ERRNO_INVALID_CONTENT_TYPE           = 113 + exports.OAUTH_SERVER_ERRNO_
+ // Errors.
+ exports.ERROR_ACCOUNT_ALREADY_EXISTS         = "ACCOUNT_ALREADY_EXISTS";
+ exports.ERROR_ACCOUNT_DOES_NOT_EXIST         = "ACCOUNT_DOES_NOT_EXIST ";
++exports.ERROR_ACCOUNT_LOCKED                 = "ACCOUNT_LOCKED";
++exports.ERROR_ACCOUNT_UNLOCKED               = "ACCOUNT_UNLOCKED";
+ exports.ERROR_ALREADY_SIGNED_IN_USER         = "ALREADY_SIGNED_IN_USER";
++exports.ERROR_DEVICE_SESSION_CONFLICT        = "DEVICE_SESSION_CONFLICT";
+ exports.ERROR_ENDPOINT_NO_LONGER_SUPPORTED   = "ENDPOINT_NO_LONGER_SUPPORTED";
+ exports.ERROR_INCORRECT_API_VERSION          = "INCORRECT_API_VERSION";
+ exports.ERROR_INCORRECT_EMAIL_CASE           = "INCORRECT_EMAIL_CASE";
+@@ -184,6 +191,7 @@ exports.ERROR_UI_REQUEST                     = "UI_REQUEST";
+ exports.ERROR_PARSE                          = "PARSE_ERROR";
+ exports.ERROR_NETWORK                        = "NETWORK_ERROR";
+ exports.ERROR_UNKNOWN                        = "UNKNOWN_ERROR";
++exports.ERROR_UNKNOWN_DEVICE                 = "UNKNOWN_DEVICE";
+ exports.ERROR_UNVERIFIED_ACCOUNT             = "UNVERIFIED_ACCOUNT";
+ 
+ // OAuth errors.
+@@ -218,7 +226,8 @@ exports.ERROR_MSG_METHOD_NOT_ALLOWED         = "METHOD_NOT_ALLOWED";
+ // The fields we save in the plaintext JSON.
+ // See bug 1013064 comments 23-25 for why the sessionToken is "safe"
+ exports.FXA_PWDMGR_PLAINTEXT_FIELDS = new Set(
+-  ["email", "verified", "authAt", "sessionToken", "uid", "oauthTokens", "profile"]);
++  ["email", "verified", "authAt", "sessionToken", "uid", "oauthTokens", "profile",
++  "deviceId", "isDeviceStale"]);
+ 
+ // Fields we store in secure storage if it exists.
+ exports.FXA_PWDMGR_SECURE_FIELDS = new Set(
+@@ -267,6 +276,10 @@ SERVER_ERRNO_TO_ERROR[ERRNO_INCORRECT_LOGIN_METHOD]         = ERROR_INCORRECT_LO
+ SERVER_ERRNO_TO_ERROR[ERRNO_INCORRECT_KEY_RETRIEVAL_METHOD] = ERROR_INCORRECT_KEY_RETRIEVAL_METHOD;
+ SERVER_ERRNO_TO_ERROR[ERRNO_INCORRECT_API_VERSION]          = ERROR_INCORRECT_API_VERSION;
+ SERVER_ERRNO_TO_ERROR[ERRNO_INCORRECT_EMAIL_CASE]           = ERROR_INCORRECT_EMAIL_CASE;
++SERVER_ERRNO_TO_ERROR[ERRNO_ACCOUNT_LOCKED]                 = ERROR_ACCOUNT_LOCKED;
++SERVER_ERRNO_TO_ERROR[ERRNO_ACCOUNT_UNLOCKED]               = ERROR_ACCOUNT_UNLOCKED;
++SERVER_ERRNO_TO_ERROR[ERRNO_UNKNOWN_DEVICE]                 = ERROR_UNKNOWN_DEVICE;
++SERVER_ERRNO_TO_ERROR[ERRNO_DEVICE_SESSION_CONFLICT]        = ERROR_DEVICE_SESSION_CONFLICT;
+ SERVER_ERRNO_TO_ERROR[ERRNO_SERVICE_TEMP_UNAVAILABLE]       = ERROR_SERVICE_TEMP_UNAVAILABLE;
+ SERVER_ERRNO_TO_ERROR[ERRNO_UNKNOWN_ERROR]                  = ERROR_UNKNOWN;
+ SERVER_ERRNO_TO_ERROR[ERRNO_NETWORK]                        = ERROR_NETWORK;
+@@ -290,7 +303,10 @@ SERVER_ERRNO_TO_ERROR[ERRNO_INVALID_CONTENT_TYPE]           = ERROR_INVALID_CONT
+ // Map internal errors to more generic error classes for consumers
+ ERROR_TO_GENERAL_ERROR_CLASS[ERROR_ACCOUNT_ALREADY_EXISTS]         = ERROR_AUTH_ERROR;
+ ERROR_TO_GENERAL_ERROR_CLASS[ERROR_ACCOUNT_DOES_NOT_EXIST]         = ERROR_AUTH_ERROR;
++ERROR_TO_GENERAL_ERROR_CLASS[ERROR_ACCOUNT_LOCKED]                 = ERROR_AUTH_ERROR;
++ERROR_TO_GENERAL_ERROR_CLASS[ERROR_ACCOUNT_UNLOCKED]               = ERROR_AUTH_ERROR;
+ ERROR_TO_GENERAL_ERROR_CLASS[ERROR_ALREADY_SIGNED_IN_USER]         = ERROR_AUTH_ERROR;
++ERROR_TO_GENERAL_ERROR_CLASS[ERROR_DEVICE_SESSION_CONFLICT]        = ERROR_AUTH_ERROR;
+ ERROR_TO_GENERAL_ERROR_CLASS[ERROR_ENDPOINT_NO_LONGER_SUPPORTED]   = ERROR_AUTH_ERROR;
+ ERROR_TO_GENERAL_ERROR_CLASS[ERROR_INCORRECT_API_VERSION]          = ERROR_AUTH_ERROR;
+ ERROR_TO_GENERAL_ERROR_CLASS[ERROR_INCORRECT_EMAIL_CASE]           = ERROR_AUTH_ERROR;
+@@ -314,6 +330,7 @@ ERROR_TO_GENERAL_ERROR_CLASS[ERROR_NO_SILENT_REFRESH_AUTH]         = ERROR_AUTH_
+ ERROR_TO_GENERAL_ERROR_CLASS[ERROR_NOT_VALID_JSON_BODY]            = ERROR_AUTH_ERROR;
+ ERROR_TO_GENERAL_ERROR_CLASS[ERROR_PERMISSION_DENIED]              = ERROR_AUTH_ERROR;
+ ERROR_TO_GENERAL_ERROR_CLASS[ERROR_REQUEST_BODY_TOO_LARGE]         = ERROR_AUTH_ERROR;
++ERROR_TO_GENERAL_ERROR_CLASS[ERROR_UNKNOWN_DEVICE]                 = ERROR_AUTH_ERROR;
+ ERROR_TO_GENERAL_ERROR_CLASS[ERROR_UNVERIFIED_ACCOUNT]             = ERROR_AUTH_ERROR;
+ ERROR_TO_GENERAL_ERROR_CLASS[ERROR_UI_ERROR]                       = ERROR_AUTH_ERROR;
+ ERROR_TO_GENERAL_ERROR_CLASS[ERROR_UI_REQUEST]                     = ERROR_AUTH_ERROR;
+diff --git a/services/fxaccounts/FxAccountsWebChannel.jsm b/services/fxaccounts/FxAccountsWebChannel.jsm
+index 60b1ad2..9e0874c 100644
+--- a/services/fxaccounts/FxAccountsWebChannel.jsm
++++ b/services/fxaccounts/FxAccountsWebChannel.jsm
+@@ -261,7 +261,9 @@ this.FxAccountsWebChannelHelpers.prototype = {
+   logout(uid) {
+     return fxAccounts.getSignedInUser().then(userData => {
+       if (userData.uid === uid) {
+-        return fxAccounts.signOut();
++        // true argument is `localOnly`, because server-side stuff
++        // has already been taken care of by the content server
++        return fxAccounts.signOut(true);
+       }
+     });
+   },
+diff --git a/services/fxaccounts/tests/xpcshell/test_accounts.js b/services/fxaccounts/tests/xpcshell/test_accounts.js
+index 475f0d4..2b32d7b 100644
+--- a/services/fxaccounts/tests/xpcshell/test_accounts.js
++++ b/services/fxaccounts/tests/xpcshell/test_accounts.js
+@@ -127,7 +127,8 @@ function MockFxAccountsClient() {
+ 
+   this.signCertificate = function() { throw "no" };
+ 
+-  this.signOut = function() { return Promise.resolve(); };
++  this.signOut = () => Promise.resolve();
++  this.signOutAndDestroyDevice = () => Promise.resolve({});
+ 
+   FxAccountsClient.apply(this);
+ }
+@@ -162,6 +163,9 @@ function MockFxAccounts() {
+       this._getCertificateSigned_calls.push([sessionToken, serializedPublicKey]);
+       return this._d_signCertificate.promise;
+     },
++    _registerOrUpdateDevice() {
++      return Promise.resolve();
++    },
+     fxAccountsClient: new MockFxAccountsClient()
+   });
+ }
+@@ -179,6 +183,12 @@ function MakeFxAccounts(internal = {}) {
+       return new AccountState(storage);
+     };
+   }
++  if (!internal._signOutServer) {
++    internal._signOutServer = () => Promise.resolve();
++  }
++  if (!internal._registerOrUpdateDevice) {
++    internal._registerOrUpdateDevice = () => Promise.resolve();
++  }
+   return new FxAccounts(internal);
+ }
+ 
+@@ -210,7 +220,7 @@ add_test(function test_non_https_remote_server_uri() {
+   run_next_test();
+ });
+ 
+-add_task(function test_get_signed_in_user_initially_unset() {
++add_task(function* test_get_signed_in_user_initially_unset() {
+   _("Check getSignedInUser initially and after signout reports no user");
+   let account = MakeFxAccounts();
+   let credentials = {
+@@ -555,7 +565,7 @@ add_test(function test_overlapping_signins() {
+   });
+ });
+ 
+-add_task(function test_getAssertion() {
++add_task(function* test_getAssertion() {
+   let fxa = new MockFxAccounts();
+ 
+   do_check_throws(function() {
+@@ -675,7 +685,7 @@ add_task(function test_getAssertion() {
+   _("----- DONE ----\n");
+ });
+ 
+-add_task(function test_resend_email_not_signed_in() {
++add_task(function* test_resend_email_not_signed_in() {
+   let fxa = new MockFxAccounts();
+ 
+   try {
+@@ -762,21 +772,98 @@ add_test(function test_resend_email() {
+   });
+ });
+ 
+-add_test(function test_sign_out() {
+-  let fxa = new MockFxAccounts();
+-  let remoteSignOutCalled = false;
+-  let client = fxa.internal.fxAccountsClient;
+-  client.signOut = function() { remoteSignOutCalled = true; return Promise.resolve(); };
+-  makeObserver(ONLOGOUT_NOTIFICATION, function() {
+-    log.debug("test_sign_out_with_remote_error observed onlogout");
+-    // user should be undefined after sign out
+-    fxa.internal.getUserAccountData().then(user => {
+-      do_check_eq(user, null);
+-      do_check_true(remoteSignOutCalled);
+-      run_next_test();
++add_task(function* test_sign_out_with_device() {
++  const fxa = new MockFxAccounts();
++
++  const credentials = getTestUser("alice");
++  yield fxa.internal.setSignedInUser(credentials);
++
++  const user = yield fxa.internal.getUserAccountData();
++  do_check_true(user);
++  Object.keys(credentials).forEach(key => do_check_eq(credentials[key], user[key]));
++
++  const spy = {
++    signOut: { count: 0 },
++    signOutAndDeviceDestroy: { count: 0, args: [] }
++  };
++  const client = fxa.internal.fxAccountsClient;
++  client.signOut = function () {
++    spy.signOut.count += 1;
++    return Promise.resolve();
++  };
++  client.signOutAndDestroyDevice = function () {
++    spy.signOutAndDeviceDestroy.count += 1;
++    spy.signOutAndDeviceDestroy.args.push(arguments);
++    return Promise.resolve();
++  };
++
++  const promise = new Promise(resolve => {
++    makeObserver(ONLOGOUT_NOTIFICATION, () => {
++      log.debug("test_sign_out_with_device observed onlogout");
++      // user should be undefined after sign out
++      fxa.internal.getUserAccountData().then(user2 => {
++        do_check_eq(user2, null);
++        do_check_eq(spy.signOut.count, 0);
++        do_check_eq(spy.signOutAndDeviceDestroy.count, 1);
++        do_check_eq(spy.signOutAndDeviceDestroy.args[0].length, 3);
++        do_check_eq(spy.signOutAndDeviceDestroy.args[0][0], credentials.sessionToken);
++        do_check_eq(spy.signOutAndDeviceDestroy.args[0][1], credentials.deviceId);
++        do_check_true(spy.signOutAndDeviceDestroy.args[0][2]);
++        do_check_eq(spy.signOutAndDeviceDestroy.args[0][2].service, "sync");
++        resolve();
++      });
+     });
+   });
+-  fxa.signOut();
++
++  yield fxa.signOut();
++
++  yield promise;
++});
++
++add_task(function* test_sign_out_without_device() {
++  const fxa = new MockFxAccounts();
++
++  const credentials = getTestUser("alice");
++  delete credentials.deviceId;
++  yield fxa.internal.setSignedInUser(credentials);
++
++  const user = yield fxa.internal.getUserAccountData();
++
++  const spy = {
++    signOut: { count: 0, args: [] },
++    signOutAndDeviceDestroy: { count: 0 }
++  };
++  const client = fxa.internal.fxAccountsClient;
++  client.signOut = function () {
++    spy.signOut.count += 1;
++    spy.signOut.args.push(arguments);
++    return Promise.resolve();
++  };
++  client.signOutAndDestroyDevice = function () {
++    spy.signOutAndDeviceDestroy.count += 1;
++    return Promise.resolve();
++  };
++
++  const promise = new Promise(resolve => {
++    makeObserver(ONLOGOUT_NOTIFICATION, () => {
++      log.debug("test_sign_out_without_device observed onlogout");
++      // user should be undefined after sign out
++      fxa.internal.getUserAccountData().then(user2 => {
++        do_check_eq(user2, null);
++        do_check_eq(spy.signOut.count, 1);
++        do_check_eq(spy.signOut.args[0].length, 2);
++        do_check_eq(spy.signOut.args[0][0], credentials.sessionToken);
++        do_check_true(spy.signOut.args[0][1]);
++        do_check_eq(spy.signOut.args[0][1].service, "sync");
++        do_check_eq(spy.signOutAndDeviceDestroy.count, 0);
++        resolve();
++      });
++    });
++  });
++
++  yield fxa.signOut();
++
++  yield promise;
+ });
+ 
+ add_test(function test_sign_out_with_remote_error() {
+@@ -1087,7 +1174,10 @@ add_test(function test_getSignedInUserProfile() {
+     },
+     tearDown: function() {},
+   };
+-  let fxa = new FxAccounts({});
++  let fxa = new FxAccounts({
++    _signOutServer() { return Promise.resolve(); },
++    _registerOrUpdateDevice() { return Promise.resolve(); }
++  });
+ 
+   fxa.setSignedInUser(alice).then(() => {
+     fxa.internal._profile = mockProfile;
+@@ -1180,6 +1270,7 @@ function getTestUser(name) {
+   return {
+     email: name + "@example.com",
+     uid: "1ad7f502-4cc7-4ec1-a209-071fd2fae348",
++    deviceId: name + "'s device id",
+     sessionToken: name + "'s session token",
+     keyFetchToken: name + "'s keyfetch token",
+     unwrapBKey: expandHex("44"),
+diff --git a/services/fxaccounts/tests/xpcshell/test_accounts_device_registration.js b/services/fxaccounts/tests/xpcshell/test_accounts_device_registration.js
+new file mode 100644
+index 0000000..5412620
+--- /dev/null
++++ b/services/fxaccounts/tests/xpcshell/test_accounts_device_registration.js
+@@ -0,0 +1,465 @@
++/* Any copyright is dedicated to the Public Domain.
++ * http://creativecommons.org/publicdomain/zero/1.0/ */
++
++"use strict";
++
++Cu.import("resource://services-common/utils.js");
++Cu.import("resource://gre/modules/Services.jsm");
++Cu.import("resource://gre/modules/FxAccounts.jsm");
++Cu.import("resource://gre/modules/FxAccountsClient.jsm");
++Cu.import("resource://gre/modules/FxAccountsCommon.js");
++Cu.import("resource://gre/modules/Promise.jsm");
++Cu.import("resource://gre/modules/Log.jsm");
++
++initTestLogging("Trace");
++
++var log = Log.repository.getLogger("Services.FxAccounts.test");
++log.level = Log.Level.Debug;
++
++Services.prefs.setCharPref("identity.fxaccounts.loglevel", "Trace");
++Log.repository.getLogger("FirefoxAccounts").level = Log.Level.Trace;
++
++Services.prefs.setCharPref("identity.fxaccounts.remote.oauth.uri", "https://example.com/v1");
++Services.prefs.setCharPref("identity.fxaccounts.oauth.client_id", "abc123");
++Services.prefs.setCharPref("identity.fxaccounts.remote.profile.uri", "http://example.com/v1");
++Services.prefs.setCharPref("identity.fxaccounts.settings.uri", "http://accounts.example.com/");
++
++function MockStorageManager() {
++}
++
++MockStorageManager.prototype = {
++  initialize(accountData) {
++    this.accountData = accountData;
++  },
++
++  finalize() {
++    return Promise.resolve();
++  },
++
++  getAccountData() {
++    return Promise.resolve(this.accountData);
++  },
++
++  updateAccountData(updatedFields) {
++    for (let [name, value] of Iterator(updatedFields)) {
++      if (value == null) {
++        delete this.accountData[name];
++      } else {
++        this.accountData[name] = value;
++      }
++    }
++    return Promise.resolve();
++  },
++
++  deleteAccountData() {
++    this.accountData = null;
++    return Promise.resolve();
++  }
++}
++
++function MockFxAccountsClient(device) {
++  this._email = "nobody@example.com";
++  this._verified = false;
++  this._deletedOnServer = false; // for testing accountStatus
++
++  // mock calls up to the auth server to determine whether the
++  // user account has been verified
++  this.recoveryEmailStatus = function (sessionToken) {
++    // simulate a call to /recovery_email/status
++    return Promise.resolve({
++      email: this._email,
++      verified: this._verified
++    });
++  };
++
++  this.accountStatus = function(uid) {
++    let deferred = Promise.defer();
++    deferred.resolve(!!uid && (!this._deletedOnServer));
++    return deferred.promise;
++  };
++
++  const { id: deviceId, name: deviceName, type: deviceType, sessionToken } = device;
++
++  this.registerDevice = (st, name, type) => Promise.resolve({ id: deviceId, name });
++  this.updateDevice = (st, id, name) => Promise.resolve({ id, name });
++  this.signOutAndDestroyDevice = () => Promise.resolve({});
++  this.getDeviceList = (st) =>
++    Promise.resolve([
++      { id: deviceId, name: deviceName, type: deviceType, isCurrentDevice: st === sessionToken }
++    ]);
++
++  FxAccountsClient.apply(this);
++}
++MockFxAccountsClient.prototype = {
++  __proto__: FxAccountsClient.prototype
++}
++
++function MockFxAccounts(device = {}) {
++  return new FxAccounts({
++    _getDeviceName() {
++      return device.name || "mock device name";
++    },
++    fxAccountsClient: new MockFxAccountsClient(device)
++  });
++}
++
++add_task(function* test_updateDeviceRegistration_with_new_device() {
++  const deviceName = "foo";
++  const deviceType = "bar";
++
++  const credentials = getTestUser("baz");
++  delete credentials.deviceId;
++  const fxa = new MockFxAccounts({ name: deviceName });
++  yield fxa.internal.setSignedInUser(credentials);
++
++  const spy = {
++    registerDevice: { count: 0, args: [] },
++    updateDevice: { count: 0, args: [] },
++    getDeviceList: { count: 0, args: [] }
++  };
++  const client = fxa.internal.fxAccountsClient;
++  client.registerDevice = function () {
++    spy.registerDevice.count += 1;
++    spy.registerDevice.args.push(arguments);
++    return Promise.resolve({
++      id: "newly-generated device id",
++      createdAt: Date.now(),
++      name: deviceName,
++      type: deviceType
++    });
++  };
++  client.updateDevice = function () {
++    spy.updateDevice.count += 1;
++    spy.updateDevice.args.push(arguments);
++    return Promise.resolve({});
++  };
++  client.getDeviceList = function () {
++    spy.getDeviceList.count += 1;
++    spy.getDeviceList.args.push(arguments);
++    return Promise.resolve([]);
++  };
++
++  const result = yield fxa.updateDeviceRegistration();
++
++  do_check_eq(result, "newly-generated device id");
++  do_check_eq(spy.updateDevice.count, 0);
++  do_check_eq(spy.getDeviceList.count, 0);
++  do_check_eq(spy.registerDevice.count, 1);
++  do_check_eq(spy.registerDevice.args[0].length, 3);
++  do_check_eq(spy.registerDevice.args[0][0], credentials.sessionToken);
++  do_check_eq(spy.registerDevice.args[0][1], deviceName);
++  do_check_eq(spy.registerDevice.args[0][2], "desktop");
++
++  const state = fxa.internal.currentAccountState;
++  const data = yield state.getUserAccountData();
++
++  do_check_eq(data.deviceId, "newly-generated device id");
++  do_check_false(data.isDeviceStale);
++});
++
++add_task(function* test_updateDeviceRegistration_with_existing_device() {
++  const deviceName = "phil's device";
++  const deviceType = "desktop";
++
++  const credentials = getTestUser("pb");
++  const fxa = new MockFxAccounts({ name: deviceName });
++  yield fxa.internal.setSignedInUser(credentials);
++
++  const spy = {
++    registerDevice: { count: 0, args: [] },
++    updateDevice: { count: 0, args: [] },
++    getDeviceList: { count: 0, args: [] }
++  };
++  const client = fxa.internal.fxAccountsClient;
++  client.registerDevice = function () {
++    spy.registerDevice.count += 1;
++    spy.registerDevice.args.push(arguments);
++    return Promise.resolve({});
++  };
++  client.updateDevice = function () {
++    spy.updateDevice.count += 1;
++    spy.updateDevice.args.push(arguments);
++    return Promise.resolve({
++      id: credentials.deviceId,
++      name: deviceName
++    });
++  };
++  client.getDeviceList = function () {
++    spy.getDeviceList.count += 1;
++    spy.getDeviceList.args.push(arguments);
++    return Promise.resolve([]);
++  };
++  const result = yield fxa.updateDeviceRegistration();
++
++  do_check_eq(result, credentials.deviceId);
++  do_check_eq(spy.registerDevice.count, 0);
++  do_check_eq(spy.getDeviceList.count, 0);
++  do_check_eq(spy.updateDevice.count, 1);
++  do_check_eq(spy.updateDevice.args[0].length, 3);
++  do_check_eq(spy.updateDevice.args[0][0], credentials.sessionToken);
++  do_check_eq(spy.updateDevice.args[0][1], credentials.deviceId);
++  do_check_eq(spy.updateDevice.args[0][2], deviceName);
++
++  const state = fxa.internal.currentAccountState;
++  const data = yield state.getUserAccountData();
++
++  do_check_eq(data.deviceId, credentials.deviceId);
++  do_check_false(data.isDeviceStale);
++});
++
++add_task(function* test_updateDeviceRegistration_with_unknown_device_error() {
++  const deviceName = "foo";
++  const deviceType = "bar";
++
++  const credentials = getTestUser("baz");
++  const fxa = new MockFxAccounts({ name: deviceName });
++  yield fxa.internal.setSignedInUser(credentials);
++
++  const spy = {
++    registerDevice: { count: 0, args: [] },
++    updateDevice: { count: 0, args: [] },
++    getDeviceList: { count: 0, args: [] }
++  };
++  const client = fxa.internal.fxAccountsClient;
++  client.registerDevice = function () {
++    spy.registerDevice.count += 1;
++    spy.registerDevice.args.push(arguments);
++    return Promise.resolve({
++      id: "a different newly-generated device id",
++      createdAt: Date.now(),
++      name: deviceName,
++      type: deviceType
++    });
++  };
++  client.updateDevice = function () {
++    spy.updateDevice.count += 1;
++    spy.updateDevice.args.push(arguments);
++    return Promise.reject({
++      code: 400,
++      errno: ERRNO_UNKNOWN_DEVICE
++    });
++  };
++  client.getDeviceList = function () {
++    spy.getDeviceList.count += 1;
++    spy.getDeviceList.args.push(arguments);
++    return Promise.resolve([]);
++  };
++
++  const result = yield fxa.updateDeviceRegistration();
++
++  do_check_null(result);
++  do_check_eq(spy.getDeviceList.count, 0);
++  do_check_eq(spy.registerDevice.count, 0);
++  do_check_eq(spy.updateDevice.count, 1);
++  do_check_eq(spy.updateDevice.args[0].length, 3);
++  do_check_eq(spy.updateDevice.args[0][0], credentials.sessionToken);
++  do_check_eq(spy.updateDevice.args[0][1], credentials.deviceId);
++  do_check_eq(spy.updateDevice.args[0][2], deviceName);
++
++  const state = fxa.internal.currentAccountState;
++  const data = yield state.getUserAccountData();
++
++  do_check_null(data.deviceId);
++  do_check_false(data.isDeviceStale);
++});
++
++add_task(function* test_updateDeviceRegistration_with_device_session_conflict_error() {
++  const deviceName = "foo";
++  const deviceType = "bar";
++
++  const credentials = getTestUser("baz");
++  const fxa = new MockFxAccounts({ name: deviceName });
++  yield fxa.internal.setSignedInUser(credentials);
++
++  const spy = {
++    registerDevice: { count: 0, args: [] },
++    updateDevice: { count: 0, args: [], times: [] },
++    getDeviceList: { count: 0, args: [] }
++  };
++  const client = fxa.internal.fxAccountsClient;
++  client.registerDevice = function () {
++    spy.registerDevice.count += 1;
++    spy.registerDevice.args.push(arguments);
++    return Promise.resolve({});
++  };
++  client.updateDevice = function () {
++    spy.updateDevice.count += 1;
++    spy.updateDevice.args.push(arguments);
++    spy.updateDevice.time = Date.now();
++    if (spy.updateDevice.count === 1) {
++      return Promise.reject({
++        code: 400,
++        errno: ERRNO_DEVICE_SESSION_CONFLICT
++      });
++    }
++    return Promise.resolve({
++      id: credentials.deviceId,
++      name: deviceName
++    });
++  };
++  client.getDeviceList = function () {
++    spy.getDeviceList.count += 1;
++    spy.getDeviceList.args.push(arguments);
++    spy.getDeviceList.time = Date.now();
++    return Promise.resolve([
++      { id: "ignore", name: "ignore", type: "ignore", isCurrentDevice: false },
++      { id: credentials.deviceId, name: deviceName, type: deviceType, isCurrentDevice: true }
++    ]);
++  };
++
++  const result = yield fxa.updateDeviceRegistration();
++
++  do_check_eq(result, credentials.deviceId);
++  do_check_eq(spy.registerDevice.count, 0);
++  do_check_eq(spy.updateDevice.count, 1);
++  do_check_eq(spy.updateDevice.args[0].length, 3);
++  do_check_eq(spy.updateDevice.args[0][0], credentials.sessionToken);
++  do_check_eq(spy.updateDevice.args[0][1], credentials.deviceId);
++  do_check_eq(spy.updateDevice.args[0][2], deviceName);
++  do_check_eq(spy.getDeviceList.count, 1);
++  do_check_eq(spy.getDeviceList.args[0].length, 1);
++  do_check_eq(spy.getDeviceList.args[0][0], credentials.sessionToken);
++  do_check_true(spy.getDeviceList.time >= spy.updateDevice.time);
++
++  const state = fxa.internal.currentAccountState;
++  const data = yield state.getUserAccountData();
++
++  do_check_eq(data.deviceId, credentials.deviceId);
++  do_check_true(data.isDeviceStale);
++});
++
++add_task(function* test_updateDeviceRegistration_with_unrecoverable_error() {
++  const deviceName = "foo";
++  const deviceType = "bar";
++
++  const credentials = getTestUser("baz");
++  delete credentials.deviceId;
++  const fxa = new MockFxAccounts({ name: deviceName });
++  yield fxa.internal.setSignedInUser(credentials);
++
++  const spy = {
++    registerDevice: { count: 0, args: [] },
++    updateDevice: { count: 0, args: [] },
++    getDeviceList: { count: 0, args: [] }
++  };
++  const client = fxa.internal.fxAccountsClient;
++  client.registerDevice = function () {
++    spy.registerDevice.count += 1;
++    spy.registerDevice.args.push(arguments);
++    return Promise.reject({
++      code: 400,
++      errno: ERRNO_TOO_MANY_CLIENT_REQUESTS
++    });
++  };
++  client.updateDevice = function () {
++    spy.updateDevice.count += 1;
++    spy.updateDevice.args.push(arguments);
++    return Promise.resolve({});
++  };
++  client.getDeviceList = function () {
++    spy.getDeviceList.count += 1;
++    spy.getDeviceList.args.push(arguments);
++    return Promise.resolve([]);
++  };
++
++  const result = yield fxa.updateDeviceRegistration();
++
++  do_check_null(result);
++  do_check_eq(spy.getDeviceList.count, 0);
++  do_check_eq(spy.updateDevice.count, 0);
++  do_check_eq(spy.registerDevice.count, 1);
++  do_check_eq(spy.registerDevice.args[0].length, 3);
++
++  const state = fxa.internal.currentAccountState;
++  const data = yield state.getUserAccountData();
++
++  do_check_null(data.deviceId);
++});
++
++add_task(function* test_getDeviceId_with_no_device_id_invokes_device_registration() {
++  const credentials = getTestUser("foo");
++  credentials.verified = true;
++  delete credentials.deviceId;
++  const fxa = new MockFxAccounts();
++  yield fxa.internal.setSignedInUser(credentials);
++
++  const spy = { count: 0, args: [] };
++  fxa.internal._registerOrUpdateDevice = function () {
++    spy.count += 1;
++    spy.args.push(arguments);
++    return Promise.resolve("bar");
++  };
++
++  const result = yield fxa.internal.getDeviceId();
++
++  do_check_eq(spy.count, 1);
++  do_check_eq(spy.args[0].length, 1);
++  do_check_eq(spy.args[0][0].email, credentials.email);
++  do_check_null(spy.args[0][0].deviceId);
++  do_check_eq(result, "bar");
++});
++
++add_task(function* test_getDeviceId_with_device_id_and_stale_flag_invokes_device_registration() {
++  const credentials = getTestUser("foo");
++  credentials.verified = true;
++  const fxa = new MockFxAccounts();
++  yield fxa.internal.setSignedInUser(credentials);
++
++  const spy = { count: 0, args: [] };
++  fxa.internal.currentAccountState.getUserAccountData =
++    () => Promise.resolve({ deviceId: credentials.deviceId, isDeviceStale: true });
++  fxa.internal._registerOrUpdateDevice = function () {
++    spy.count += 1;
++    spy.args.push(arguments);
++    return Promise.resolve("wibble");
++  };
++
++  const result = yield fxa.internal.getDeviceId();
++
++  do_check_eq(spy.count, 1);
++  do_check_eq(spy.args[0].length, 1);
++  do_check_eq(spy.args[0][0].deviceId, credentials.deviceId);
++  do_check_eq(result, "wibble");
++});
++
++add_task(function* test_getDeviceId_with_device_id_and_no_stale_flag_doesnt_invoke_device_registration() {
++  const credentials = getTestUser("foo");
++  credentials.verified = true;
++  const fxa = new MockFxAccounts();
++  yield fxa.internal.setSignedInUser(credentials);
++
++  const spy = { count: 0 };
++  fxa.internal._registerOrUpdateDevice = function () {
++    spy.count += 1;
++    return Promise.resolve("bar");
++  };
++
++  const result = yield fxa.internal.getDeviceId();
++
++  do_check_eq(spy.count, 0);
++  do_check_eq(result, "foo's device id");
++});
++
++function expandHex(two_hex) {
++  // Return a 64-character hex string, encoding 32 identical bytes.
++  let eight_hex = two_hex + two_hex + two_hex + two_hex;
++  let thirtytwo_hex = eight_hex + eight_hex + eight_hex + eight_hex;
++  return thirtytwo_hex + thirtytwo_hex;
++};
++
++function expandBytes(two_hex) {
++  return CommonUtils.hexToBytes(expandHex(two_hex));
++};
++
++function getTestUser(name) {
++  return {
++    email: name + "@example.com",
++    uid: "1ad7f502-4cc7-4ec1-a209-071fd2fae348",
++    deviceId: name + "'s device id",
++    sessionToken: name + "'s session token",
++    keyFetchToken: name + "'s keyfetch token",
++    unwrapBKey: expandHex("44"),
++    verified: false
++  };
++}
++
+diff --git a/services/fxaccounts/tests/xpcshell/test_client.js b/services/fxaccounts/tests/xpcshell/test_client.js
+index 96bcbc8..7411310 100644
+--- a/services/fxaccounts/tests/xpcshell/test_client.js
++++ b/services/fxaccounts/tests/xpcshell/test_client.js
+@@ -40,7 +40,7 @@ function deferredStop(server) {
+   return deferred.promise;
+ }
+ 
+-add_task(function test_authenticated_get_request() {
++add_task(function* test_authenticated_get_request() {
+   let message = "{\"msg\": \"Great Success!\"}";
+   let credentials = {
+     id: "eyJleHBpcmVzIjogMTM2NTAxMDg5OC4x",
+@@ -65,7 +65,7 @@ add_task(function test_authenticated_get_request() {
+   yield deferredStop(server);
+ });
+ 
+-add_task(function test_authenticated_post_request() {
++add_task(function* test_authenticated_post_request() {
+   let credentials = {
+     id: "eyJleHBpcmVzIjogMTM2NTAxMDg5OC4x",
+     key: "qTZf4ZFpAMpMoeSsX3zVRjiqmNs=",
+@@ -90,7 +90,7 @@ add_task(function test_authenticated_post_request() {
+   yield deferredStop(server);
+ });
+ 
+-add_task(function test_500_error() {
++add_task(function* test_500_error() {
+   let message = "<h1>Ooops!</h1>";
+   let method = "GET";
+ 
+@@ -113,7 +113,7 @@ add_task(function test_500_error() {
+   yield deferredStop(server);
+ });
+ 
+-add_task(function test_backoffError() {
++add_task(function* test_backoffError() {
+   let method = "GET";
+   let server = httpd_setup({
+     "/retryDelay": function(request, response) {
+@@ -160,7 +160,7 @@ add_task(function test_backoffError() {
+   yield deferredStop(server);
+ });
+ 
+-add_task(function test_signUp() {
++add_task(function* test_signUp() {
+   let creationMessage_noKey = JSON.stringify({
+     uid: "uid",
+     sessionToken: "sessionToken"
+@@ -238,7 +238,7 @@ add_task(function test_signUp() {
+   yield deferredStop(server);
+ });
+ 
+-add_task(function test_signIn() {
++add_task(function* test_signIn() {
+   let sessionMessage_noKey = JSON.stringify({
+     sessionToken: FAKE_SESSION_TOKEN
+   });
+@@ -329,7 +329,7 @@ add_task(function test_signIn() {
+   yield deferredStop(server);
+ });
+ 
+-add_task(function test_signOut() {
++add_task(function* test_signOut() {
+   let signoutMessage = JSON.stringify({});
+   let errorMessage = JSON.stringify({code: 400, errno: 102, error: "doesn't exist"});
+   let signedOut = false;
+@@ -366,7 +366,7 @@ add_task(function test_signOut() {
+   yield deferredStop(server);
+ });
+ 
+-add_task(function test_recoveryEmailStatus() {
++add_task(function* test_recoveryEmailStatus() {
+   let emailStatus = JSON.stringify({verified: true});
+   let errorMessage = JSON.stringify({code: 400, errno: 102, error: "doesn't exist"});
+   let tries = 0;
+@@ -404,7 +404,7 @@ add_task(function test_recoveryEmailStatus() {
+   yield deferredStop(server);
+ });
+ 
+-add_task(function test_resendVerificationEmail() {
++add_task(function* test_resendVerificationEmail() {
+   let emptyMessage = "{}";
+   let errorMessage = JSON.stringify({code: 400, errno: 102, error: "doesn't exist"});
+   let tries = 0;
+@@ -441,7 +441,7 @@ add_task(function test_resendVerificationEmail() {
+   yield deferredStop(server);
+ });
+ 
+-add_task(function test_accountKeys() {
++add_task(function* test_accountKeys() {
+   // Four calls to accountKeys().  The first one should work correctly, and we
+   // should get a valid bundle back, in exchange for our keyFetch token, from
+   // which we correctly derive kA and wrapKB.  The subsequent three calls
+@@ -522,7 +522,7 @@ add_task(function test_accountKeys() {
+   yield deferredStop(server);
+ });
+ 
+-add_task(function test_signCertificate() {
++add_task(function* test_signCertificate() {
+   let certSignMessage = JSON.stringify({cert: {bar: "baz"}});
+   let errorMessage = JSON.stringify({code: 400, errno: 102, error: "doesn't exist"});
+   let tries = 0;
+@@ -564,7 +564,7 @@ add_task(function test_signCertificate() {
+   yield deferredStop(server);
+ });
+ 
+-add_task(function test_accountExists() {
++add_task(function* test_accountExists() {
+   let sessionMessage = JSON.stringify({sessionToken: FAKE_SESSION_TOKEN});
+   let existsMessage = JSON.stringify({error: "wrong password", code: 400, errno: 103});
+   let doesntExistMessage = JSON.stringify({error: "no such account", code: 400, errno: 102});
+@@ -625,6 +625,173 @@ add_task(function test_accountExists() {
+   yield deferredStop(server);
+ });
+ 
++add_task(function* test_registerDevice() {
++  const DEVICE_ID = "device id";
++  const DEVICE_NAME = "device name";
++  const DEVICE_TYPE = "device type";
++  const ERROR_NAME = "test that the client promise rejects";
++
++  const server = httpd_setup({
++    "/account/device": function(request, response) {
++      const body = JSON.parse(CommonUtils.readBytesFromInputStream(request.bodyInputStream));
++
++      if (body.id || !body.name || !body.type || Object.keys(body).length !== 2) {
++        response.setStatusLine(request.httpVersion, 400, "Invalid request");
++        return response.bodyOutputStream.write("{}", 2);
++      }
++
++      if (body.name === ERROR_NAME) {
++        response.setStatusLine(request.httpVersion, 500, "Alas");
++        return response.bodyOutputStream.write("{}", 2);
++      }
++
++      body.id = DEVICE_ID;
++      body.createdAt = Date.now();
++
++      const responseMessage = JSON.stringify(body);
++
++      response.setStatusLine(request.httpVersion, 200, "OK");
++      response.bodyOutputStream.write(responseMessage, responseMessage.length);
++    },
++  });
++
++  const client = new FxAccountsClient(server.baseURI);
++  const result = yield client.registerDevice(FAKE_SESSION_TOKEN, DEVICE_NAME, DEVICE_TYPE);
++
++  do_check_true(result);
++  do_check_eq(Object.keys(result).length, 4);
++  do_check_eq(result.id, DEVICE_ID);
++  do_check_eq(typeof result.createdAt, 'number');
++  do_check_true(result.createdAt > 0);
++  do_check_eq(result.name, DEVICE_NAME);
++  do_check_eq(result.type, DEVICE_TYPE);
++
++  try {
++    yield client.registerDevice(FAKE_SESSION_TOKEN, ERROR_NAME, DEVICE_TYPE);
++    do_throw("Expected to catch an exception");
++  } catch(unexpectedError) {
++    do_check_eq(unexpectedError.code, 500);
++  }
++
++  yield deferredStop(server);
++});
++
++add_task(function* test_updateDevice() {
++  const DEVICE_ID = "some other id";
++  const DEVICE_NAME = "some other name";
++  const ERROR_ID = "test that the client promise rejects";
++
++  const server = httpd_setup({
++    "/account/device": function(request, response) {
++      const body = JSON.parse(CommonUtils.readBytesFromInputStream(request.bodyInputStream));
++
++      if (!body.id || !body.name || body.type || Object.keys(body).length !== 2) {
++        response.setStatusLine(request.httpVersion, 400, "Invalid request");
++        return response.bodyOutputStream.write("{}", 2);
++      }
++
++      if (body.id === ERROR_ID) {
++        response.setStatusLine(request.httpVersion, 500, "Alas");
++        return response.bodyOutputStream.write("{}", 2);
++      }
++
++      const responseMessage = JSON.stringify(body);
++
++      response.setStatusLine(request.httpVersion, 200, "OK");
++      response.bodyOutputStream.write(responseMessage, responseMessage.length);
++    },
++  });
++
++  const client = new FxAccountsClient(server.baseURI);
++  const result = yield client.updateDevice(FAKE_SESSION_TOKEN, DEVICE_ID, DEVICE_NAME);
++
++  do_check_true(result);
++  do_check_eq(Object.keys(result).length, 2);
++  do_check_eq(result.id, DEVICE_ID);
++  do_check_eq(result.name, DEVICE_NAME);
++
++  try {
++    yield client.updateDevice(FAKE_SESSION_TOKEN, ERROR_ID, DEVICE_NAME);
++    do_throw("Expected to catch an exception");
++  } catch(unexpectedError) {
++    do_check_eq(unexpectedError.code, 500);
++  }
++
++  yield deferredStop(server);
++});
++
++add_task(function* test_signOutAndDestroyDevice() {
++  const DEVICE_ID = "device id";
++  const ERROR_ID = "test that the client promise rejects";
++
++  const server = httpd_setup({
++    "/account/device/destroy": function(request, response) {
++      const body = JSON.parse(CommonUtils.readBytesFromInputStream(request.bodyInputStream));
++
++      if (!body.id) {
++        response.setStatusLine(request.httpVersion, 400, "Invalid request");
++        return response.bodyOutputStream.write(emptyMessage, emptyMessage.length);
++      }
++
++      if (body.id === ERROR_ID) {
++        response.setStatusLine(request.httpVersion, 500, "Alas");
++        return response.bodyOutputStream.write("{}", 2);
++      }
++
++      response.setStatusLine(request.httpVersion, 200, "OK");
++      response.bodyOutputStream.write("{}", 2);
++    },
++  });
++
++  const client = new FxAccountsClient(server.baseURI);
++  const result = yield client.signOutAndDestroyDevice(FAKE_SESSION_TOKEN, DEVICE_ID);
++
++  do_check_true(result);
++  do_check_eq(Object.keys(result).length, 0);
++
++  try {
++    yield client.signOutAndDestroyDevice(FAKE_SESSION_TOKEN, ERROR_ID);
++    do_throw("Expected to catch an exception");
++  } catch(unexpectedError) {
++    do_check_eq(unexpectedError.code, 500);
++  }
++
++  yield deferredStop(server);
++});
++
++add_task(function* test_getDeviceList() {
++  let canReturnDevices;
++
++  const server = httpd_setup({
++    "/account/devices": function(request, response) {
++      if (canReturnDevices) {
++        response.setStatusLine(request.httpVersion, 200, "OK");
++        response.bodyOutputStream.write("[]", 2);
++      } else {
++        response.setStatusLine(request.httpVersion, 500, "Alas");
++        response.bodyOutputStream.write("{}", 2);
++      }
++    },
++  });
++
++  const client = new FxAccountsClient(server.baseURI);
++
++  canReturnDevices = true;
++  const result = yield client.getDeviceList(FAKE_SESSION_TOKEN);
++  do_check_true(Array.isArray(result));
++  do_check_eq(result.length, 0);
++
++  try {
++    canReturnDevices = false;
++    yield client.getDeviceList(FAKE_SESSION_TOKEN);
++    do_throw("Expected to catch an exception");
++  } catch(unexpectedError) {
++    do_check_eq(unexpectedError.code, 500);
++  }
++
++  yield deferredStop(server);
++});
++
+ add_task(function* test_client_metrics() {
+   ["FXA_UNVERIFIED_ACCOUNT_ERRORS", "FXA_HAWK_ERRORS", "FXA_SERVER_ERRORS"].forEach(name => {
+     let histogram = Services.telemetry.getKeyedHistogramById(name);
+@@ -710,7 +877,7 @@ add_task(function* test_client_metrics() {
+   yield deferredStop(server);
+ });
+ 
+-add_task(function test_email_case() {
++add_task(function* test_email_case() {
+   let canonicalEmail = "greta.garbo@gmail.com";
+   let clientEmail = "Greta.Garbo@gmail.COM";
+   let attempts = 0;
+diff --git a/services/fxaccounts/tests/xpcshell/test_credentials.js b/services/fxaccounts/tests/xpcshell/test_credentials.js
+index df2b010..81b713f 100644
+--- a/services/fxaccounts/tests/xpcshell/test_credentials.js
++++ b/services/fxaccounts/tests/xpcshell/test_credentials.js
+@@ -29,7 +29,7 @@ var vectors = {
+ };
+ 
+ // A simple test suite with no utf8 encoding madness.
+-add_task(function test_onepw_setup_credentials() {
++add_task(function* test_onepw_setup_credentials() {
+   let email = "francine@example.org";
+   let password = CommonUtils.encodeUTF8("i like pie");
+ 
+@@ -66,7 +66,7 @@ add_task(function test_onepw_setup_credentials() {
+   do_check_eq(b2h(unwrapKey), "8ff58975be391338e4ec5d7138b5ed7b65c7d1bfd1f3a4f93e05aa47d5b72be9");
+ });
+ 
+-add_task(function test_client_stretch_kdf() {
++add_task(function* test_client_stretch_kdf() {
+   let pbkdf2 = CryptoUtils.pbkdf2Generate;
+   let hkdf = CryptoUtils.hkdf;
+   let expected = vectors["client stretch-KDF"];
+diff --git a/services/fxaccounts/tests/xpcshell/test_loginmgr_storage.js b/services/fxaccounts/tests/xpcshell/test_loginmgr_storage.js
+index 88a3656..4d57b7c 100644
+--- a/services/fxaccounts/tests/xpcshell/test_loginmgr_storage.js
++++ b/services/fxaccounts/tests/xpcshell/test_loginmgr_storage.js
+@@ -44,8 +44,16 @@ function getLoginMgrData() {
+   return logins[0];
+ }
+ 
+-add_task(function test_simple() {
+-  let fxa = new FxAccounts({});
++function createFxAccounts() {
++  return new FxAccounts({
++    _getDeviceName() {
++      return "mock device name";
++    }
++  });
++}
++
++add_task(function* test_simple() {
++  let fxa = createFxAccounts();
+ 
+   let creds = {
+     uid: "abcd",
+@@ -84,8 +92,8 @@ add_task(function test_simple() {
+   Assert.strictEqual(getLoginMgrData(), null, "login mgr data deleted on logout");
+ });
+ 
+-add_task(function test_MPLocked() {
+-  let fxa = new FxAccounts({});
++add_task(function* test_MPLocked() {
++  let fxa = createFxAccounts();
+ 
+   let creds = {
+     uid: "abcd",
+@@ -118,10 +126,10 @@ add_task(function test_MPLocked() {
+ });
+ 
+ 
+-add_task(function test_consistentWithMPEdgeCases() {
++add_task(function* test_consistentWithMPEdgeCases() {
+   setLoginMgrLoggedInState(true);
+ 
+-  let fxa = new FxAccounts({});
++  let fxa = createFxAccounts();
+ 
+   let creds1 = {
+     uid: "uid1",
+@@ -161,7 +169,7 @@ add_task(function test_consistentWithMPEdgeCases() {
+   // Make a new FxA instance (otherwise the values in memory will be used)
+   // and we want the login manager to be unlocked.
+   setLoginMgrLoggedInState(true);
+-  fxa = new FxAccounts({});
++  fxa = createFxAccounts();
+ 
+   let accountData = yield fxa.getSignedInUser();
+   Assert.strictEqual(accountData.email, creds2.email);
+@@ -172,7 +180,7 @@ add_task(function test_consistentWithMPEdgeCases() {
+ 
+ // A test for the fact we will accept either a UID or email when looking in
+ // the login manager.
+-add_task(function test_uidMigration() {
++add_task(function* test_uidMigration() {
+   setLoginMgrLoggedInState(true);
+   Assert.strictEqual(getLoginMgrData(), null, "expect no logins at the start");
+ 
+diff --git a/services/fxaccounts/tests/xpcshell/test_oauth_grant_client.js b/services/fxaccounts/tests/xpcshell/test_oauth_grant_client.js
+index 3b11219..244b79a 100644
+--- a/services/fxaccounts/tests/xpcshell/test_oauth_grant_client.js
++++ b/services/fxaccounts/tests/xpcshell/test_oauth_grant_client.js
+@@ -5,6 +5,7 @@
+ 
+ Cu.import("resource://gre/modules/FxAccountsCommon.js");
+ Cu.import("resource://gre/modules/FxAccountsOAuthGrantClient.jsm");
++Cu.import("resource://gre/modules/Services.jsm");
+ 
+ const CLIENT_OPTIONS = {
+   serverURL: "http://127.0.0.1:9010/v1",
+@@ -145,6 +146,7 @@ add_test(function networkErrorResponse () {
+     serverURL: "http://",
+     client_id: "abc123"
+   });
++  Services.prefs.setBoolPref("identity.fxaccounts.skipDeviceRegistration", true);
+   client.getTokenFromAssertion("assertion", "scope")
+     .then(
+       null,
+@@ -155,7 +157,8 @@ add_test(function networkErrorResponse () {
+         do_check_eq(e.error, ERROR_NETWORK);
+         run_next_test();
+       }
+-    );
++    ).catch(() => {}).then(() =>
++      Services.prefs.clearUserPref("identity.fxaccounts.skipDeviceRegistration"));
+ });
+ 
+ add_test(function unsupportedMethod () {
+diff --git a/services/fxaccounts/tests/xpcshell/test_oauth_grant_client_server.js b/services/fxaccounts/tests/xpcshell/test_oauth_grant_client_server.js
+index 9ce438f..bd44651 100644
+--- a/services/fxaccounts/tests/xpcshell/test_oauth_grant_client_server.js
++++ b/services/fxaccounts/tests/xpcshell/test_oauth_grant_client_server.js
+@@ -50,7 +50,7 @@ function promiseStopServer(server) {
+   });
+ }
+ 
+-add_task(function getAndRevokeToken () {
++add_task(function* getAndRevokeToken () {
+   let server = startServer();
+   let clientOptions = {
+     serverURL: "http://localhost:" + server.identity.primaryPort + "/v1",
+diff --git a/services/fxaccounts/tests/xpcshell/test_oauth_token_storage.js b/services/fxaccounts/tests/xpcshell/test_oauth_token_storage.js
+index b3556ae..26ea372 100644
+--- a/services/fxaccounts/tests/xpcshell/test_oauth_token_storage.js
++++ b/services/fxaccounts/tests/xpcshell/test_oauth_token_storage.js
+@@ -70,6 +70,10 @@ function MockFxAccountsClient() {
+   };
+ 
+   this.signOut = function() { return Promise.resolve(); };
++  this.registerDevice = function() { return Promise.resolve(); };
++  this.updateDevice = function() { return Promise.resolve(); };
++  this.signOutAndDestroyDevice = function() { return Promise.resolve(); };
++  this.getDeviceList = function() { return Promise.resolve(); };
+ 
+   FxAccountsClient.apply(this);
+ }
+@@ -78,7 +82,7 @@ MockFxAccountsClient.prototype = {
+   __proto__: FxAccountsClient.prototype
+ }
+ 
+-function MockFxAccounts() {
++function MockFxAccounts(device={}) {
+   return new FxAccounts({
+     fxAccountsClient: new MockFxAccountsClient(),
+     newAccountState(credentials) {
+@@ -87,6 +91,9 @@ function MockFxAccounts() {
+       storage.initialize(credentials);
+       return new AccountState(storage);
+     },
++    _getDeviceName() {
++      return "mock device name";
++    }
+   });
+ }
+ 
+@@ -110,7 +117,7 @@ function run_test() {
+   run_next_test();
+ }
+ 
+-add_task(function testCacheStorage() {
++add_task(function* testCacheStorage() {
+   let fxa = yield createMockFxA();
+ 
+   // Hook what the impl calls to save to disk.
+diff --git a/services/fxaccounts/tests/xpcshell/test_oauth_tokens.js b/services/fxaccounts/tests/xpcshell/test_oauth_tokens.js
+index 68903d8..fa20fdd 100644
+--- a/services/fxaccounts/tests/xpcshell/test_oauth_tokens.js
++++ b/services/fxaccounts/tests/xpcshell/test_oauth_tokens.js
+@@ -67,6 +67,10 @@ function MockFxAccountsClient() {
+   };
+ 
+   this.signOut = function() { return Promise.resolve(); };
++  this.registerDevice = function() { return Promise.resolve(); };
++  this.updateDevice = function() { return Promise.resolve(); };
++  this.signOutAndDestroyDevice = function() { return Promise.resolve(); };
++  this.getDeviceList = function() { return Promise.resolve(); };
+ 
+   FxAccountsClient.apply(this);
+ }
+@@ -91,6 +95,9 @@ function MockFxAccounts(mockGrantClient) {
+         Services.obs.notifyObservers(null, "testhelper-fxa-revoke-complete", null);
+       });
+     },
++    _getDeviceName() {
++      return "mock device name";
++    }
+   });
+ }
+ 
+@@ -138,7 +145,7 @@ MockFxAccountsOAuthGrantClient.prototype = {
+   activeTokens: null,
+ }
+ 
+-add_task(function testRevoke() {
++add_task(function* testRevoke() {
+   let client = new MockFxAccountsOAuthGrantClient();
+   let tokenOptions = { scope: "test-scope", client: client };
+   let fxa = yield createMockFxA(client);
+@@ -165,7 +172,7 @@ add_task(function testRevoke() {
+   notEqual(token1, token2, "got a different token");
+ });
+ 
+-add_task(function testSignOutDestroysTokens() {
++add_task(function* testSignOutDestroysTokens() {
+   let client = new MockFxAccountsOAuthGrantClient();
+   let fxa = yield createMockFxA(client);
+ 
+@@ -190,7 +197,7 @@ add_task(function testSignOutDestroysTokens() {
+   equal(client.activeTokens.size, 0);
+ });
+ 
+-add_task(function testTokenRaces() {
++add_task(function* testTokenRaces() {
+   // Here we do 2 concurrent fetches each for 2 different token scopes (ie,
+   // 4 token fetches in total).
+   // This should provoke a potential race in the token fetching but we should
+diff --git a/services/fxaccounts/tests/xpcshell/test_profile.js b/services/fxaccounts/tests/xpcshell/test_profile.js
+index 81d2391..964f95c 100644
+--- a/services/fxaccounts/tests/xpcshell/test_profile.js
++++ b/services/fxaccounts/tests/xpcshell/test_profile.js
+@@ -168,7 +168,7 @@ add_test(function fetchAndCacheProfile_ok() {
+ 
+ // Check that a second profile request when one is already in-flight reuses
+ // the in-flight one.
+-add_task(function fetchAndCacheProfileOnce() {
++add_task(function* fetchAndCacheProfileOnce() {
+   // A promise that remains unresolved while we fire off 2 requests for
+   // a profile.
+   let resolveProfile;
+@@ -205,7 +205,7 @@ add_task(function fetchAndCacheProfileOnce() {
+ 
+ // Check that sharing a single fetch promise works correctly when the promise
+ // is rejected.
+-add_task(function fetchAndCacheProfileOnce() {
++add_task(function* fetchAndCacheProfileOnce() {
+   // A promise that remains unresolved while we fire off 2 requests for
+   // a profile.
+   let rejectProfile;
+@@ -251,7 +251,7 @@ add_task(function fetchAndCacheProfileOnce() {
+ 
+ // Check that a new profile request within PROFILE_FRESHNESS_THRESHOLD of the
+ // last one doesn't kick off a new request to check the cached copy is fresh.
+-add_task(function fetchAndCacheProfileAfterThreshold() {
++add_task(function* fetchAndCacheProfileAfterThreshold() {
+   let numFetches = 0;
+   let client = mockClient(mockFxa());
+   client.fetchProfile = function () {
+@@ -278,7 +278,7 @@ add_task(function fetchAndCacheProfileAfterThreshold() {
+ // Check that a new profile request within PROFILE_FRESHNESS_THRESHOLD of the
+ // last one *does* kick off a new request if ON_PROFILE_CHANGE_NOTIFICATION
+ // is sent.
+-add_task(function fetchAndCacheProfileBeforeThresholdOnNotification() {
++add_task(function* fetchAndCacheProfileBeforeThresholdOnNotification() {
+   let numFetches = 0;
+   let client = mockClient(mockFxa());
+   client.fetchProfile = function () {
+diff --git a/services/fxaccounts/tests/xpcshell/test_storage_manager.js b/services/fxaccounts/tests/xpcshell/test_storage_manager.js
+index 915cbb5..8927e1d 100644
+--- a/services/fxaccounts/tests/xpcshell/test_storage_manager.js
++++ b/services/fxaccounts/tests/xpcshell/test_storage_manager.js
+@@ -97,6 +97,7 @@ add_storage_task(function* checkNewUser(sm) {
+     uid: "uid",
+     email: "someone@somewhere.com",
+     kA: "kA",
++    deviceId: "device id"
+   };
+   sm.plainStorage = new MockedPlainStorage()
+   if (sm.secureStorage) {
+@@ -107,10 +108,12 @@ add_storage_task(function* checkNewUser(sm) {
+   Assert.equal(accountData.uid, initialAccountData.uid);
+   Assert.equal(accountData.email, initialAccountData.email);
+   Assert.equal(accountData.kA, initialAccountData.kA);
++  Assert.equal(accountData.deviceId, initialAccountData.deviceId);
+ 
+   // and it should have been written to storage.
+   Assert.equal(sm.plainStorage.data.accountData.uid, initialAccountData.uid);
+   Assert.equal(sm.plainStorage.data.accountData.email, initialAccountData.email);
++  Assert.equal(sm.plainStorage.data.accountData.deviceId, initialAccountData.deviceId);
+   // check secure
+   if (sm.secureStorage) {
+     Assert.equal(sm.secureStorage.data.accountData.kA, initialAccountData.kA);
+@@ -121,7 +124,12 @@ add_storage_task(function* checkNewUser(sm) {
+ 
+ // Initialized without account data but storage has it available.
+ add_storage_task(function* checkEverythingRead(sm) {
+-  sm.plainStorage = new MockedPlainStorage({uid: "uid", email: "someone@somewhere.com"})
++  sm.plainStorage = new MockedPlainStorage({
++    uid: "uid",
++    email: "someone@somewhere.com",
++    deviceId: "wibble",
++    isDeviceStale: true
++  });
+   if (sm.secureStorage) {
+     sm.secureStorage = new MockedSecureStorage(null);
+   }
+@@ -130,16 +138,27 @@ add_storage_task(function* checkEverythingRead(sm) {
+   Assert.ok(accountData, "read account data");
+   Assert.equal(accountData.uid, "uid");
+   Assert.equal(accountData.email, "someone@somewhere.com");
++  Assert.equal(accountData.deviceId, "wibble");
++  Assert.equal(accountData.isDeviceStale, true);
+   // Update the data - we should be able to fetch it back and it should appear
+   // in our storage.
+-  yield sm.updateAccountData({verified: true, kA: "kA", kB: "kB"});
++  yield sm.updateAccountData({
++    verified: true,
++    kA: "kA",
++    kB: "kB",
++    isDeviceStale: false
++  });
+   accountData = yield sm.getAccountData();
+   Assert.equal(accountData.kB, "kB");
+   Assert.equal(accountData.kA, "kA");
++  Assert.equal(accountData.deviceId, "wibble");
++  Assert.equal(accountData.isDeviceStale, false);
+   // Check the new value was written to storage.
+   yield sm._promiseStorageComplete; // storage is written in the background.
+-  // "verified" is a plain-text field.
++  // "verified", "deviceId" and "isDeviceStale" are plain-text fields.
+   Assert.equal(sm.plainStorage.data.accountData.verified, true);
++  Assert.equal(sm.plainStorage.data.accountData.deviceId, "wibble");
++  Assert.equal(sm.plainStorage.data.accountData.isDeviceStale, false);
+   // "kA" and "foo" are secure
+   if (sm.secureStorage) {
+     Assert.equal(sm.secureStorage.data.accountData.kA, "kA");
+diff --git a/services/fxaccounts/tests/xpcshell/xpcshell.ini b/services/fxaccounts/tests/xpcshell/xpcshell.ini
+index 8585571..b513c03 100644
+--- a/services/fxaccounts/tests/xpcshell/xpcshell.ini
++++ b/services/fxaccounts/tests/xpcshell/xpcshell.ini
+@@ -4,6 +4,8 @@ tail =
+ skip-if = toolkit == 'android'
+ 
+ [test_accounts.js]
++[test_accounts_device_registration.js]
++skip-if = appname == 'b2g'
+ [test_client.js]
+ skip-if = toolkit == 'gonk' # times out, bug 1073639
+ [test_credentials.js]
+diff --git a/services/sync/modules/constants.js b/services/sync/modules/constants.js
+index 875e64a..a5198b0 100644
+--- a/services/sync/modules/constants.js
++++ b/services/sync/modules/constants.js
+@@ -181,4 +181,7 @@ MIN_PASS_LENGTH:                       8,
+ 
+ LOG_DATE_FORMAT:                       "%Y-%m-%d %H:%M:%S",
+ 
++DEVICE_TYPE_DESKTOP:                   "desktop",
++DEVICE_TYPE_MOBILE:                    "mobile",
++
+ }))];
+diff --git a/services/sync/modules/engines/clients.js b/services/sync/modules/engines/clients.js
+index 96b1766..6c1264e 100644
+--- a/services/sync/modules/engines/clients.js
++++ b/services/sync/modules/engines/clients.js
+@@ -14,6 +14,10 @@ Cu.import("resource://services-sync/constants.js");
+ Cu.import("resource://services-sync/engines.js");
+ Cu.import("resource://services-sync/record.js");
+ Cu.import("resource://services-sync/util.js");
++Cu.import("resource://services-common/async.js");
++
++XPCOMUtils.defineLazyModuleGetter(this, "fxAccounts",
++  "resource://gre/modules/FxAccounts.jsm");
+ 
+ const CLIENTS_TTL = 1814400; // 21 days
+ const CLIENTS_TTL_REFRESH = 604800; // 7 days
+@@ -63,14 +67,14 @@ ClientEngine.prototype = {
+   // Aggregate some stats on the composition of clients on this account
+   get stats() {
+     let stats = {
+-      hasMobile: this.localType == "mobile",
++      hasMobile: this.localType == DEVICE_TYPE_MOBILE,
+       names: [this.localName],
+       numClients: 1,
+     };
+ 
+     for (let id in this._store._remoteClients) {
+       let {name, type} = this._store._remoteClients[id];
+-      stats.hasMobile = stats.hasMobile || type == "mobile";
++      stats.hasMobile = stats.hasMobile || type == DEVICE_TYPE_MOBILE;
+       stats.names.push(name);
+       stats.numClients++;
+     }
+@@ -116,18 +120,15 @@ ClientEngine.prototype = {
+   },
+ 
+   get localName() {
+-    let localName = Svc.Prefs.get("client.name", "");
+-    if (localName != "")
+-      return localName;
+-
+-    return this.localName = Utils.getDefaultDeviceName();
++    return this.localName = Utils.getDeviceName();
+   },
+   set localName(value) {
+     Svc.Prefs.set("client.name", value);
++    fxAccounts.updateDeviceRegistration();
+   },
+ 
+   get localType() {
+-    return Svc.Prefs.get("client.type", "desktop");
++    return Utils.getDeviceType();
+   },
+   set localType(value) {
+     Svc.Prefs.set("client.type", value);
+@@ -135,7 +136,7 @@ ClientEngine.prototype = {
+ 
+   isMobile: function isMobile(id) {
+     if (this._store._remoteClients[id])
+-      return this._store._remoteClients[id].type == "mobile";
++      return this._store._remoteClients[id].type == DEVICE_TYPE_MOBILE;
+     return false;
+   },
+ 
+@@ -413,6 +414,13 @@ ClientStore.prototype = {
+ 
+     // Package the individual components into a record for the local client
+     if (id == this.engine.localID) {
++      let cb = Async.makeSpinningCallback();
++      fxAccounts.getDeviceId().then(id => cb(null, id), cb);
++      try {
++        record.fxaDeviceId = cb.wait();
++      } catch(error) {
++        this._log.warn("failed to get fxa device id", error);
++      }
+       record.name = this.engine.localName;
+       record.type = this.engine.localType;
+       record.commands = this.engine.localCommands;
+diff --git a/services/sync/modules/util.js b/services/sync/modules/util.js
+index 7f1bf44..7c1eae5 100644
+--- a/services/sync/modules/util.js
++++ b/services/sync/modules/util.js
+@@ -672,6 +672,20 @@ this.Utils = {
+       Cc["@mozilla.org/network/protocol;1?name=http"].getService(Ci.nsIHttpProtocolHandler).oscpu;
+ 
+     return Str.sync.get("client.name2", [user, appName, system]);
++  },
++
++  getDeviceName() {
++    const deviceName = Svc.Prefs.get("client.name", "");
++
++    if (deviceName === "") {
++      return this.getDefaultDeviceName();
++    }
++
++    return deviceName;
++  },
++
++  getDeviceType() {
++    return Svc.Prefs.get("client.type", DEVICE_TYPE_DESKTOP);
+   }
+ };
+ 
+diff --git a/testing/profiles/prefs_b2g_unittest.js b/testing/profiles/prefs_b2g_unittest.js
+index d188573..afa741b 100644
+--- a/testing/profiles/prefs_b2g_unittest.js
++++ b/testing/profiles/prefs_b2g_unittest.js
+@@ -8,5 +8,6 @@ user_pref("dom.ipc.tabs.shutdownTimeoutSecs", 0);
+ user_pref("dom.mozBrowserFramesEnabled", "%(OOP)s");
+ user_pref("dom.mozBrowserFramesWhitelist","app://test-container.gaiamobile.org,http://mochi.test:8888");
+ user_pref("dom.testing.datastore_enabled_for_hosted_apps", true);
++user_pref('identity.fxaccounts.skipDeviceRegistration', true);
+ user_pref("marionette.force-local", true);
+ user_pref("touchcaret.expiration.time", 0);
+diff --git a/testing/profiles/prefs_general.js b/testing/profiles/prefs_general.js
+index 5264bce..6be1624 100644
+--- a/testing/profiles/prefs_general.js
++++ b/testing/profiles/prefs_general.js
+@@ -248,6 +248,9 @@ user_pref("identity.fxaccounts.remote.signin.uri", "https://%(server)s/fxa-signi
+ user_pref("identity.fxaccounts.settings.uri", "https://%(server)s/fxa-settings");
+ user_pref('identity.fxaccounts.remote.webchannel.uri', 'https://%(server)s/');
+ 
++// We don't want browser tests to perform FxA device registration.
++user_pref('identity.fxaccounts.skipDeviceRegistration', true);
++
+ // Increase the APZ content response timeout in tests to 1 minute.
+ // This is to accommodate the fact that test environments tends to be slower
+ // than production environments (with the b2g emulator being the slowest of them
+

@@ -1,0 +1,264 @@
+# HG changeset patch
+# User Fernando Jimenez <ferjmoreno@gmail.com>
+# Parent  20d4ff2c80271cce906a9f354cb421da192abba0
+Bug 1217544 - Implement one-off BackgroundSync API. Part 2: ServiceWorkerRegistration. r=baku
+
+diff --git a/dom/webidl/ServiceWorkerRegistration.webidl b/dom/webidl/ServiceWorkerRegistration.webidl
+--- a/dom/webidl/ServiceWorkerRegistration.webidl
++++ b/dom/webidl/ServiceWorkerRegistration.webidl
+@@ -27,9 +27,11 @@ interface ServiceWorkerRegistration : Ev
+   attribute EventHandler onupdatefound;
+ };
+ 
+ partial interface ServiceWorkerRegistration {
+ #ifndef MOZ_SIMPLEPUSH
+   [Throws, Exposed=(Window,Worker), Func="nsContentUtils::PushEnabled"]
+   readonly attribute PushManager pushManager;
+ #endif
++  [Throws, Exposed=(Window,Worker)]
++  readonly attribute SyncManager sync;
+ };
+diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWorkerRegistration.cpp
+--- a/dom/workers/ServiceWorkerRegistration.cpp
++++ b/dom/workers/ServiceWorkerRegistration.cpp
+@@ -27,16 +27,19 @@
+ #include "Workers.h"
+ #include "WorkerScope.h"
+ 
+ #ifndef MOZ_SIMPLEPUSH
+ #include "mozilla/dom/PushManagerBinding.h"
+ #include "mozilla/dom/PushManager.h"
+ #endif
+ 
++#include "mozilla/dom/SyncManagerBinding.h"
++#include "mozilla/dom/SyncManager.h"
++
+ using namespace mozilla::dom::workers;
+ 
+ namespace mozilla {
+ namespace dom {
+ 
+ bool
+ ServiceWorkerRegistrationVisible(JSContext* aCx, JSObject* aObj)
+ {
+@@ -86,20 +89,21 @@ ServiceWorkerRegistrationBase::ServiceWo
+ NS_IMPL_ADDREF_INHERITED(ServiceWorkerRegistrationMainThread, ServiceWorkerRegistrationBase)
+ NS_IMPL_RELEASE_INHERITED(ServiceWorkerRegistrationMainThread, ServiceWorkerRegistrationBase)
+ 
+ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(ServiceWorkerRegistrationMainThread)
+ NS_INTERFACE_MAP_END_INHERITING(ServiceWorkerRegistrationBase)
+ 
+ #ifndef MOZ_SIMPLEPUSH
+ NS_IMPL_CYCLE_COLLECTION_INHERITED(ServiceWorkerRegistrationMainThread, ServiceWorkerRegistrationBase,
+-                                   mPushManager,
++                                   mPushManager, mSyncManager,
+                                    mInstallingWorker, mWaitingWorker, mActiveWorker);
+ #else
+ NS_IMPL_CYCLE_COLLECTION_INHERITED(ServiceWorkerRegistrationMainThread, ServiceWorkerRegistrationBase,
++                                   mSyncManager,
+                                    mInstallingWorker, mWaitingWorker, mActiveWorker);
+ #endif
+ 
+ ServiceWorkerRegistrationMainThread::ServiceWorkerRegistrationMainThread(nsPIDOMWindow* aWindow,
+                                                                          const nsAString& aScope)
+   : ServiceWorkerRegistrationBase(aWindow, aScope)
+   , mListeningForEvents(false)
+ {
+@@ -808,16 +812,49 @@ ServiceWorkerRegistrationMainThread::Get
+   }
+ 
+   RefPtr<PushManager> ret = mPushManager;
+   return ret.forget();
+ 
+   #endif /* ! MOZ_SIMPLEPUSH */
+ }
+ 
++already_AddRefed<SyncManager>
++ServiceWorkerRegistrationMainThread::GetSync(ErrorResult& aRv)
++{
++  AssertIsOnMainThread();
++
++  if (!mSyncManager) {
++    nsCOMPtr<nsIGlobalObject> globalObject = do_QueryInterface(GetOwner());
++
++    if (!globalObject) {
++      aRv.Throw(NS_ERROR_FAILURE);
++      return nullptr;
++    }
++
++    nsCOMPtr<nsIDocument> document = GetOwner()->GetExtantDoc();
++    if (!document) {
++      aRv.Throw(NS_ERROR_FAILURE);
++      return nullptr;
++    }
++
++    nsCOMPtr<nsIPrincipal> principal = document->NodePrincipal();
++    if (!principal) {
++      aRv.Throw(NS_ERROR_FAILURE);
++      return nullptr;
++    }
++
++    mSyncManager = SyncManager::CreateOnMainThread(globalObject, principal,
++                                                   aRv);
++  }
++
++  RefPtr<SyncManager> ret = mSyncManager;
++  return ret.forget();
++}
++
+ ////////////////////////////////////////////////////
+ // Worker Thread implementation
+ class WorkerListener final : public ServiceWorkerRegistrationListener
+ {
+   // Accessed on the main thread.
+   WorkerPrivate* mWorkerPrivate;
+   nsString mScope;
+   bool mListeningForEvents;
+@@ -932,23 +969,25 @@ NS_INTERFACE_MAP_END_INHERITING(ServiceW
+ // Expanded macros since we need special behaviour to release the proxy.
+ NS_IMPL_CYCLE_COLLECTION_CLASS(ServiceWorkerRegistrationWorkerThread)
+ 
+ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(ServiceWorkerRegistrationWorkerThread,
+                                                   ServiceWorkerRegistrationBase)
+ #ifndef MOZ_SIMPLEPUSH
+   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPushManager)
+ #endif
++  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mSyncManager)
+ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+ 
+ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(ServiceWorkerRegistrationWorkerThread,
+                                                 ServiceWorkerRegistrationBase)
+ #ifndef MOZ_SIMPLEPUSH
+   NS_IMPL_CYCLE_COLLECTION_UNLINK(mPushManager)
+ #endif
++  NS_IMPL_CYCLE_COLLECTION_UNLINK(mSyncManager)
+   tmp->ReleaseListener(RegistrationIsGoingAway);
+ NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+ 
+ ServiceWorkerRegistrationWorkerThread::ServiceWorkerRegistrationWorkerThread(WorkerPrivate* aWorkerPrivate,
+                                                                              const nsAString& aScope)
+   : ServiceWorkerRegistrationBase(nullptr, aScope)
+   , mWorkerPrivate(aWorkerPrivate)
+ {
+@@ -1249,10 +1288,21 @@ ServiceWorkerRegistrationWorkerThread::G
+   }
+ 
+   RefPtr<WorkerPushManager> ret = mPushManager;
+   return ret.forget();
+ 
+   #endif /* ! MOZ_SIMPLEPUSH */
+ }
+ 
++already_AddRefed<SyncManager>
++ServiceWorkerRegistrationWorkerThread::GetSync(ErrorResult& aRv)
++{
++  if (!mSyncManager) {
++    mSyncManager = SyncManager::CreateOnWorker(mWorkerPrivate);
++  }
++
++  RefPtr<SyncManager> ret = mSyncManager;
++  return ret.forget();
++}
++
+ } // dom namespace
+ } // mozilla namespace
+diff --git a/dom/workers/ServiceWorkerRegistration.h b/dom/workers/ServiceWorkerRegistration.h
+--- a/dom/workers/ServiceWorkerRegistration.h
++++ b/dom/workers/ServiceWorkerRegistration.h
+@@ -17,18 +17,19 @@
+ 
+ class nsPIDOMWindow;
+ 
+ namespace mozilla {
+ namespace dom {
+ 
+ class Promise;
+ class PushManager;
++class SyncManager;
++class WorkerListener;
+ class WorkerPushManager;
+-class WorkerListener;
+ 
+ namespace workers {
+ class ServiceWorker;
+ class WorkerPrivate;
+ } // namespace workers
+ 
+ bool
+ ServiceWorkerRegistrationVisible(JSContext* aCx, JSObject* aObj);
+@@ -135,16 +136,19 @@ public:
+   GetWaiting() override;
+ 
+   already_AddRefed<workers::ServiceWorker>
+   GetActive() override;
+ 
+   already_AddRefed<PushManager>
+   GetPushManager(ErrorResult& aRv);
+ 
++  already_AddRefed<SyncManager>
++  GetSync(ErrorResult& aRv);
++
+   // DOMEventTargethelper
+   void DisconnectFromOwner() override
+   {
+     StopListeningForEvents();
+     ServiceWorkerRegistrationBase::DisconnectFromOwner();
+   }
+ 
+   // ServiceWorkerRegistrationListener
+@@ -186,16 +190,18 @@ private:
+   // These three may change to a new worker at any time.
+   RefPtr<workers::ServiceWorker> mInstallingWorker;
+   RefPtr<workers::ServiceWorker> mWaitingWorker;
+   RefPtr<workers::ServiceWorker> mActiveWorker;
+ 
+ #ifndef MOZ_SIMPLEPUSH
+   RefPtr<PushManager> mPushManager;
+ #endif
++
++  RefPtr<SyncManager> mSyncManager;
+ };
+ 
+ class ServiceWorkerRegistrationWorkerThread final : public ServiceWorkerRegistrationBase
+                                                   , public workers::WorkerFeature
+ {
+ public:
+   NS_DECL_ISUPPORTS_INHERITED
+   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(ServiceWorkerRegistrationWorkerThread,
+@@ -239,16 +245,19 @@ public:
+   }
+ 
+   bool
+   Notify(JSContext* aCx, workers::Status aStatus) override;
+ 
+   already_AddRefed<WorkerPushManager>
+   GetPushManager(ErrorResult& aRv);
+ 
++  already_AddRefed<SyncManager>
++  GetSync(ErrorResult& aRv);
++
+ private:
+   enum Reason
+   {
+     RegistrationIsGoingAway = 0,
+     WorkerIsGoingAway,
+   };
+ 
+   ~ServiceWorkerRegistrationWorkerThread();
+@@ -260,14 +269,16 @@ private:
+   ReleaseListener(Reason aReason);
+ 
+   workers::WorkerPrivate* mWorkerPrivate;
+   RefPtr<WorkerListener> mListener;
+ 
+ #ifndef MOZ_SIMPLEPUSH
+   RefPtr<WorkerPushManager> mPushManager;
+ #endif
++
++  RefPtr<SyncManager> mSyncManager;
+ };
+ 
+ } // namespace dom
+ } // namespace mozilla
+ 
+ #endif /* mozilla_dom_ServiceWorkerRegistration_h */

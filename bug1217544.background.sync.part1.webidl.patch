@@ -1,0 +1,370 @@
+# HG changeset patch
+# User Fernando Jimenez <ferjmoreno@gmail.com>
+# Parent  184a432d20c5cb63d86d08bd7459a53bb81b2466
+Bug 1217544 - Implement one-off BackgroundSync API. Part 1: SyncManager interface. r=baku
+
+diff --git a/dom/moz.build b/dom/moz.build
+--- a/dom/moz.build
++++ b/dom/moz.build
+@@ -109,16 +109,17 @@ DIRS += [
+     'xbl',
+     'xml',
+     'xslt',
+     'xul',
+     'resourcestats',
+     'manifest',
+     'vr',
+     'newapps',
++    'sync'
+ ]
+ 
+ if CONFIG['OS_ARCH'] == 'WINNT':
+     DIRS += ['plugins/ipc/hangui']
+ 
+ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
+     DIRS += [
+         'speakermanager',
+diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
+new file mode 100644
+--- /dev/null
++++ b/dom/sync/SyncManager.cpp
+@@ -0,0 +1,136 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
++ * You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#include "SyncManager.h"
++
++#include "mozilla/dom/Promise.h"
++#include "mozilla/dom/PromiseWorkerProxy.h"
++#include "mozilla/dom/SyncManagerBinding.h"
++#include "mozilla/ipc/BackgroundChild.h"
++#include "mozilla/ipc/BackgroundUtils.h"
++#include "mozilla/ipc/PBackgroundChild.h"
++#include "mozilla/Preferences.h"
++#include "nsIGlobalObject.h"
++#include "WorkerPrivate.h"
++
++namespace mozilla {
++
++using namespace ipc;
++
++namespace dom {
++
++using namespace workers;
++
++// SyncManager
++
++// static
++already_AddRefed<SyncManager>
++SyncManager::CreateOnMainThread(nsIGlobalObject* aGlobal,
++                                nsIPrincipal* aPrincipal,
++                                ErrorResult& aRv)
++{
++  MOZ_ASSERT(aGlobal);
++  MOZ_ASSERT(aPrincipal);
++  MOZ_ASSERT(NS_IsMainThread());
++
++  PrincipalInfo principalInfo;
++  nsresult rv = PrincipalToPrincipalInfo(aPrincipal, &principalInfo);
++  if (NS_WARN_IF(NS_FAILED(rv))) {
++    aRv.Throw(rv);
++    return nullptr;
++  }
++
++  RefPtr<SyncManager> ref = new SyncManager(aGlobal, principalInfo);
++  return ref.forget();
++}
++
++// static
++already_AddRefed<SyncManager>
++SyncManager::CreateOnWorker(WorkerPrivate* aWorkerPrivate)
++{
++  MOZ_ASSERT(aWorkerPrivate);
++  aWorkerPrivate->AssertIsOnWorkerThread();
++
++  const PrincipalInfo& principalInfo = aWorkerPrivate->GetPrincipalInfo();
++
++  RefPtr<SyncManager> ref = new SyncManager(nullptr, principalInfo);
++  return ref.forget();
++}
++
++SyncManager::SyncManager(nsIGlobalObject* aGlobal,
++                         const PrincipalInfo& aPrincipalInfo)
++  : mGlobal(aGlobal)
++  , mPrincipalInfo(new PrincipalInfo(aPrincipalInfo))
++{}
++
++SyncManager::~SyncManager()
++{}
++
++// Bindings methods.
++
++JSObject*
++SyncManager::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
++{
++  return SyncManagerBinding::Wrap(aCx, this, aGivenProto);
++}
++
++// static
++bool
++SyncManager::PrefEnabled(JSContext* aCx, JSObject* aObj)
++{
++  using mozilla::dom::workers::WorkerPrivate;
++  using mozilla::dom::workers::GetWorkerPrivateFromContext;
++
++  // If we are on the main thread, then check the pref directly.
++  if (NS_IsMainThread()) {
++    bool enabled = false;
++    Preferences::GetBool("dom.background.sync.enabled", &enabled);
++    return enabled;
++  }
++
++  // Otherwise check the pref via the worker private helper.
++  WorkerPrivate* workerPrivate = GetWorkerPrivateFromContext(aCx);
++  if (!workerPrivate) {
++    return false;
++  }
++
++  return workerPrivate->BackgroundSyncEnabled();
++}
++
++// WebIDL interace methods.
++
++already_AddRefed<Promise>
++SyncManager::Register(const nsAString& aName, ErrorResult& aRv)
++{
++  RefPtr<Promise> p = Promise::Create(mGlobal, aRv);
++  if (NS_WARN_IF(aRv.Failed())) {
++    return nullptr;
++  }
++
++  return p.forget();
++}
++
++already_AddRefed<Promise>
++SyncManager::GetTags(ErrorResult& aRv)
++{
++  RefPtr<Promise> p = Promise::Create(mGlobal, aRv);
++  if (NS_WARN_IF(aRv.Failed())) {
++    return nullptr;
++  }
++
++  return p.forget();
++}
++
++NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(SyncManager, mGlobal)
++NS_IMPL_CYCLE_COLLECTING_ADDREF(SyncManager)
++NS_IMPL_CYCLE_COLLECTING_RELEASE(SyncManager)
++NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(SyncManager)
++  NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
++  NS_INTERFACE_MAP_ENTRY(nsISupports)
++NS_INTERFACE_MAP_END
++
++} // namespace dom
++} // namespace mozilla
+diff --git a/dom/sync/SyncManager.h b/dom/sync/SyncManager.h
+new file mode 100644
+--- /dev/null
++++ b/dom/sync/SyncManager.h
+@@ -0,0 +1,87 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
++ * You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#ifndef mozilla_dom_SyncManager_h
++#define mozilla_dom_SyncManager_h
++
++#include "nsIPrincipal.h"
++#include "nsWrapperCache.h"
++
++#include "mozilla/AlreadyAddRefed.h"
++#include "mozilla/ErrorResult.h"
++#include "mozilla/dom/BindingDeclarations.h"
++
++#include "nsCOMPtr.h"
++#include "jsapi.h"
++
++class nsIGlobalObject;
++
++namespace mozilla {
++
++namespace ipc {
++  class PrincipalInfo;
++} // namespace ipc
++
++namespace dom {
++
++namespace workers {
++  class WorkerPrivate;
++} // namespace workers
++
++class Promise;
++
++class SyncManager final : public nsISupports
++                        , public nsWrapperCache
++{
++public:
++  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
++  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(SyncManager)
++
++  static already_AddRefed<SyncManager>
++  CreateOnMainThread(nsIGlobalObject* aGlobal,
++                     nsIPrincipal* aPrincipal,
++                     ErrorResult& aRv);
++
++  static already_AddRefed<SyncManager>
++  CreateOnWorker(workers::WorkerPrivate* aWorkerPrivate);
++
++  // Binding methods.
++
++  nsIGlobalObject*
++  GetParentObject() const
++  {
++    // Can be nullptr on workers.
++    return mGlobal;
++  }
++
++  JSObject*
++  WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
++
++  static bool PrefEnabled(JSContext* aCx, JSObject* aObj);
++
++  // WebIDL interface methods.
++
++  already_AddRefed<Promise>
++  Register(const nsAString& aName, ErrorResult& aRv);
++
++  already_AddRefed<Promise>
++  GetTags(ErrorResult& aRv);
++
++private:
++  SyncManager(nsIGlobalObject* aGlobal,
++              const mozilla::ipc::PrincipalInfo& aPrincipalInfo);
++
++  ~SyncManager();
++
++  nsCOMPtr<nsIGlobalObject> mGlobal;
++
++  nsAutoPtr<mozilla::ipc::PrincipalInfo> mPrincipalInfo;
++};
++
++} // namespace dom
++} // namespace mozilla
++
++#endif // mozilla_dom_SyncManager_h
+diff --git a/dom/sync/moz.build b/dom/sync/moz.build
+new file mode 100644
+--- /dev/null
++++ b/dom/sync/moz.build
+@@ -0,0 +1,20 @@
++# vim: set filetype=python:
++# This Source Code Form is subject to the terms of the Mozilla Public
++# License, v. 2.0. If a copy of the MPL was not distributed with this
++# file, You can obtain one at http://mozilla.org/MPL/2.0/.
++
++EXPORTS.mozilla.dom += [
++    'SyncManager.h'
++]
++
++UNIFIED_SOURCES += [
++    'SyncManager.cpp'
++]
++
++LOCAL_INCLUDES += [
++    '/dom/workers'
++]
++
++include('/ipc/chromium/chromium-config.mozbuild')
++
++FINAL_LIBRARY = 'xul'
+diff --git a/dom/tests/mochitest/general/test_interfaces.html b/dom/tests/mochitest/general/test_interfaces.html
+--- a/dom/tests/mochitest/general/test_interfaces.html
++++ b/dom/tests/mochitest/general/test_interfaces.html
+@@ -1291,16 +1291,18 @@ var interfaceNamesInGlobalScope =
+     "SVGUseElement",
+ // IMPORTANT: Do not change this list without review from a DOM peer!
+     "SVGViewElement",
+ // IMPORTANT: Do not change this list without review from a DOM peer!
+     "SVGZoomAndPan",
+ // IMPORTANT: Do not change this list without review from a DOM peer!
+     "SVGZoomEvent",
+ // IMPORTANT: Do not change this list without review from a DOM peer!
++    {name: "SyncManager", b2g: false},
++// IMPORTANT: Do not change this list without review from a DOM peer!
+     {name: "RequestSyncManager", b2g: true, permission: ["requestsync-manager"] },
+ // IMPORTANT: Do not change this list without review from a DOM peer!
+     {name: "RequestSyncApp", b2g: true, permission: ["requestsync-manager"] },
+ // IMPORTANT: Do not change this list without review from a DOM peer!
+     {name: "RequestSyncTask", b2g: true, permission: ["requestsync-manager"] },
+ // IMPORTANT: Do not change this list without review from a DOM peer!
+     {name: "Telephony", b2g: true},
+ // IMPORTANT: Do not change this list without review from a DOM peer!
+diff --git a/dom/webidl/SyncManager.webidl b/dom/webidl/SyncManager.webidl
+new file mode 100644
+--- /dev/null
++++ b/dom/webidl/SyncManager.webidl
+@@ -0,0 +1,17 @@
++/* -*- Mode: IDL; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++* License, v. 2.0. If a copy of the MPL was not distributed with this file,
++* You can obtain one at http://mozilla.org/MPL/2.0/.
++*
++* The origin of this IDL file is
++* https://wicg.github.io/BackgroundSync/spec/
++*/
++
++[Exposed=(Window,Worker),
++ Func="mozilla::dom::SyncManager::PrefEnabled"]
++interface SyncManager {
++  [Throws]
++  Promise<void> register(DOMString tag);
++  [Throws]
++  Promise<sequence<DOMString>> getTags();
++};
+diff --git a/dom/webidl/moz.build b/dom/webidl/moz.build
+--- a/dom/webidl/moz.build
++++ b/dom/webidl/moz.build
+@@ -531,16 +531,17 @@ WEBIDL_FILES = [
+     'SVGTransformList.webidl',
+     'SVGTSpanElement.webidl',
+     'SVGUnitTypes.webidl',
+     'SVGURIReference.webidl',
+     'SVGUseElement.webidl',
+     'SVGViewElement.webidl',
+     'SVGZoomAndPan.webidl',
+     'SVGZoomEvent.webidl',
++    'SyncManager.webidl',
+     'SystemUpdate.webidl',
+     'TCPServerSocket.webidl',
+     'TCPServerSocketEvent.webidl',
+     'TCPSocket.webidl',
+     'TCPSocketErrorEvent.webidl',
+     'TCPSocketEvent.webidl',
+     'Telephony.webidl',
+     'TelephonyCall.webidl',
+diff --git a/dom/workers/WorkerPrefs.h b/dom/workers/WorkerPrefs.h
+--- a/dom/workers/WorkerPrefs.h
++++ b/dom/workers/WorkerPrefs.h
+@@ -30,16 +30,17 @@ WORKER_SIMPLE_PREF("dom.performance.enab
+ WORKER_SIMPLE_PREF("dom.webnotifications.enabled", DOMWorkerNotificationEnabled, DOM_WORKERNOTIFICATION)
+ WORKER_SIMPLE_PREF("dom.webnotifications.serviceworker.enabled", DOMServiceWorkerNotificationEnabled, DOM_SERVICEWORKERNOTIFICATION)
+ WORKER_SIMPLE_PREF("dom.serviceWorkers.enabled", ServiceWorkersEnabled, SERVICEWORKERS_ENABLED)
+ WORKER_SIMPLE_PREF("dom.serviceWorkers.testing.enabled", ServiceWorkersTestingEnabled, SERVICEWORKERS_TESTING_ENABLED)
+ WORKER_SIMPLE_PREF("dom.serviceWorkers.interception.enabled", InterceptionEnabled, INTERCEPTION_ENABLED)
+ WORKER_SIMPLE_PREF("dom.serviceWorkers.interception.opaque.enabled", OpaqueInterceptionEnabled, INTERCEPTION_OPAQUE_ENABLED)
+ WORKER_SIMPLE_PREF("dom.serviceWorkers.openWindow.enabled", OpenWindowEnabled, OPEN_WINDOW_ENABLED)
+ WORKER_SIMPLE_PREF("dom.push.enabled", PushEnabled, PUSH_ENABLED)
++WORKER_SIMPLE_PREF("dom.background.sync.enabled", BackgroundSyncEnabled, BACKGROUND_SYNC_ENABLED)
+ WORKER_SIMPLE_PREF("dom.requestcache.enabled", RequestCacheEnabled, REQUESTCACHE_ENABLED)
+ WORKER_SIMPLE_PREF("dom.requestcontext.enabled", RequestContextEnabled, REQUESTCONTEXT_ENABLED)
+ WORKER_SIMPLE_PREF("gfx.offscreencanvas.enabled", OffscreenCanvasEnabled, OFFSCREENCANVAS_ENABLED)
+ WORKER_PREF("dom.workers.latestJSVersion", JSVersionChanged)
+ WORKER_PREF("intl.accept_languages", PrefLanguagesChanged)
+ WORKER_PREF("general.appname.override", AppNameOverrideChanged)
+ WORKER_PREF("general.appversion.override", AppVersionOverrideChanged)
+ WORKER_PREF("general.platform.override", PlatformOverrideChanged)

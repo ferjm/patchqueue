@@ -1,0 +1,22 @@
+# HG changeset patch
+# User Fernando Jimenez <ferjmoreno@gmail.com>
+# Parent  89179ddbfb3d306eccee96334bebb8acc5019b0c
+try: -b do -p linux,linux64-mulet,emulator,emulator-jb,emulator-kk,emulator-l,emulator-x86-kk,linux32_gecko -u xpcshell,marionette,marionette-e10s,mochitests,mochitest-chrome,marionette-webapi,gaia-build,gaia-build-unit,gaia-linter,gaia-unit,gaia-ui-test-functional,gaia-ui-test-oop,gaia-ui-test-unit,gaia-js-integration -t none
+
+diff --git a/b2g/config/gaia.json b/b2g/config/gaia.json
+--- a/b2g/config/gaia.json
++++ b/b2g/config/gaia.json
+@@ -1,9 +1,9 @@
+ {
+     "git": {
+-        "git_revision": "6164cd7af92ec2a3422d48f17f9577fc9b3f7ff4", 
+-        "remote": "https://git.mozilla.org/releases/gaia.git", 
+-        "branch": ""
+-    }, 
++       "remote": "https://github.com/ferjm/gaia.git",
++       "branch": "bug1239701.ds.certifiedonly",
++       "git_revision": "bug1239701.ds.certifiedonly"
++    },
+     "revision": "5dec1b4e9d9c827e70b3f2018f1857b8ed1e1068", 
+     "repo_path": "integration/gaia-central"
+ }

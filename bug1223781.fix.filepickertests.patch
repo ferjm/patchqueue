@@ -1,0 +1,57 @@
+# HG changeset patch
+# User Fernando Jimenez <ferjmoreno@gmail.com>
+# Parent  800a3f722e9eaa234bbd3a623d67c5e73a002350
+Bug 1223781 - New settings added to settings.json should be applied after OTA without requiring to bump settings DB version. Part 2: Fix FilePicker tests timing issue. r=fabrice
+
+diff --git a/b2g/components/FilePicker.js b/b2g/components/FilePicker.js
+--- a/b2g/components/FilePicker.js
++++ b/b2g/components/FilePicker.js
+@@ -153,16 +153,19 @@ FilePicker.prototype = {
+         return this.mFiles[this.mIndex++];
+       }
+     };
+ 
+     if (this.mFilePickerShownCallback) {
+       this.mFilePickerShownCallback.done(Ci.nsIFilePicker.returnOK);
+       this.mFilePickerShownCallback = null;
+     }
++
++    // Only for testing purposes.
++    cpmm.sendAsyncMessage('file-picker-fire-success');
+   },
+ 
+   fireError: function() {
+     if (this.mFilePickerShownCallback) {
+       this.mFilePickerShownCallback.done(Ci.nsIFilePicker.returnCancel);
+       this.mFilePickerShownCallback = null;
+     }
+   },
+diff --git a/b2g/components/test/mochitest/filepicker_path_handler_chrome.js b/b2g/components/test/mochitest/filepicker_path_handler_chrome.js
+--- a/b2g/components/test/mochitest/filepicker_path_handler_chrome.js
++++ b/b2g/components/test/mochitest/filepicker_path_handler_chrome.js
+@@ -12,18 +12,23 @@ var ppmm = Cc['@mozilla.org/parentproces
+              .getService(Ci.nsIMessageListenerManager);
+ 
+ var pickResult = null;
+ 
+ function processPickMessage(message) {
+   let sender = message.target.QueryInterface(Ci.nsIMessageSender);
+   // reply FilePicker's message
+   sender.sendAsyncMessage('file-picked', pickResult);
+-  // notify caller
+-  sendAsyncMessage('file-picked-posted', { type: 'file-picked-posted' });
++  function sendFilePickedPosted() {
++    sender.removeMessageListener('file-picker-fire-success',
++                                 sendFilePickedPosted);
++    // notify caller
++    sendAsyncMessage('file-picked-posted', { type: 'file-picked-posted' });
++  }
++  sender.addMessageListener('file-picker-fire-success', sendFilePickedPosted);
+ }
+ 
+ function updatePickResult(result) {
+   pickResult = result;
+   sendAsyncMessage('pick-result-updated', { type: 'pick-result-updated' });
+ }
+ 
+ ppmm.addMessageListener('file-picker', processPickMessage);

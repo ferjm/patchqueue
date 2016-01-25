@@ -1,0 +1,82 @@
+# HG changeset patch
+# User Fernando Jimenez <ferjmoreno@gmail.com>
+# Parent  1cdabbfe799a4e4a16a49d2d24d7f1e989389f8a
+
+diff --git a/dom/settings/SettingsManager.js b/dom/settings/SettingsManager.js
+--- a/dom/settings/SettingsManager.js
++++ b/dom/settings/SettingsManager.js
+@@ -7,17 +7,17 @@
+ const Cc = Components.classes;
+ const Ci = Components.interfaces;
+ const Cu = Components.utils;
+ 
+ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+ Cu.import("resource://gre/modules/Services.jsm");
+ Cu.import("resource://gre/modules/DOMRequestHelper.jsm");
+ 
+-var DEBUG = false;
++var DEBUG = true;
+ var VERBOSE = false;
+ 
+ try {
+   DEBUG   =
+     Services.prefs.getBoolPref("dom.mozSettings.SettingsManager.debug.enabled");
+   VERBOSE =
+     Services.prefs.getBoolPref("dom.mozSettings.SettingsManager.verbose.enabled");
+ } catch (ex) { }
+diff --git a/dom/settings/SettingsRequestManager.jsm b/dom/settings/SettingsRequestManager.jsm
+--- a/dom/settings/SettingsRequestManager.jsm
++++ b/dom/settings/SettingsRequestManager.jsm
+@@ -13,29 +13,31 @@ Cu.importGlobalProperties(['File']);
+ 
+ this.EXPORTED_SYMBOLS = ["SettingsRequestManager"];
+ 
+ Cu.import("resource://gre/modules/SettingsDB.jsm");
+ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+ Cu.import("resource://gre/modules/Services.jsm");
+ Cu.import("resource://gre/modules/PermissionsTable.jsm");
+ 
+-var DEBUG = false;
+-var VERBOSE = false;
++var DEBUG = true;
++var VERBOSE = true;
+ var TRACK = false;
+ 
+ try {
+   DEBUG   =
+     Services.prefs.getBoolPref("dom.mozSettings.SettingsRequestManager.debug.enabled");
+   VERBOSE =
+     Services.prefs.getBoolPref("dom.mozSettings.SettingsRequestManager.verbose.enabled");
+   TRACK =
+     Services.prefs.getBoolPref("dom.mozSettings.trackTasksUsage");
+ } catch (ex) { }
+ 
++DEBUG = true;
++VERBOSE = true;
+ var allowForceReadOnly = false;
+ try {
+   allowForceReadOnly = Services.prefs.getBoolPref("dom.mozSettings.allowForceReadOnly");
+ } catch (ex) { }
+ 
+ function debug(s) {
+   dump("-*- SettingsRequestManager: " + s + "\n");
+ }
+@@ -1156,17 +1158,17 @@ var SettingsRequestManager = {
+             returnMessage("Settings:Get:KO", {
+               lockID: msg.lockID,
+               requestID: msg.requestID,
+               errorMsg: error
+             });
+         });
+         break;
+       case "Settings:Set":
+-        if (VERBOSE) debug("Received Set Request from " + msg.lockID);
++        if (VERBOSE) debug("Received Set Request from " + msg.lockID + " origin " + aMessage.principal.origin);
+         this.queueTask("set", msg).then(function(settings) {
+           returnMessage("Settings:Set:OK", {
+             lockID: msg.lockID,
+             requestID: msg.requestID
+           });
+         }, function(error) {
+           returnMessage("Settings:Set:KO", {
+             lockID: msg.lockID,

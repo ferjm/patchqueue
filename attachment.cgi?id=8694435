@@ -1,0 +1,98 @@
+# HG changeset patch
+# User Ben Kelly <ben@wanderview.com>
+# Parent  1a7759e1914201fcec9b9b0ede58883de35469be
+Bug 1227015 P6 Abort updates if the script spec has changed. r=ehsan
+
+diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
+--- a/dom/workers/ServiceWorkerManager.cpp
++++ b/dom/workers/ServiceWorkerManager.cpp
+@@ -991,17 +991,17 @@ protected:
+   {
+   }
+ 
+   // This MUST only be called when the job is still performing actions related
+   // to registration or update. After the spec resolves the update promise, use
+   // Done() with the failure code instead.
+   // Callers MUST hold a strong ref before calling this!
+   void
+-  Fail(ErrorResult& aRv)
++  FailWithErrorResult(ErrorResult& aRv)
+   {
+     AssertIsOnMainThread();
+     MOZ_ASSERT(mRegistration);
+ 
+     // With cancellation support, we may only be running with one reference
+     // from another object like a stream loader or something.
+     RefPtr<ServiceWorkerJob> kungFuDeathGrip = this;
+ 
+@@ -1045,17 +1045,17 @@ protected:
+     mRegistration = nullptr;
+     Done(origStatus);
+   }
+ 
+   void
+   Fail(nsresult aRv)
+   {
+     ErrorResult rv(aRv);
+-    Fail(rv);
++    FailWithErrorResult(rv);
+   }
+ };
+ 
+ class ServiceWorkerInstallJob final : public ServiceWorkerScriptJobBase
+ {
+   friend class ContinueInstallTask;
+ 
+ public:
+@@ -1271,16 +1271,32 @@ public:
+         }
+       } else {
+         mRegistration = swm->CreateNewRegistration(mScope, mPrincipal);
+       }
+ 
+       swm->StoreRegistration(mPrincipal, mRegistration);
+     } else {
+       MOZ_ASSERT(mJobType == UpdateJob);
++
++      // If a different script spec has been registered between when this update
++      // was scheduled and it running now, then simply abort.
++      RefPtr<ServiceWorkerInfo> newest = mRegistration->Newest();
++      if (newest && !mScriptSpec.Equals(newest->ScriptSpec())) {
++
++        // Done() must always be called async from Start()
++        nsCOMPtr<nsIRunnable> runnable =
++          NS_NewRunnableMethodWithArg<nsresult>(
++            this,
++            &ServiceWorkerRegisterJob::Fail,
++            NS_ERROR_DOM_ABORT_ERR);
++          MOZ_ALWAYS_TRUE(NS_SUCCEEDED(NS_DispatchToCurrentThread(runnable)));
++
++        return;
++      }
+     }
+ 
+     Update();
+   }
+ 
+   void
+   ComparisonResult(nsresult aStatus, bool aInCacheAndEqual,
+                    const nsAString& aNewCacheName,
+@@ -1391,17 +1407,17 @@ private:
+     }
+ 
+     if (NS_WARN_IF(!aScriptEvaluationResult)) {
+       ErrorResult error;
+ 
+       NS_ConvertUTF8toUTF16 scriptSpec(mScriptSpec);
+       NS_ConvertUTF8toUTF16 scope(mRegistration->mScope);
+       error.ThrowTypeError<MSG_SW_SCRIPT_THREW>(scriptSpec, scope);
+-      return Fail(error);
++      return FailWithErrorResult(error);
+     }
+ 
+     RefPtr<ServiceWorkerInstallJob> job =
+       new ServiceWorkerInstallJob(mQueue, mCallback, mRegistration,
+                                   mUpdateAndInstallInfo, mScriptSpec);
+     mQueue->Append(job);
+     Done(NS_OK);
+   }
