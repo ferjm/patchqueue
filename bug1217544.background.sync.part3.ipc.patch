@@ -38,7 +38,7 @@ new file mode 100644
 diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
 --- a/dom/sync/SyncManager.cpp
 +++ b/dom/sync/SyncManager.cpp
-@@ -1,16 +1,17 @@
+@@ -1,34 +1,105 @@
  /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
  /* vim: set ts=8 sts=2 et sw=2 tw=80: */
  /* This Source Code Form is subject to the terms of the Mozilla Public
@@ -48,16 +48,17 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
  #include "SyncManager.h"
 -
 +#include "SyncManagerChild.h"
-+#include "SyncTypes.h"
  #include "mozilla/dom/Promise.h"
  #include "mozilla/dom/PromiseWorkerProxy.h"
++#include "mozilla/dom/SyncIPCTypes.h"
  #include "mozilla/dom/SyncManagerBinding.h"
  #include "mozilla/ipc/BackgroundChild.h"
  #include "mozilla/ipc/BackgroundUtils.h"
  #include "mozilla/ipc/PBackgroundChild.h"
  #include "mozilla/Preferences.h"
  #include "nsIGlobalObject.h"
-@@ -19,16 +20,86 @@
+ #include "WorkerPrivate.h"
+ 
  namespace mozilla {
  
  using namespace ipc;
@@ -112,15 +113,15 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
 +};
 +
 +already_AddRefed<Promise>
-+SyncManager::ExecuteOp(SyncOp* aOp, ErrorResult& aRv)
++SyncManager::ExecuteOp(const SyncOpArgs& aArgs, ErrorResult& aRv)
 +{
 +  RefPtr<Promise> p = Promise::Create(mGlobal, aRv);
 +  if (NS_WARN_IF(aRv.Failed())) {
 +    return nullptr;
 +  }
 +
-+  RefPtr<SyncOpRunnable> runnable =
-+    new SyncOpRunnable(p, nsAutoPtr<SyncOp>(aOp).forget());
++  nsAutoPtr<SyncOp> op(new SyncOp(aArgs));
++  RefPtr<SyncOpRunnable> runnable = new SyncOpRunnable(p, op.forget());
 +
 +  if (mActor) {
 +    runnable->SetActor(mActor);
@@ -188,7 +189,7 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
  {
    return SyncManagerBinding::Wrap(aCx, this, aGivenProto);
  }
-@@ -95,42 +186,100 @@ SyncManager::PrefEnabled(JSContext* aCx,
+@@ -95,42 +186,97 @@ SyncManager::PrefEnabled(JSContext* aCx,
    WorkerPrivate* workerPrivate = GetWorkerPrivateFromContext(aCx);
    if (!workerPrivate) {
      return false;
@@ -273,9 +274,7 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
 -
 -  return p.forget();
 +  const SyncRegisterArgs args((nsString(aTag)));
-+  nsAutoPtr<SyncOp> op(new SyncOp(uint32_t(SyncOpType::Register),
-+                       SyncOpArgs(args)));
-+  return ExecuteOp(op.forget(), aRv);
++  return ExecuteOp(SyncOpArgs(args), aRv);
  }
  
  already_AddRefed<Promise>
@@ -287,9 +286,8 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
 -  }
 -
 -  return p.forget();
-+  nsAutoPtr<SyncOp> op(new SyncOp(uint32_t(SyncOpType::GetTags), 
-+                       SyncOpArgs(SyncGetTagsArgs())));
-+  return ExecuteOp(op.forget(), aRv);
++  const SyncGetTagsArgs args;
++  return ExecuteOp(SyncOpArgs(args), aRv);
  }
  
  NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(SyncManager, mGlobal)
@@ -390,7 +388,7 @@ diff --git a/dom/sync/SyncManager.h b/dom/sync/SyncManager.h
    ~SyncManager();
  
 +  already_AddRefed<Promise>
-+  ExecuteOp(SyncOp* aOp, ErrorResult& aRv);
++  ExecuteOp(const SyncOpArgs& aArgs, ErrorResult& aRv);
 +
    nsCOMPtr<nsIGlobalObject> mGlobal;
  
@@ -587,7 +585,7 @@ diff --git a/dom/sync/SyncManagerParent.cpp b/dom/sync/SyncManagerParent.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncManagerParent.cpp
-@@ -0,0 +1,55 @@
+@@ -0,0 +1,62 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -624,9 +622,16 @@ new file mode 100644
 +bool SyncManagerParent::RecvRequest(const nsID& aRequestId,
 +                                    const SyncOp& aOp)
 +{
-+  switch(SyncOpType(aOp.mType())) {
-+    case SyncOpType::Register:
++  switch(aOp.mArgs().type()) {
++    case SyncOpArgs::TSyncRegisterArgs:
 +    {
++      // XXX Do registration.
++      Unused << SendResponse(aRequestId);
++      break;
++    }
++    case SyncOpArgs::TSyncGetTagsArgs:
++    {
++      //XXX Do GetTags.
 +      Unused << SendResponse(aRequestId);
 +      break;
 +    }
@@ -692,48 +697,15 @@ new file mode 100644
 +#endif // mozilla_dom_SyncManagerParent_h
 +
 +
-diff --git a/dom/sync/SyncTypes.h b/dom/sync/SyncTypes.h
-new file mode 100644
---- /dev/null
-+++ b/dom/sync/SyncTypes.h
-@@ -0,0 +1,24 @@
-+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
-+/* This Source Code Form is subject to the terms of the Mozilla Public
-+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
-+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
-+
-+#ifndef mozilla_dom_SyncTypes_h
-+#define mozilla_dom_SyncTypes_h
-+
-+#include "nsString.h"
-+
-+namespace mozilla {
-+namespace dom {
-+
-+enum class SyncOpType : uint32_t
-+{
-+  Register = 0,
-+  GetTags
-+} mType;
-+
-+} // namespace dom
-+} // namespace mozilla
-+
-+#endif // mozilla_dom_SyncTypes_h
 diff --git a/dom/sync/moz.build b/dom/sync/moz.build
 --- a/dom/sync/moz.build
 +++ b/dom/sync/moz.build
-@@ -1,19 +1,27 @@
- # vim: set filetype=python:
- # This Source Code Form is subject to the terms of the Mozilla Public
+@@ -3,17 +3,24 @@
  # License, v. 2.0. If a copy of the MPL was not distributed with this
  # file, You can obtain one at http://mozilla.org/MPL/2.0/.
  
  EXPORTS.mozilla.dom += [
--    'SyncManager.h'
-+    'SyncManager.h',
-+    'SyncTypes.h'
+     'SyncManager.h'
  ]
  
  UNIFIED_SOURCES += [
