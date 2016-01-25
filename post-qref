@@ -1,4 +1,4 @@
 #!/bin/bash
 git add .
 git commit -m "qref -> auto push"
-git push
+git push origin master
