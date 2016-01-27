@@ -232,7 +232,7 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
  {
    return SyncManagerBinding::Wrap(aCx, this, aGivenProto);
  }
-@@ -95,42 +228,98 @@ SyncManager::PrefEnabled(JSContext* aCx,
+@@ -95,42 +228,100 @@ SyncManager::PrefEnabled(JSContext* aCx,
    WorkerPrivate* workerPrivate = GetWorkerPrivateFromContext(aCx);
    if (!workerPrivate) {
      return false;
@@ -293,7 +293,9 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
 +    }
 +
 +    if (mActor) {
-+      // XXX send shutdown
++      RefPtr<TeardownRunnable> runnable = new TeardownRunnable(mActor);
++      nsresult rv = NS_DispatchToCurrentThread(runnable);
++      Unused << NS_WARN_IF(NS_FAILED(rv));
 +      mActor = nullptr;
 +    } else {
 +      mPendingOperations.Clear();
