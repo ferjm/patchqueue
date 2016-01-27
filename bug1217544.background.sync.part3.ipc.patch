@@ -175,7 +175,7 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
                                  nsIPrincipal* aPrincipal,
                                  ErrorResult& aRv)
  {
-@@ -58,21 +159,55 @@ SyncManager::CreateOnWorker(WorkerPrivat
+@@ -58,21 +159,57 @@ SyncManager::CreateOnWorker(WorkerPrivat
  
    RefPtr<SyncManager> ref = new SyncManager(nullptr, principalInfo);
    return ref.forget();
@@ -196,13 +196,15 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
 +    MOZ_ALWAYS_TRUE(BackgroundChild::GetOrCreateForCurrentThread(this));
 +  }
 +
-+  // Observe XPCOM shutdown
-+  nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
-+  if (obs) {
-+    DebugOnly<nsresult> rv;
-+    rv = obs->AddObserver(this, NS_XPCOM_SHUTDOWN_OBSERVER_ID,
-+                          false /* ownsWeak */);
-+    MOZ_ASSERT(NS_SUCCEEDED(rv));
++  if (NS_IsMainThread()) {
++    // Observe XPCOM shutdown
++    nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
++    if (obs) {
++      DebugOnly<nsresult> rv;
++      rv = obs->AddObserver(this, NS_XPCOM_SHUTDOWN_OBSERVER_ID,
++                            false /* ownsWeak */);
++      MOZ_ASSERT(NS_SUCCEEDED(rv));
++    }
 +  }
 +}
  
@@ -233,7 +235,7 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
  {
    return SyncManagerBinding::Wrap(aCx, this, aGivenProto);
  }
-@@ -95,42 +230,100 @@ SyncManager::PrefEnabled(JSContext* aCx,
+@@ -95,42 +232,100 @@ SyncManager::PrefEnabled(JSContext* aCx,
    WorkerPrivate* workerPrivate = GetWorkerPrivateFromContext(aCx);
    if (!workerPrivate) {
      return false;
