@@ -1,8 +1,69 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  20d4ff2c80271cce906a9f354cb421da192abba0
+# Parent  1294f5260bce5853c2498f1ee2d19ba1cb943551
 Bug 1217544 - Implement one-off BackgroundSync API. Part 2: ServiceWorkerRegistration. r=baku
 
+diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
+--- a/dom/sync/SyncManager.cpp
++++ b/dom/sync/SyncManager.cpp
+@@ -44,24 +44,25 @@ SyncManager::CreateOnMainThread(nsIGloba
+   }
+ 
+   RefPtr<SyncManager> ref = new SyncManager(aGlobal, principalInfo);
+   return ref.forget();
+ }
+ 
+ // static
+ already_AddRefed<SyncManager>
+-SyncManager::CreateOnWorker(WorkerPrivate* aWorkerPrivate)
++SyncManager::CreateOnWorker(nsIGlobalObject* aGlobal,
++                            WorkerPrivate* aWorkerPrivate)
+ {
+   MOZ_ASSERT(aWorkerPrivate);
+   aWorkerPrivate->AssertIsOnWorkerThread();
+ 
+   const PrincipalInfo& principalInfo = aWorkerPrivate->GetPrincipalInfo();
+ 
+-  RefPtr<SyncManager> ref = new SyncManager(nullptr, principalInfo);
++  RefPtr<SyncManager> ref = new SyncManager(aGlobal, principalInfo);
+   return ref.forget();
+ }
+ 
+ SyncManager::SyncManager(nsIGlobalObject* aGlobal,
+                          const PrincipalInfo& aPrincipalInfo)
+   : mGlobal(aGlobal)
+   , mPrincipalInfo(new PrincipalInfo(aPrincipalInfo))
+ {}
+diff --git a/dom/sync/SyncManager.h b/dom/sync/SyncManager.h
+--- a/dom/sync/SyncManager.h
++++ b/dom/sync/SyncManager.h
+@@ -41,24 +41,24 @@ public:
+   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(SyncManager)
+ 
+   static already_AddRefed<SyncManager>
+   CreateOnMainThread(nsIGlobalObject* aGlobal,
+                      nsIPrincipal* aPrincipal,
+                      ErrorResult& aRv);
+ 
+   static already_AddRefed<SyncManager>
+-  CreateOnWorker(workers::WorkerPrivate* aWorkerPrivate);
++  CreateOnWorker(nsIGlobalObject* aGlobal,
++                 workers::WorkerPrivate* aWorkerPrivate);
+ 
+   // Binding methods.
+ 
+   nsIGlobalObject*
+   GetParentObject() const
+   {
+-    // Can be nullptr on workers.
+     return mGlobal;
+   }
+ 
+   JSObject*
+   WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
+ 
+   static bool PrefEnabled(JSContext* aCx, JSObject* aObj);
+ 
 diff --git a/dom/webidl/ServiceWorkerRegistration.webidl b/dom/webidl/ServiceWorkerRegistration.webidl
 --- a/dom/webidl/ServiceWorkerRegistration.webidl
 +++ b/dom/webidl/ServiceWorkerRegistration.webidl
@@ -140,7 +201,7 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
    : ServiceWorkerRegistrationBase(nullptr, aScope)
    , mWorkerPrivate(aWorkerPrivate)
  {
-@@ -1249,10 +1288,21 @@ ServiceWorkerRegistrationWorkerThread::G
+@@ -1249,10 +1288,22 @@ ServiceWorkerRegistrationWorkerThread::G
    }
  
    RefPtr<WorkerPushManager> ret = mPushManager;
@@ -153,7 +214,8 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
 +ServiceWorkerRegistrationWorkerThread::GetSync(ErrorResult& aRv)
 +{
 +  if (!mSyncManager) {
-+    mSyncManager = SyncManager::CreateOnWorker(mWorkerPrivate);
++    mSyncManager = SyncManager::CreateOnWorker(mWorkerPrivate->GlobalScope(),
++                                               mWorkerPrivate);
 +  }
 +
 +  RefPtr<SyncManager> ret = mSyncManager;
