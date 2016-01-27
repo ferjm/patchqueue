@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  36c0713a76e958c257b0548560c307ee07990340
+# Parent  05255ba4a9b87acdd78c019469be94c3d3bb477c
 Bug 1217544 - Implement one-off BackgroundSync API. Part 3: IPC. r=baku
 
 diff --git a/dom/sync/PSyncManager.ipdl b/dom/sync/PSyncManager.ipdl
@@ -36,6 +36,64 @@ new file mode 100644
 +
 +} // namespace dom
 +} // namespace mozilla
+diff --git a/dom/sync/SyncIPCTypes.ipdlh b/dom/sync/SyncIPCTypes.ipdlh
+new file mode 100644
+--- /dev/null
++++ b/dom/sync/SyncIPCTypes.ipdlh
+@@ -0,0 +1,53 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++namespace mozilla {
++namespace dom {
++
++struct SyncRegisterArgs
++{
++  nsString mTag;
++};
++
++struct SyncGetTagsArgs
++{
++};
++
++union SyncOpArgs
++{
++  SyncRegisterArgs;
++  SyncGetTagsArgs;
++};
++
++struct SyncOp
++{
++  SyncOpArgs mArgs;
++};
++
++struct SyncRegisterResponse
++{
++  bool mSuccess;
++};
++
++struct SyncGetTagsResponse
++{
++  nsString[] mTags;
++};
++
++struct SyncOpError
++{
++  uint32_t mCode;
++};
++
++union SyncOpResponse
++{
++  SyncRegisterResponse;
++  SyncGetTagsResponse;
++  SyncOpError;
++};
++
++} // namespace dom
++} // namespace mozilla
++
++
 diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
 --- a/dom/sync/SyncManager.cpp
 +++ b/dom/sync/SyncManager.cpp
@@ -175,9 +233,9 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
                                  nsIPrincipal* aPrincipal,
                                  ErrorResult& aRv)
  {
-@@ -58,21 +159,57 @@ SyncManager::CreateOnWorker(WorkerPrivat
+@@ -59,21 +160,57 @@ SyncManager::CreateOnWorker(nsIGlobalObj
  
-   RefPtr<SyncManager> ref = new SyncManager(nullptr, principalInfo);
+   RefPtr<SyncManager> ref = new SyncManager(aGlobal, principalInfo);
    return ref.forget();
  }
  
@@ -235,7 +293,7 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
  {
    return SyncManagerBinding::Wrap(aCx, this, aGivenProto);
  }
-@@ -95,42 +232,100 @@ SyncManager::PrefEnabled(JSContext* aCx,
+@@ -96,42 +233,100 @@ SyncManager::PrefEnabled(JSContext* aCx,
    WorkerPrivate* workerPrivate = GetWorkerPrivateFromContext(aCx);
    if (!workerPrivate) {
      return false;
@@ -414,7 +472,7 @@ diff --git a/dom/sync/SyncManager.h b/dom/sync/SyncManager.h
                       ErrorResult& aRv);
  
    static already_AddRefed<SyncManager>
-   CreateOnWorker(workers::WorkerPrivate* aWorkerPrivate);
+   CreateOnWorker(nsIGlobalObject* aGlobal,
 @@ -60,28 +71,40 @@ public:
    JSObject*
    WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
