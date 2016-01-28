@@ -1,6 +1,7 @@
 bug1217544.background.sync.part1.webidl.patch
 bug1217544.background.sync.part2.serviceworkerregistration.patch
 bug1217544.background.sync.part3.ipc.patch
+bug1217544.background.sync.tests.patch
 bug1239701.datastore.certified.patch
 bug1239701.datastore.certified.tests.patch
 tryall
