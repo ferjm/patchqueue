@@ -3,7 +3,7 @@
 # User Fernando Jimenez <ferjmoreno@gmail.com>
 # Date 1448629010 -3600
 # Node ID 350ecdaedef88b5007e0d47002ac6a36c951dc45
-# Parent  d52bfe63522ee1f61cb450196dec05eeb8b68780
+# Parent  d8329476b632ddbf9ed7124ef305ee4c075b106e
 Bug 1223781 - New settings added to settings.json should be applied after OTA without requiring to bump settings DB version. r=gwagner
 
 diff --git a/b2g/components/test/mochitest/filepicker_path_handler_chrome.js b/b2g/components/test/mochitest/filepicker_path_handler_chrome.js
@@ -40,6 +40,32 @@ diff --git a/b2g/components/test/mochitest/filepicker_path_handler_chrome.js b/b
  }
  
  ppmm.addMessageListener('file-picker', processPickMessage);
+diff --git a/dom/apps/AppsUtils.jsm b/dom/apps/AppsUtils.jsm
+--- a/dom/apps/AppsUtils.jsm
++++ b/dom/apps/AppsUtils.jsm
+@@ -636,18 +636,20 @@ this.AppsUtils = {
+ 
+     let savedBuildID = null;
+     try {
+       savedBuildID = aPrefBranch.getCharPref("gecko.buildID");
+     } catch (e) {}
+ 
+     let buildID = Services.appinfo.platformBuildID;
+ 
+-    aPrefBranch.setCharPref("gecko.mstone", mstone);
+-    aPrefBranch.setCharPref("gecko.buildID", buildID);
++    try {
++      aPrefBranch.setCharPref("gecko.mstone", mstone);
++      aPrefBranch.setCharPref("gecko.buildID", buildID);
++    } catch (e) {}
+ 
+     if ((mstone != savedmstone) || (buildID != savedBuildID)) {
+       aPrefBranch.setBoolPref("dom.apps.reset-permissions", false);
+       return true;
+     } else {
+       return false;
+     }
+   },
 diff --git a/dom/settings/SettingsDB.jsm b/dom/settings/SettingsDB.jsm
 --- a/dom/settings/SettingsDB.jsm
 +++ b/dom/settings/SettingsDB.jsm
@@ -601,4 +627,3 @@ diff --git a/dom/settings/tests/unit/test_settingsrequestmanager_messages.js b/d
  
  function handlerHelper(reply, callback, runNext = true) {
    let handler = {
-
