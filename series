@@ -1,11 +1,11 @@
 350ecdaedef8
+try-all
 bug1217544.background.sync.part1.webidl.patch
 bug1217544.background.sync.part2.serviceworkerregistration.patch
 bug1217544.background.sync.part3.ipc.patch
 bug1217544.background.sync.tests.patch
 bug1239701.datastore.certified.patch
 bug1239701.datastore.certified.tests.patch
-tryall
 attachment.cgi?id=8687517
 attachment.cgi?id=8700736
 try
@@ -15,5 +15,4 @@ attachment.cgi?id=8694432
 attachment.cgi?id=8694433
 attachment.cgi?id=8694936
 attachment.cgi?id=8694435
-try-all
 bug1223781.fix.filepickertests.patch

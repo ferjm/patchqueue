@@ -3,7 +3,7 @@
 # User Fernando Jimenez <ferjmoreno@gmail.com>
 # Date 1448629010 -3600
 # Node ID 350ecdaedef88b5007e0d47002ac6a36c951dc45
-# Parent  d8329476b632ddbf9ed7124ef305ee4c075b106e
+# Parent  c8f7d8b8a1f716caf3000e670cdaefb7edc17251
 Bug 1223781 - New settings added to settings.json should be applied after OTA without requiring to bump settings DB version. r=gwagner
 
 diff --git a/b2g/components/test/mochitest/filepicker_path_handler_chrome.js b/b2g/components/test/mochitest/filepicker_path_handler_chrome.js
@@ -98,7 +98,7 @@ diff --git a/dom/settings/SettingsDB.jsm b/dom/settings/SettingsDB.jsm
    DEBUG   =
      Services.prefs.getBoolPref("dom.mozSettings.SettingsDB.debug.enabled");
    VERBOSE =
-@@ -48,99 +54,38 @@ Cu.import("resource://gre/modules/FileUt
+@@ -48,99 +54,37 @@ Cu.import("resource://gre/modules/FileUt
  Cu.import("resource://gre/modules/NetUtil.jsm");
  
  this.SettingsDB = function SettingsDB() {}
@@ -124,7 +124,7 @@ diff --git a/dom/settings/SettingsDB.jsm b/dom/settings/SettingsDB.jsm
        if (VERBOSE) debug("Get object store for upgrade");
        objectStore = aTransaction.objectStore(SETTINGSSTORE_NAME);
      }
- 
+-
 -    // Loading resource://app/defaults/settings.json doesn't work because
 -    // settings.json is not in the omnijar.
 -    // So we look for the app dir instead and go from here...
@@ -141,7 +141,7 @@ diff --git a/dom/settings/SettingsDB.jsm b/dom/settings/SettingsDB.jsm
 -    let chan = NetUtil.newChannel({
 -      uri: NetUtil.newURI(settingsFile),
 -      loadUsingSystemPrincipal: true});
--    let stream = chan.open();
+-    let stream = chan.open2();
 -    // Obtain a converter to read from a UTF-8 encoded input stream.
 -    let converter = Cc["@mozilla.org/intl/scriptableunicodeconverter"]
 -                    .createInstance(Ci.nsIScriptableUnicodeConverter);
@@ -204,7 +204,7 @@ diff --git a/dom/settings/SettingsDB.jsm b/dom/settings/SettingsDB.jsm
            nChr - 65
          : nChr > 96 && nChr < 123 ?
            nChr - 71
-@@ -194,17 +139,17 @@ SettingsDB.prototype = {
+@@ -194,17 +138,17 @@ SettingsDB.prototype = {
                          { type: mimeType });
        } catch(e) {
          dump(e);
@@ -223,7 +223,7 @@ diff --git a/dom/settings/SettingsDB.jsm b/dom/settings/SettingsDB.jsm
        return "file";
      } else if (aObject instanceof Ci.nsIDOMBlob) {
        return "blob";
-@@ -215,17 +160,17 @@ SettingsDB.prototype = {
+@@ -215,17 +159,17 @@ SettingsDB.prototype = {
      } else if (typeof aObject == "object") {
        return "object";
      } else {
@@ -242,7 +242,7 @@ diff --git a/dom/settings/SettingsDB.jsm b/dom/settings/SettingsDB.jsm
        }, this);
        return res;
      } else if (kind == "file" || kind == "blob" || kind == "date") {
-@@ -237,13 +182,123 @@ SettingsDB.prototype = {
+@@ -237,13 +181,123 @@ SettingsDB.prototype = {
      // Fall-through, we now have a dictionary object.
      let res = {};
      for (let prop in aObject) {
@@ -271,7 +271,7 @@ diff --git a/dom/settings/SettingsDB.jsm b/dom/settings/SettingsDB.jsm
 +      uri: NetUtil.newURI(settingsFile),
 +      loadUsingSystemPrincipal: true
 +    });
-+    let stream = chan.open();
++    let stream = chan.open2();
 +    // Obtain a converter to read from a UTF-8 encoded input stream.
 +    let converter = Cc["@mozilla.org/intl/scriptableunicodeconverter"]
 +                    .createInstance(Ci.nsIScriptableUnicodeConverter);
