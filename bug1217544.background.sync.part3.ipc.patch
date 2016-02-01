@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  05255ba4a9b87acdd78c019469be94c3d3bb477c
+# Parent  93bf8646bfbfdbc1bdbca55cbf64568bba9c28b9
 Bug 1217544 - Implement one-off BackgroundSync API. Part 3: IPC. r=baku
 
 diff --git a/dom/sync/PSyncManager.ipdl b/dom/sync/PSyncManager.ipdl
@@ -1138,28 +1138,28 @@ diff --git a/ipc/glue/PBackground.ipdl b/ipc/glue/PBackground.ipdl
  
  parent:
    // Only called at startup during mochitests to check the basic infrastructure.
-   PBackgroundTest(nsCString testArg);
+   async PBackgroundTest(nsCString testArg);
  
-   PBackgroundIDBFactory(LoggingInfo loggingInfo);
+   async PBackgroundIDBFactory(LoggingInfo loggingInfo);
 @@ -87,16 +89,18 @@ parent:
-   MessagePortForceClose(nsID uuid, nsID destinationUuid, uint32_t sequenceId);
+   async MessagePortForceClose(nsID uuid, nsID destinationUuid, uint32_t sequenceId);
  
-   PAsmJSCacheEntry(OpenMode openMode,
-                    WriteParams write,
-                    PrincipalInfo principalInfo);
+   async PAsmJSCacheEntry(OpenMode openMode,
+                          WriteParams write,
+                          PrincipalInfo principalInfo);
  
-   PQuota();
+   async PQuota();
  
-+  PSyncManager();
++  async PSyncManager();
 +
  child:
-   PCache();
-   PCacheStreamControl();
+   async PCache();
+   async PCacheStreamControl();
  
  both:
-   PBlob(BlobConstructorParams params);
+   async PBlob(BlobConstructorParams params);
  
-   PFileDescriptorSet(FileDescriptor fd);
+   async PFileDescriptorSet(FileDescriptor fd);
 diff --git a/ipc/glue/moz.build b/ipc/glue/moz.build
 --- a/ipc/glue/moz.build
 +++ b/ipc/glue/moz.build
