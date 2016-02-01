@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  1294f5260bce5853c2498f1ee2d19ba1cb943551
+# Parent  8d75c87b1ea69b8c3d48063a7fc3f4976e329cd3
 Bug 1217544 - Implement one-off BackgroundSync API. Part 2: ServiceWorkerRegistration. r=baku
 
 diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
@@ -120,12 +120,12 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
                                     mInstallingWorker, mWaitingWorker, mActiveWorker);
  #endif
  
- ServiceWorkerRegistrationMainThread::ServiceWorkerRegistrationMainThread(nsPIDOMWindow* aWindow,
+ ServiceWorkerRegistrationMainThread::ServiceWorkerRegistrationMainThread(nsPIDOMWindowInner* aWindow,
                                                                           const nsAString& aScope)
    : ServiceWorkerRegistrationBase(aWindow, aScope)
    , mListeningForEvents(false)
  {
-@@ -808,16 +812,49 @@ ServiceWorkerRegistrationMainThread::Get
+@@ -807,16 +811,49 @@ ServiceWorkerRegistrationMainThread::Get
    }
  
    RefPtr<PushManager> ret = mPushManager;
@@ -175,7 +175,7 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
    WorkerPrivate* mWorkerPrivate;
    nsString mScope;
    bool mListeningForEvents;
-@@ -932,23 +969,25 @@ NS_INTERFACE_MAP_END_INHERITING(ServiceW
+@@ -931,23 +968,25 @@ NS_INTERFACE_MAP_END_INHERITING(ServiceW
  // Expanded macros since we need special behaviour to release the proxy.
  NS_IMPL_CYCLE_COLLECTION_CLASS(ServiceWorkerRegistrationWorkerThread)
  
@@ -201,7 +201,7 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
    : ServiceWorkerRegistrationBase(nullptr, aScope)
    , mWorkerPrivate(aWorkerPrivate)
  {
-@@ -1249,10 +1288,22 @@ ServiceWorkerRegistrationWorkerThread::G
+@@ -1248,10 +1287,22 @@ ServiceWorkerRegistrationWorkerThread::G
    }
  
    RefPtr<WorkerPushManager> ret = mPushManager;
@@ -229,7 +229,7 @@ diff --git a/dom/workers/ServiceWorkerRegistration.h b/dom/workers/ServiceWorker
 +++ b/dom/workers/ServiceWorkerRegistration.h
 @@ -17,18 +17,19 @@
  
- class nsPIDOMWindow;
+ class nsPIDOMWindowInner;
  
  namespace mozilla {
  namespace dom {
@@ -248,7 +248,7 @@ diff --git a/dom/workers/ServiceWorkerRegistration.h b/dom/workers/ServiceWorker
  
  bool
  ServiceWorkerRegistrationVisible(JSContext* aCx, JSObject* aObj);
-@@ -135,16 +136,19 @@ public:
+@@ -136,16 +137,19 @@ public:
    GetWaiting() override;
  
    already_AddRefed<workers::ServiceWorker>
