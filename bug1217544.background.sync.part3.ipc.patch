@@ -26,12 +26,12 @@ new file mode 100644
 +  manager PBackground;
 +
 +parent: // child -> parent messages
-+  Request(nsID aRequestId, SyncOp aOp);
-+  Shutdown();
++  async Request(nsID aRequestId, SyncOp aOp);
++  async Shutdown();
 +
 +child: // parent -> child messages
-+  Response(nsID requestId, SyncOpResponse aResponse);
-+  __delete__();
++  async Response(nsID requestId, SyncOpResponse aResponse);
++  async __delete__();
 +};
 +
 +} // namespace dom
