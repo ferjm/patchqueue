@@ -1,4 +1,5 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  ad6cc968cff28b4e677332dc09641a93d4b8d641
-try: -b o -p linux -u web-platform-tests-e10s -t none
+# Parent  b38e07d9bd815ede7ecf3c92b64691e166285c89
+try: -b o -p emulator -u none -t none
+
