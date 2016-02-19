@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  2e7c3dc67535b5fad3879974577cde0d8bea0675
+# Parent  453a5709fe13299badb3a31004f2ddb29c72e923
 Bug 1217544 - Implement one-off BackgroundSync API. Tests. r=baku
 
 diff --git a/dom/sync/moz.build b/dom/sync/moz.build
@@ -37,7 +37,7 @@ diff --git a/dom/sync/tests/test_backgroundsync_basic.html b/dom/sync/tests/test
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/tests/test_backgroundsync_basic.html
-@@ -0,0 +1,57 @@
+@@ -0,0 +1,56 @@
 +<!DOCTYPE HTML>
 +<html>
 +<!--
@@ -72,7 +72,6 @@ new file mode 100644
 +  var registration;
 +  add_task(function* start() {
 +    yield setupPrefs();
-+
 +    var url = "worker.js" + "?" + (Math.random());
 +    registration = yield navigator.serviceWorker.register(url, {scope: "."});
 +  });
