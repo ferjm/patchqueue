@@ -1,13 +1,12 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  184a432d20c5cb63d86d08bd7459a53bb81b2466
+# Parent  7da7f2d03209a9c6b0e9c314a9d85d5b8ac82897
 Bug 1217544 - Implement one-off BackgroundSync API. Part 1: SyncManager interface. r=baku
 
 diff --git a/dom/moz.build b/dom/moz.build
 --- a/dom/moz.build
 +++ b/dom/moz.build
-@@ -109,16 +109,17 @@ DIRS += [
-     'xbl',
+@@ -110,16 +110,17 @@ DIRS += [
      'xml',
      'xslt',
      'xul',
@@ -15,6 +14,7 @@ diff --git a/dom/moz.build b/dom/moz.build
      'manifest',
      'vr',
      'newapps',
+     'u2f',
 +    'sync'
  ]
  
@@ -285,7 +285,7 @@ new file mode 100644
 diff --git a/dom/tests/mochitest/general/test_interfaces.html b/dom/tests/mochitest/general/test_interfaces.html
 --- a/dom/tests/mochitest/general/test_interfaces.html
 +++ b/dom/tests/mochitest/general/test_interfaces.html
-@@ -1291,16 +1291,18 @@ var interfaceNamesInGlobalScope =
+@@ -1301,16 +1301,18 @@ var interfaceNamesInGlobalScope =
      "SVGUseElement",
  // IMPORTANT: Do not change this list without review from a DOM peer!
      "SVGViewElement",
@@ -329,7 +329,7 @@ new file mode 100644
 diff --git a/dom/webidl/moz.build b/dom/webidl/moz.build
 --- a/dom/webidl/moz.build
 +++ b/dom/webidl/moz.build
-@@ -531,16 +531,17 @@ WEBIDL_FILES = [
+@@ -534,16 +534,17 @@ WEBIDL_FILES = [
      'SVGTransformList.webidl',
      'SVGTSpanElement.webidl',
      'SVGUnitTypes.webidl',
