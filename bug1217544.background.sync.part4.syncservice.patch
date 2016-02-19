@@ -125,7 +125,7 @@ diff --git a/dom/sync/SyncService.cpp b/dom/sync/SyncService.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncService.cpp
-@@ -0,0 +1,70 @@
+@@ -0,0 +1,83 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -194,13 +194,26 @@ new file mode 100644
 +  mActors.RemoveEntry(aParent);
 +}
 +
++bool
++SyncService::Register(nsString& aTag)
++{
++  // XXX implement me.
++  return true;
++}
++
++void
++SyncService::GetTags(nsTArray<nsString>& aTags)
++{
++  // XXX implement me.
++}
++
 +} // namespace dom
 +} // namespace mozilla
 diff --git a/dom/sync/SyncService.h b/dom/sync/SyncService.h
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncService.h
-@@ -0,0 +1,39 @@
+@@ -0,0 +1,43 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -228,6 +241,10 @@ new file mode 100644
 +
 +  void RegisterActor(SyncManagerParent* aParent);
 +  void UnregisterActor(SyncManagerParent* aParent);
++
++  // XXX need to give principal or origin
++  bool Register(nsString& aTag);
++  void GetTags(nsTArray<nsString>& aTags);
 +
 +private:
 +  SyncService();
