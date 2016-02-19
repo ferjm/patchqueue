@@ -1,0 +1,147 @@
+# HG changeset patch
+# User Fernando Jimenez <ferjmoreno@gmail.com>
+# Parent  97100d73c2704030811d9ee6f4858de2d0d547f5
+Bug 1217544 - Implement one-off BackgroundSync API. Part 4: SyncService. r=baku
+
+diff --git a/dom/sync/SyncService.cpp b/dom/sync/SyncService.cpp
+new file mode 100644
+--- /dev/null
++++ b/dom/sync/SyncService.cpp
+@@ -0,0 +1,70 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#include "SyncService.h"
++#include "SyncManagerParent.h"
++
++namespace mozilla {
++
++namespace dom {
++
++namespace {
++  SyncService* sInstance = nullptr;
++} // namespace
++
++SyncService::SyncService()
++{
++  AssertIsOnBackgroundThread();
++
++  // sInstance is a raw SyncService*.
++  MOZ_ASSERT(!sInstance);
++  sInstance = this;
++}
++
++SyncService::~SyncService()
++{
++  AssertIsOnBackgroundThread();
++  MOZ_ASSERT(sInstance == this);
++  MOZ_ASSERT(mActors.Count() == 0);
++
++  sInstance = nullptr;
++}
++
++// static
++already_AddRefed<SyncService>
++SyncService::GetOrCreate()
++{
++  AssertIsOnBackgroundThread();
++
++  RefPtr<SyncService> instance = sInstance;
++  if (!instance) {
++    instance = new SyncService();
++  }
++  return instance.forget();
++}
++
++void
++SyncService::RegisterActor(SyncManagerParent* aParent)
++{
++  AssertIsOnBackgroundThread();
++  MOZ_ASSERT(aParent);
++  MOZ_ASSERT(!mActors.Contains(aParent));
++
++  mActors.PutEntry(aParent);
++}
++
++void
++SyncService::UnregisterActor(SyncManagerParent* aParent)
++{
++  AssertIsOnBackgroundThread();
++  MOZ_ASSERT(aParent);
++  MOZ_ASSERT(mActors.Contains(aParent));
++
++  mActors.RemoveEntry(aParent);
++}
++
++} // namespace dom
++} // namespace mozilla
+diff --git a/dom/sync/SyncService.h b/dom/sync/SyncService.h
+new file mode 100644
+--- /dev/null
++++ b/dom/sync/SyncService.h
+@@ -0,0 +1,39 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
++ * You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#ifndef mozilla_dom_SyncService_h
++#define mozilla_dom_SyncService_h
++
++#include "nsISupportsImpl.h"
++#include "nsHashKeys.h"
++#include "nsTHashtable.h"
++
++namespace mozilla {
++namespace dom {
++
++class SyncManagerParent;
++
++class SyncService final
++{
++public:
++  NS_INLINE_DECL_REFCOUNTING(SyncService)
++
++  static already_AddRefed<SyncService> GetOrCreate();
++
++  void RegisterActor(SyncManagerParent* aParent);
++  void UnregisterActor(SyncManagerParent* aParent);
++
++private:
++  SyncService();
++  ~SyncService();
++
++  nsTHashtable<nsPtrHashKey<SyncManagerParent>> mActors;
++};
++
++} // namespace dom
++} // namespace mozilla
++
++#endif // mozilla_dom_SyncService_h
+diff --git a/dom/sync/moz.build b/dom/sync/moz.build
+--- a/dom/sync/moz.build
++++ b/dom/sync/moz.build
+@@ -5,17 +5,18 @@
+ 
+ EXPORTS.mozilla.dom += [
+     'SyncManager.h'
+ ]
+ 
+ UNIFIED_SOURCES += [
+     'SyncManager.cpp',
+     'SyncManagerChild.cpp',
+-    'SyncManagerParent.cpp'
++    'SyncManagerParent.cpp',
++    'SyncService.cpp'
+ ]
+ 
+ IPDL_SOURCES += [
+     'PSyncManager.ipdl',
+     'SyncIPCTypes.ipdlh'
+ ]
+ 
+ LOCAL_INCLUDES += [
