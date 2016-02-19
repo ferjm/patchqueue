@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  8d75c87b1ea69b8c3d48063a7fc3f4976e329cd3
+# Parent  43a6584da74700b755f492f9fad00ef02232adfd
 Bug 1217544 - Implement one-off BackgroundSync API. Part 2: ServiceWorkerRegistration. r=baku
 
 diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
@@ -125,7 +125,7 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
    : ServiceWorkerRegistrationBase(aWindow, aScope)
    , mListeningForEvents(false)
  {
-@@ -807,16 +811,49 @@ ServiceWorkerRegistrationMainThread::Get
+@@ -807,16 +811,48 @@ ServiceWorkerRegistrationMainThread::Get
    }
  
    RefPtr<PushManager> ret = mPushManager;
@@ -134,7 +134,7 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
    #endif /* ! MOZ_SIMPLEPUSH */
  }
  
-+already_AddRefed<SyncManager>
++SyncManager*
 +ServiceWorkerRegistrationMainThread::GetSync(ErrorResult& aRv)
 +{
 +  AssertIsOnMainThread();
@@ -163,8 +163,7 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
 +                                                   aRv);
 +  }
 +
-+  RefPtr<SyncManager> ret = mSyncManager;
-+  return ret.forget();
++  return mSyncManager;
 +}
 +
  ////////////////////////////////////////////////////
@@ -175,7 +174,7 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
    WorkerPrivate* mWorkerPrivate;
    nsString mScope;
    bool mListeningForEvents;
-@@ -931,23 +968,25 @@ NS_INTERFACE_MAP_END_INHERITING(ServiceW
+@@ -931,23 +967,25 @@ NS_INTERFACE_MAP_END_INHERITING(ServiceW
  // Expanded macros since we need special behaviour to release the proxy.
  NS_IMPL_CYCLE_COLLECTION_CLASS(ServiceWorkerRegistrationWorkerThread)
  
@@ -201,7 +200,7 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
    : ServiceWorkerRegistrationBase(nullptr, aScope)
    , mWorkerPrivate(aWorkerPrivate)
  {
-@@ -1248,10 +1287,22 @@ ServiceWorkerRegistrationWorkerThread::G
+@@ -1248,10 +1286,21 @@ ServiceWorkerRegistrationWorkerThread::G
    }
  
    RefPtr<WorkerPushManager> ret = mPushManager;
@@ -210,7 +209,7 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
    #endif /* ! MOZ_SIMPLEPUSH */
  }
  
-+already_AddRefed<SyncManager>
++SyncManager*
 +ServiceWorkerRegistrationWorkerThread::GetSync(ErrorResult& aRv)
 +{
 +  if (!mSyncManager) {
@@ -218,8 +217,7 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
 +                                               mWorkerPrivate);
 +  }
 +
-+  RefPtr<SyncManager> ret = mSyncManager;
-+  return ret.forget();
++  return mSyncManager;
 +}
 +
  } // dom namespace
@@ -257,7 +255,7 @@ diff --git a/dom/workers/ServiceWorkerRegistration.h b/dom/workers/ServiceWorker
    already_AddRefed<PushManager>
    GetPushManager(ErrorResult& aRv);
  
-+  already_AddRefed<SyncManager>
++  SyncManager*
 +  GetSync(ErrorResult& aRv);
 +
    // DOMEventTargethelper
@@ -296,7 +294,7 @@ diff --git a/dom/workers/ServiceWorkerRegistration.h b/dom/workers/ServiceWorker
    already_AddRefed<WorkerPushManager>
    GetPushManager(ErrorResult& aRv);
  
-+  already_AddRefed<SyncManager>
++  SyncManager*
 +  GetSync(ErrorResult& aRv);
 +
  private:
