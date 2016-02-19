@@ -469,7 +469,7 @@ diff --git a/dom/tests/mochitest/general/test_interfaces.html b/dom/tests/mochit
  // IMPORTANT: Do not change this list without review from a DOM peer!
      "SVGZoomEvent",
  // IMPORTANT: Do not change this list without review from a DOM peer!
-+    {name: "SyncManager", b2g: false},
++    {name: "SyncManager", b2g: true},
 +// IMPORTANT: Do not change this list without review from a DOM peer!
      {name: "RequestSyncManager", b2g: true, permission: ["requestsync-manager"] },
  // IMPORTANT: Do not change this list without review from a DOM peer!
