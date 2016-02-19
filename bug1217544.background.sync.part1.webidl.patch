@@ -6,16 +6,168 @@ Bug 1217544 - Implement one-off BackgroundSync API. Part 1: SyncManager interfac
 diff --git a/dom/moz.build b/dom/moz.build
 --- a/dom/moz.build
 +++ b/dom/moz.build
-@@ -110,16 +110,17 @@ DIRS += [
+@@ -2,124 +2,125 @@
+ # vim: set filetype=python:
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ JAR_MANIFESTS += ['jar.mn']
+ 
+ interfaces = [
++    'apps',
+     'base',
+     'canvas',
+     'core',
++    'css',
++    'events',
++    'gamepad',
++    'geolocation',
+     'html',
+-    'events',
++    'json',
++    'notification',
++    'offline',
++    'permission',
++    'range',
++    'security',
+     'settings',
++    'smil',
++    'storage',
+     'stylesheets',
++    'svg',
+     'sidebar',
+-    'css',
+     'traversal',
+-    'range',
+     'xbl',
+     'xpath',
+-    'xul',
+-    'security',
+-    'storage',
+-    'json',
+-    'offline',
+-    'geolocation',
+-    'notification',
+-    'permission',
+-    'svg',
+-    'smil',
+-    'apps',
+-    'gamepad',
++    'xul'
+ ]
+ 
+ if not CONFIG['MOZ_SIMPLEPUSH']:
+     interfaces += ['push']
+ 
+ DIRS += ['interfaces/' + i for i in interfaces]
+ 
+ DIRS += [
++    'activities',
++    'alarm',
+     'animation',
+     'apps',
++    'archivereader',
++    'asmjscache',
++    'audiochannel',
+     'base',
++    'battery',
++    'bindings',
+     'bluetooth',
+-    'activities',
+-    'archivereader',
+-    'requestsync',
+-    'bindings',
+-    'battery',
++    'broadcastchannel',
+     'browser-element',
+     'cache',
++    'camera',
+     'canvas',
+     'cellbroadcast',
+     'contacts',
+     'crypto',
+-    'phonenumberutils',
+-    'alarm',
+     'datastore',
+     'devicestorage',
+     'encoding',
+     'events',
+     'fetch',
+     'filehandle',
+     'filesystem',
+     'fmradio',
+     'geolocation',
+     'html',
+     'icc',
++    'indexedDB',
++    'inputmethod',
+     'inputport',
++    'ipc',
+     'json',
+     'jsurl',
+-    'asmjscache',
++    'locales',
++    'manifest',
+     'mathml',
+     'media',
++    'messagechannel',
+     'messages',
+     'mobileconnection',
++    'mobilemessage',
++    'network',
++    'newapps',
+     'notification',
+     'offline',
++    'permission',
++    'phonenumberutils',
++    'plugins/base',
++    'plugins/ipc',
+     'power',
++    'promise',
+     'quota',
++    'requestsync',
++    'resourcestats',
+     'security',
+     'settings',
+     'storage',
+     'svg',
+-    'mobilemessage',
++    'sync',
++    'system',
+     'time',
+-    'locales',
+-    'network',
+-    'permission',
+-    'plugins/base',
+-    'plugins/ipc',
+-    'indexedDB',
+-    'system',
+-    'ipc',
+     'workers',
+-    'camera',
+-    'audiochannel',
+-    'broadcastchannel',
+-    'messagechannel',
+-    'promise',
+     'smil',
+     'telephony',
+     'tv',
++    'u2f',
+     'voicemail',
+-    'inputmethod',
++    'vr',
+     'webidl',
+     'xbl',
      'xml',
      'xslt',
-     'xul',
-     'resourcestats',
-     'manifest',
-     'vr',
-     'newapps',
-     'u2f',
-+    'sync'
+-    'xul',
+-    'resourcestats',
+-    'manifest',
+-    'vr',
+-    'newapps',
+-    'u2f',
++    'xul'
  ]
  
  if CONFIG['OS_ARCH'] == 'WINNT':
@@ -24,6 +176,29 @@ diff --git a/dom/moz.build b/dom/moz.build
  if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
      DIRS += [
          'speakermanager',
+@@ -146,20 +147,20 @@ if CONFIG['MOZ_SIMPLEPUSH']:
+ else:
+     DIRS += ['push']
+ 
+ if CONFIG['MOZ_SECUREELEMENT']:
+     DIRS += ['secureelement']
+ 
+ if CONFIG['MOZ_B2G']:
+     DIRS += [
++        'engineeringmode',
+         'downloads',
+         'identity',
+-        'mobileid',
+-        'engineeringmode'
++        'mobileid'
+     ]
+ 
+ DIRS += ['presentation']
+ 
+ TEST_DIRS += [
+     'tests',
+     'imptests',
+ ]
 diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
 new file mode 100644
 --- /dev/null
