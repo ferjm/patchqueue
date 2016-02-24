@@ -366,7 +366,7 @@ diff --git a/dom/workers/ServiceWorkerPrivate.cpp b/dom/workers/ServiceWorkerPri
  bool
  LifecycleEventWorkerRunnable::DispatchLifecycleEvent(JSContext* aCx,
                                                       WorkerPrivate* aWorkerPrivate)
-@@ -1357,16 +1357,101 @@ ServiceWorkerPrivate::SendFetchEvent(nsI
+@@ -1357,16 +1357,103 @@ ServiceWorkerPrivate::SendFetchEvent(nsI
    jsapi.Init();
    if (NS_WARN_IF(!r->Dispatch(jsapi.cx()))) {
      return NS_ERROR_FAILURE;
@@ -376,7 +376,7 @@ diff --git a/dom/workers/ServiceWorkerPrivate.cpp b/dom/workers/ServiceWorkerPri
  }
  
 +namespace {
-+class SendSyncEventRunnable final : public ExtendableEventWorkerRunnable
++class SendSyncEventRunnable final : public ExtendableFunctionalEventWorkerRunnable
 +{
 +  nsString mTag;
 +  bool mLastChance;
@@ -384,12 +384,13 @@ diff --git a/dom/workers/ServiceWorkerPrivate.cpp b/dom/workers/ServiceWorkerPri
 +public:
 +  SendSyncEventRunnable(WorkerPrivate* aWorkerPrivate,
 +                        KeepAliveToken* aKeepAliveToken,
-+                        nsAString& aTag,
-+                        bool aLastChance,
++                        const nsAString& aTag,
++                        const bool aLastChance,
 +                        nsMainThreadPtrHandle<ServiceWorkerRegistrationInfo> aRegistration)
 +    : ExtendableFunctionalEventWorkerRunnable(
 +        aWorkerPrivate, aKeepAliveToken, aRegistration)
-+    , mData(aData)
++    , mTag(aTag)
++    , mLastChance(aLastChance)
 +  {
 +    AssertIsOnMainThread();
 +    MOZ_ASSERT(aWorkerPrivate);
@@ -403,15 +404,15 @@ diff --git a/dom/workers/ServiceWorkerPrivate.cpp b/dom/workers/ServiceWorkerPri
 +    GlobalObject globalObj(aCx, aWorkerPrivate->GlobalScope()->GetWrapper());
 +
 +    SyncEventInit sei;
-+    sei.mTag = aTag;
-+    // sei.mLastChance = aLastChance;
++    sei.mTag = mTag;
++    // sei.mLastChance = mLastChance;
 +    sei.mBubbles = false;
 +    sei.mCancelable = false;
 +
 +    ErrorResult result;
 +    RefPtr<SyncEvent> event =
 +      SyncEvent::Constructor(globalObj, NS_LITERAL_STRING("sync"), sei, result);
-+    if (NS_WARN_IF(result.Failed()) {
++    if (NS_WARN_IF(result.Failed())) {
 +      result.SuppressException();
 +      return false;
 +    }
@@ -427,7 +428,8 @@ diff --git a/dom/workers/ServiceWorkerPrivate.cpp b/dom/workers/ServiceWorkerPri
 +
 +nsresult
 +ServiceWorkerPrivate::SendSyncEvent(const nsAString& aTag,
-+                                    const bool aLastChance)
++                                    const bool aLastChance,
++                                    ServiceWorkerRegistrationInfo* aRegistration)
 +{
 +  nsresult rv = SpawnWorkerIfNeeded(SyncEvent, nullptr);
 +  NS_ENSURE_SUCCESS(rv, rv);
@@ -435,7 +437,7 @@ diff --git a/dom/workers/ServiceWorkerPrivate.cpp b/dom/workers/ServiceWorkerPri
 +  MOZ_ASSERT(mKeepAliveToken);
 +
 +  nsMainThreadPtrHandle<ServiceWorkerRegistrationInfo> regInfo(
-+      new nsMainThreadPtrHolder<ServiceWorkerRegistrationInfo(aRegistration, false));
++      new nsMainThreadPtrHolder<ServiceWorkerRegistrationInfo>(aRegistration, false));
 +
 +
 +  RefPtr<WorkerRunnable> runnable = new SendSyncEventRunnable(mWorkerPrivate,
@@ -468,7 +470,7 @@ diff --git a/dom/workers/ServiceWorkerPrivate.cpp b/dom/workers/ServiceWorkerPri
    AssertIsOnMainThread();
  
    // XXXcatalinb: We need to have a separate load group that's linked to
-@@ -1451,17 +1536,17 @@ ServiceWorkerPrivate::SpawnWorkerIfNeede
+@@ -1451,17 +1538,17 @@ ServiceWorkerPrivate::SpawnWorkerIfNeede
    mWorkerPrivate = WorkerPrivate::Constructor(jsapi.cx(),
                                                scriptSpec,
                                                false, WorkerTypeService,
@@ -487,7 +489,7 @@ diff --git a/dom/workers/ServiceWorkerPrivate.cpp b/dom/workers/ServiceWorkerPri
  void
  ServiceWorkerPrivate::StoreISupports(nsISupports* aSupports)
  {
-@@ -1518,17 +1603,17 @@ ServiceWorkerPrivate::NoteDeadServiceWor
+@@ -1518,17 +1605,17 @@ ServiceWorkerPrivate::NoteDeadServiceWor
    mInfo = nullptr;
    TerminateWorker();
  }
@@ -506,7 +508,7 @@ diff --git a/dom/workers/ServiceWorkerPrivate.cpp b/dom/workers/ServiceWorkerPri
  
  void
  ServiceWorkerPrivate::Activated()
-@@ -1658,18 +1743,19 @@ ServiceWorkerPrivate::TerminateWorkerCal
+@@ -1658,18 +1745,19 @@ ServiceWorkerPrivate::TerminateWorkerCal
  }
  
  void
@@ -518,7 +520,7 @@ diff --git a/dom/workers/ServiceWorkerPrivate.cpp b/dom/workers/ServiceWorkerPri
 -  if (aWhy == PushEvent || aWhy == PushSubscriptionChangeEvent) {
 -    mIsPushWorker = true;
 +  if (aWhy == PushEvent || aWhy == PushSubscriptionChangeEvent ||
-+      aWhy = SyncEvent) {
++      aWhy == SyncEvent) {
 +    mIsPushOrSyncWorker = true;
    }
  
@@ -531,7 +533,7 @@ diff --git a/dom/workers/ServiceWorkerPrivate.cpp b/dom/workers/ServiceWorkerPri
 diff --git a/dom/workers/ServiceWorkerPrivate.h b/dom/workers/ServiceWorkerPrivate.h
 --- a/dom/workers/ServiceWorkerPrivate.h
 +++ b/dom/workers/ServiceWorkerPrivate.h
-@@ -101,16 +101,20 @@ public:
+@@ -101,16 +101,21 @@ public:
                               const nsAString& aScope);
  
    nsresult
@@ -542,7 +544,8 @@ diff --git a/dom/workers/ServiceWorkerPrivate.h b/dom/workers/ServiceWorkerPriva
  
 +  nsresult
 +  SendSyncEvent(const nsAString& aTag,
-+                const bool aLastChance);
++                const bool aLastChance,
++                ServiceWorkerRegistrationInfo* aRegistration);
 +
    void
    StoreISupports(nsISupports* aSupports);
@@ -552,7 +555,7 @@ diff --git a/dom/workers/ServiceWorkerPrivate.h b/dom/workers/ServiceWorkerPriva
  
    // This will terminate the current running worker thread and drop the
    // workerPrivate reference.
-@@ -141,17 +145,18 @@ public:
+@@ -141,17 +146,18 @@ public:
  private:
    enum WakeUpReason {
      FetchEvent = 0,
@@ -572,7 +575,7 @@ diff --git a/dom/workers/ServiceWorkerPrivate.h b/dom/workers/ServiceWorkerPriva
  
    static void
    TerminateWorkerCallback(nsITimer* aTimer, void *aPrivate);
-@@ -184,20 +189,20 @@ private:
+@@ -184,20 +190,20 @@ private:
  
    // The WorkerPrivate object can only be closed by this class or by the
    // RuntimeService class if gecko is shutting down. Closing the worker
