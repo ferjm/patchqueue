@@ -100,7 +100,7 @@ new file mode 100644
 +
 +dictionary SyncEventInit : ExtendableEventInit {
 +  required DOMString tag;
-+  boolean lastChance; // =false
++  boolean lastChance = false;
 +};
 diff --git a/dom/webidl/moz.build b/dom/webidl/moz.build
 --- a/dom/webidl/moz.build
@@ -145,7 +145,7 @@ diff --git a/dom/workers/ServiceWorkerEvents.cpp b/dom/workers/ServiceWorkerEven
  PushMessageData::~PushMessageData()
  {
  }
-@@ -1110,16 +1110,52 @@ NS_IMPL_RELEASE_INHERITED(PushEvent, Ext
+@@ -1110,16 +1110,50 @@ NS_IMPL_RELEASE_INHERITED(PushEvent, Ext
  
  NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(PushEvent)
  NS_INTERFACE_MAP_END_INHERITING(ExtendableEvent)
@@ -172,9 +172,7 @@ diff --git a/dom/workers/ServiceWorkerEvents.cpp b/dom/workers/ServiceWorkerEven
 +  e->InitEvent(aType, aOptions.mBubbles, aOptions.mCancelable);
 +  e->SetTrusted(trusted);
 +  e->mTag = aOptions.mTag;
-+  if (aOptions.mLastChance.WasPassed()) {
-+    e->mLastChance = aOptions.mLastChance.Value();
-+  }
++  e->mLastChance = aOptions.mLastChance;
 +  return e.forget();
 +}
 +
@@ -220,7 +218,7 @@ diff --git a/dom/workers/ServiceWorkerEvents.h b/dom/workers/ServiceWorkerEvents
  namespace mozilla {
  namespace dom {
  class Blob;
-@@ -317,11 +319,62 @@ public:
+@@ -317,11 +319,60 @@ public:
  
    void SetPorts(MessagePortList* aPorts);
  
@@ -265,18 +263,16 @@ diff --git a/dom/workers/ServiceWorkerEvents.h b/dom/workers/ServiceWorkerEvents
 +    return Constructor(owner, aType, aOptions, aRv);
 +  }
 +
-+  NS_IMETHOD
++  void
 +  GetTag(nsAString& aTag)
 +  {
 +    aTag = mTag;
-+    return NS_OK;
 +  }
 +
-+  NS_IMETHOD
-+  GetLastChance(bool& aLastChance)
++  bool
++  LastChance()
 +  {
-+    aLastChance = mLastChance;
-+    return NS_OK;
++    return mLastChance;
 +  }
 +};
 +
