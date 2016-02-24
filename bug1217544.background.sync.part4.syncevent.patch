@@ -323,3 +323,277 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
 +}
 +
  END_WORKERS_NAMESPACE
+diff --git a/dom/workers/ServiceWorkerPrivate.cpp b/dom/workers/ServiceWorkerPrivate.cpp
+--- a/dom/workers/ServiceWorkerPrivate.cpp
++++ b/dom/workers/ServiceWorkerPrivate.cpp
+@@ -56,17 +56,17 @@ private:
+ 
+   RefPtr<ServiceWorkerPrivate> mPrivate;
+ };
+ 
+ NS_IMPL_ISUPPORTS0(KeepAliveToken)
+ 
+ ServiceWorkerPrivate::ServiceWorkerPrivate(ServiceWorkerInfo* aInfo)
+   : mInfo(aInfo)
+-  , mIsPushWorker(false)
++  , mIsPushOrSyncWorker(false)
+   , mDebuggerCount(0)
+   , mTokenCount(0)
+ {
+   AssertIsOnMainThread();
+   MOZ_ASSERT(aInfo);
+ 
+   mIdleWorkerTimer = do_CreateInstance(NS_TIMER_CONTRACTID);
+   MOZ_ASSERT(mIdleWorkerTimer);
+@@ -478,18 +478,18 @@ public:
+   {
+     MOZ_ASSERT(GetCurrentThreadWorkerPrivate() == mWorkerPrivate);
+     mWorkerPrivate->AssertIsOnWorkerThread();
+ 
+     ReportResult(aCx, false);
+ 
+     // Note, all WaitUntil() rejections are reported to client consoles
+     // by the WaitUntilHandler in ServiceWorkerEvents.  This ensures that
+-    // errors in non-lifecycle events like FetchEvent and PushEvent are
+-    // reported properly.
++    // errors in non-lifecycle events like FetchEvent, PushEvent or SyncEvent
++    // are reported properly.
+   }
+ };
+ 
+ NS_IMPL_ISUPPORTS0(LifeCycleEventWatcher)
+ 
+ bool
+ LifecycleEventWorkerRunnable::DispatchLifecycleEvent(JSContext* aCx,
+                                                      WorkerPrivate* aWorkerPrivate)
+@@ -1357,16 +1357,101 @@ ServiceWorkerPrivate::SendFetchEvent(nsI
+   jsapi.Init();
+   if (NS_WARN_IF(!r->Dispatch(jsapi.cx()))) {
+     return NS_ERROR_FAILURE;
+   }
+ 
+   return NS_OK;
+ }
+ 
++namespace {
++class SendSyncEventRunnable final : public ExtendableEventWorkerRunnable
++{
++  nsString mTag;
++  bool mLastChance;
++
++public:
++  SendSyncEventRunnable(WorkerPrivate* aWorkerPrivate,
++                        KeepAliveToken* aKeepAliveToken,
++                        nsAString& aTag,
++                        bool aLastChance,
++                        nsMainThreadPtrHandle<ServiceWorkerRegistrationInfo> aRegistration)
++    : ExtendableFunctionalEventWorkerRunnable(
++        aWorkerPrivate, aKeepAliveToken, aRegistration)
++    , mData(aData)
++  {
++    AssertIsOnMainThread();
++    MOZ_ASSERT(aWorkerPrivate);
++    MOZ_ASSERT(aWorkerPrivate->IsServiceWorker());
++  }
++
++  bool
++  WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate) override
++  {
++    MOZ_ASSERT(aWorkerPrivate);
++    GlobalObject globalObj(aCx, aWorkerPrivate->GlobalScope()->GetWrapper());
++
++    SyncEventInit sei;
++    sei.mTag = aTag;
++    // sei.mLastChance = aLastChance;
++    sei.mBubbles = false;
++    sei.mCancelable = false;
++
++    ErrorResult result;
++    RefPtr<SyncEvent> event =
++      SyncEvent::Constructor(globalObj, NS_LITERAL_STRING("sync"), sei, result);
++    if (NS_WARN_IF(result.Failed()) {
++      result.SuppressException();
++      return false;
++    }
++    event->SetTrusted(true);
++
++    DispatchExtendableEventOnWorkerScope(aCx, aWorkerPrivate->GlobalScope(),
++                                         event, nullptr);
++
++    return true;
++  }
++};
++} // anonymous namespace
++
++nsresult
++ServiceWorkerPrivate::SendSyncEvent(const nsAString& aTag,
++                                    const bool aLastChance)
++{
++  nsresult rv = SpawnWorkerIfNeeded(SyncEvent, nullptr);
++  NS_ENSURE_SUCCESS(rv, rv);
++
++  MOZ_ASSERT(mKeepAliveToken);
++
++  nsMainThreadPtrHandle<ServiceWorkerRegistrationInfo> regInfo(
++      new nsMainThreadPtrHolder<ServiceWorkerRegistrationInfo(aRegistration, false));
++
++
++  RefPtr<WorkerRunnable> runnable = new SendSyncEventRunnable(mWorkerPrivate,
++                                                              mKeepAliveToken,
++                                                              aTag,
++                                                              aLastChance,
++                                                              regInfo);
++
++  if (mInfo->State() == ServiceWorkerState::Activating) {
++    mPendingFunctionalEvents.AppendElement(runnable.forget());
++    return NS_OK;
++  }
++
++  MOZ_ASSERT(mInfo->State() == ServiceWorkerState::Activated);
++
++  AutoJSAPI jsapi;
++  jsapi.Init();
++  if (NS_WARN_IF(!runnable->Dispatch(jsapi.cx()))) {
++    return NS_ERROR_FAILURE;
++  }
++
++  return NS_OK;
++}
++
+ nsresult
+ ServiceWorkerPrivate::SpawnWorkerIfNeeded(WakeUpReason aWhy,
+                                           nsIRunnable* aLoadFailedRunnable,
+                                           nsILoadGroup* aLoadGroup)
+ {
+   AssertIsOnMainThread();
+ 
+   // XXXcatalinb: We need to have a separate load group that's linked to
+@@ -1451,17 +1536,17 @@ ServiceWorkerPrivate::SpawnWorkerIfNeede
+   mWorkerPrivate = WorkerPrivate::Constructor(jsapi.cx(),
+                                               scriptSpec,
+                                               false, WorkerTypeService,
+                                               mInfo->Scope(), &info, error);
+   if (NS_WARN_IF(error.Failed())) {
+     return error.StealNSResult();
+   }
+ 
+-  mIsPushWorker = false;
++  mIsPushOrSyncWorker = false;
+   RenewKeepAliveToken(aWhy);
+ 
+   return NS_OK;
+ }
+ 
+ void
+ ServiceWorkerPrivate::StoreISupports(nsISupports* aSupports)
+ {
+@@ -1518,17 +1603,17 @@ ServiceWorkerPrivate::NoteDeadServiceWor
+   mInfo = nullptr;
+   TerminateWorker();
+ }
+ 
+ void
+ ServiceWorkerPrivate::NoteStoppedControllingDocuments()
+ {
+   AssertIsOnMainThread();
+-  if (mIsPushWorker || mDebuggerCount) {
++  if (mIsPushOrSyncWorker || mDebuggerCount) {
+     return;
+   }
+ 
+   TerminateWorker();
+ }
+ 
+ void
+ ServiceWorkerPrivate::Activated()
+@@ -1658,18 +1743,19 @@ ServiceWorkerPrivate::TerminateWorkerCal
+ }
+ 
+ void
+ ServiceWorkerPrivate::RenewKeepAliveToken(WakeUpReason aWhy)
+ {
+   // We should have an active worker if we're renewing the keep alive token.
+   MOZ_ASSERT(mWorkerPrivate);
+ 
+-  if (aWhy == PushEvent || aWhy == PushSubscriptionChangeEvent) {
+-    mIsPushWorker = true;
++  if (aWhy == PushEvent || aWhy == PushSubscriptionChangeEvent ||
++      aWhy = SyncEvent) {
++    mIsPushOrSyncWorker = true;
+   }
+ 
+   // If there is at least one debugger attached to the worker, the idle worker
+   // timeout was canceled when the first debugger attached to the worker. It
+   // should not be reset until the last debugger detaches from the worker.
+   if (!mDebuggerCount) {
+     ResetIdleTimeout();
+   }
+diff --git a/dom/workers/ServiceWorkerPrivate.h b/dom/workers/ServiceWorkerPrivate.h
+--- a/dom/workers/ServiceWorkerPrivate.h
++++ b/dom/workers/ServiceWorkerPrivate.h
+@@ -101,16 +101,20 @@ public:
+                              const nsAString& aScope);
+ 
+   nsresult
+   SendFetchEvent(nsIInterceptedChannel* aChannel,
+                  nsILoadGroup* aLoadGroup,
+                  const nsAString& aDocumentId,
+                  bool aIsReload);
+ 
++  nsresult
++  SendSyncEvent(const nsAString& aTag,
++                const bool aLastChance);
++
+   void
+   StoreISupports(nsISupports* aSupports);
+ 
+   void
+   RemoveISupports(nsISupports* aSupports);
+ 
+   // This will terminate the current running worker thread and drop the
+   // workerPrivate reference.
+@@ -141,17 +145,18 @@ public:
+ private:
+   enum WakeUpReason {
+     FetchEvent = 0,
+     PushEvent,
+     PushSubscriptionChangeEvent,
+     MessageEvent,
+     NotificationClickEvent,
+     LifeCycleEvent,
+-    AttachEvent
++    AttachEvent,
++    SyncEvent
+   };
+ 
+   // Timer callbacks
+   static void
+   NoteIdleWorkerCallback(nsITimer* aTimer, void* aPrivate);
+ 
+   static void
+   TerminateWorkerCallback(nsITimer* aTimer, void *aPrivate);
+@@ -184,20 +189,20 @@ private:
+ 
+   // The WorkerPrivate object can only be closed by this class or by the
+   // RuntimeService class if gecko is shutting down. Closing the worker
+   // multiple times is OK, since the second attempt will be a no-op.
+   RefPtr<WorkerPrivate> mWorkerPrivate;
+ 
+   nsCOMPtr<nsITimer> mIdleWorkerTimer;
+ 
+-  // We keep track if this worker received any push events since it was last
+-  // woken up. The flag is reset to false every time a new WorkerPrivate
+-  // is created.
+-  bool mIsPushWorker;
++  // We keep track if this worker received any push or sync events since it
++  // was last woken up. The flag is reset to false every time a new
++  // WorkerPrivate is created.
++  bool mIsPushOrSyncWorker;
+ 
+   // We keep a token for |dom.serviceWorkers.idle_timeout| seconds to give the
+   // worker a grace period after each event.
+   RefPtr<KeepAliveToken> mKeepAliveToken;
+ 
+   uint64_t mDebuggerCount;
+ 
+   uint64_t mTokenCount;
