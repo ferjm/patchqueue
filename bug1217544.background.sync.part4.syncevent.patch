@@ -29,6 +29,54 @@ diff --git a/dom/bindings/Bindings.conf b/dom/bindings/Bindings.conf
  
  'TextDecoder': {
      'wrapperCache': False
+diff --git a/dom/interfaces/base/nsIServiceWorkerManager.idl b/dom/interfaces/base/nsIServiceWorkerManager.idl
+--- a/dom/interfaces/base/nsIServiceWorkerManager.idl
++++ b/dom/interfaces/base/nsIServiceWorkerManager.idl
+@@ -72,17 +72,17 @@ interface nsIServiceWorkerRegistrationIn
+ [scriptable, uuid(9e523e7c-ad6f-4df0-8077-c74aebbc679d)]
+ interface nsIServiceWorkerManagerListener : nsISupports
+ {
+   void onRegister(in nsIServiceWorkerRegistrationInfo aInfo);
+ 
+   void onUnregister(in nsIServiceWorkerRegistrationInfo aInfo);
+ };
+ 
+-[scriptable, builtinclass, uuid(7404c8e8-4d47-4449-8ed1-47d1261d4e33)]
++[scriptable, builtinclass, uuid(0577039d-c34e-4f01-afb4-a423ae650e54)]
+ interface nsIServiceWorkerManager : nsISupports
+ {
+   /**
+    * Registers a ServiceWorker with script loaded from `aScriptURI` to act as
+    * the ServiceWorker for aScope.  Requires a valid entry settings object on
+    * the stack. This means you must call this from content code 'within'
+    * a window.
+    *
+@@ -186,19 +186,24 @@ interface nsIServiceWorkerManager : nsIS
+                                   in AString aData,
+                                   in AString aBehavior);
+   [optional_argc] void sendPushEvent(in ACString aOriginAttributes,
+                                      in ACString aScope,
+                                      [optional] in uint32_t aDataLength,
+                                      [optional, array, size_is(aDataLength)] in uint8_t aDataBytes);
+   void sendPushSubscriptionChangeEvent(in ACString aOriginAttributes,
+                                        in ACString scope);
+-
+   void addListener(in nsIServiceWorkerManagerListener aListener);
+ 
+   void removeListener(in nsIServiceWorkerManagerListener aListener);
+ 
+   bool shouldReportToWindow(in mozIDOMWindowProxy aWindow, in ACString aScope);
++
++/*  void sendSyncEvent(in ACString aOriginAttributes,
++                     in ACString scope,
++                     in ACString aTag,
++                     in boolean aLastChance);*/
++  void sendSyncEvent();
+ };
+ 
+ %{ C++
+ #define SERVICEWORKERMANAGER_CONTRACTID "@mozilla.org/serviceworkers/manager;1"
+ %}
 diff --git a/dom/webidl/SyncEvent.webidl b/dom/webidl/SyncEvent.webidl
 new file mode 100644
 --- /dev/null
@@ -235,3 +283,43 @@ diff --git a/dom/workers/ServiceWorkerEvents.h b/dom/workers/ServiceWorkerEvents
  END_WORKERS_NAMESPACE
  
  #endif /* mozilla_dom_workers_serviceworkerevents_h__ */
+diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
+--- a/dom/workers/ServiceWorkerManager.cpp
++++ b/dom/workers/ServiceWorkerManager.cpp
+@@ -5200,9 +5200,36 @@ ServiceWorkerInfo::~ServiceWorkerInfo()
+ static uint64_t gServiceWorkerInfoCurrentID = 0;
+ 
+ uint64_t
+ ServiceWorkerInfo::GetNextID() const
+ {
+   return ++gServiceWorkerInfoCurrentID;
+ }
+ 
++// Background Sync
++
++/*NS_IMETHODIMP
++ServiceWorkerManager::SendSyncEvent(const nsACString& aOriginAttributes,
++                                    const nsACString& aScope,
++                                    const nsACString& aTag,
++                                    const bool aLastChance)*/
++NS_IMETHODIMP
++ServiceWorkerManager::SendSyncEvent()
++{
++/*  PrincipalOriginAttributes attrs;
++  if (!attrs.PopulateFromSuffix(aOriginAttributes)) {
++    return NS_ERROR_INVALID_ARG;
++  }
++
++  ServiceWorkerInfo* serviceWorker = GetActiveWorkerInfoForScope(attrs, aScope);
++  if (NS_WARN_IF(!serviceWorker)) {
++    return NS_ERROR_FAILURE;
++  }
++
++  RefPtr<ServiceWorkerRegistrationInfo> registration =
++    GetRegistration(serviceWorker->GetPrincipal(), aScope);
++*/
++  return NS_OK;
++  //return serviceWorker->WorkerPrivate()->SendSyncEvent(aData, registration);
++}
++
+ END_WORKERS_NAMESPACE
