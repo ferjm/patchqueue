@@ -97,7 +97,7 @@ diff --git a/dom/workers/ServiceWorkerEvents.cpp b/dom/workers/ServiceWorkerEven
  PushMessageData::~PushMessageData()
  {
  }
-@@ -1110,16 +1110,48 @@ NS_IMPL_RELEASE_INHERITED(PushEvent, Ext
+@@ -1110,16 +1110,52 @@ NS_IMPL_RELEASE_INHERITED(PushEvent, Ext
  
  NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(PushEvent)
  NS_INTERFACE_MAP_END_INHERITING(ExtendableEvent)
@@ -137,6 +137,10 @@ diff --git a/dom/workers/ServiceWorkerEvents.cpp b/dom/workers/ServiceWorkerEven
 +NS_INTERFACE_MAP_END_INHERITING(ExtendableEvent)
 +
 +NS_IMPL_CYCLE_COLLECTION_CLASS(SyncEvent)
++NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(SyncEvent, ExtendableEvent)
++NS_IMPL_CYCLE_COLLECTION_UNLINK_END
++NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(SyncEvent, ExtendableEvent)
++NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 +
  ExtendableMessageEvent::ExtendableMessageEvent(EventTarget* aOwner)
    : ExtendableEvent(aOwner)
