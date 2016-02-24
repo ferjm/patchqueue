@@ -95,12 +95,12 @@ new file mode 100644
 + Exposed=ServiceWorker]
 +interface SyncEvent : ExtendableEvent {
 +  readonly attribute DOMString tag;
-+  //readonly attribute boolean lastChance;
++  readonly attribute boolean lastChance;
 +};
 +
 +dictionary SyncEventInit : ExtendableEventInit {
 +  required DOMString tag;
-+  //boolean lastChance = false;
++  boolean lastChance; // =false
 +};
 diff --git a/dom/webidl/moz.build b/dom/webidl/moz.build
 --- a/dom/webidl/moz.build
@@ -172,9 +172,9 @@ diff --git a/dom/workers/ServiceWorkerEvents.cpp b/dom/workers/ServiceWorkerEven
 +  e->InitEvent(aType, aOptions.mBubbles, aOptions.mCancelable);
 +  e->SetTrusted(trusted);
 +  e->mTag = aOptions.mTag;
-+/*  if (aOptions.mLastEventId.WasPassed()) {
-+    e->mLastChance = aOptions.mLastEventId.Value();
-+  }*/
++  if (aOptions.mLastChance.WasPassed()) {
++    e->mLastChance = aOptions.mLastChance.Value();
++  }
 +  return e.forget();
 +}
 +
@@ -232,7 +232,7 @@ diff --git a/dom/workers/ServiceWorkerEvents.h b/dom/workers/ServiceWorkerEvents
 +class SyncEvent final : public ExtendableEvent
 +{
 +  nsString mTag;
-+  //bool mLastChance;
++  bool mLastChance;
 +
 +protected:
 +  explicit SyncEvent(mozilla::dom::EventTarget* aOwner);
@@ -272,12 +272,12 @@ diff --git a/dom/workers/ServiceWorkerEvents.h b/dom/workers/ServiceWorkerEvents
 +    return NS_OK;
 +  }
 +
-+  /*NS_IMETHOD
++  NS_IMETHOD
 +  GetLastChance(bool& aLastChance)
 +  {
 +    aLastChance = mLastChance;
 +    return NS_OK;
-+  }*/
++  }
 +};
 +
  END_WORKERS_NAMESPACE
@@ -405,7 +405,7 @@ diff --git a/dom/workers/ServiceWorkerPrivate.cpp b/dom/workers/ServiceWorkerPri
 +
 +    SyncEventInit sei;
 +    sei.mTag = mTag;
-+    // sei.mLastChance = mLastChance;
++    sei.mLastChance = mLastChance;
 +    sei.mBubbles = false;
 +    sei.mCancelable = false;
 +
