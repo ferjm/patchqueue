@@ -1,0 +1,52 @@
+# HG changeset patch
+# User Fernando Jimenez <ferjmoreno@gmail.com>
+# Parent  97100d73c2704030811d9ee6f4858de2d0d547f5
+Bug 1217544 - Implement one-off BackgroundSync API. Part 4: Sync event. r=baku
+
+diff --git a/dom/webidl/SyncEvent.webidl b/dom/webidl/SyncEvent.webidl
+new file mode 100644
+--- /dev/null
++++ b/dom/webidl/SyncEvent.webidl
+@@ -0,0 +1,21 @@
++/* -*- Mode: IDL; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
++ * You can obtain one at http://mozilla.org/MPL/2.0/.
++ *
++ * The origin of this IDL file is
++ * https://wicg.github.io/BackgroundSync/spec/
++ */
++
++[Constructor(DOMString type, optional SyncEventInit eventInitDict),
++ Func="mozilla::dom::SyncManager::PrefEnabled",
++ Exposed=ServiceWorker]
++interface SyncEvent : ExtendableEvent {
++  readonly attribute DOMString tag;
++  readonly attribute boolean lastChance;
++};
++
++dictionary SyncEventInit : ExtendableEventInit {
++  required DOMString tag;
++  boolean lastChance = false;
++};
+diff --git a/dom/webidl/moz.build b/dom/webidl/moz.build
+--- a/dom/webidl/moz.build
++++ b/dom/webidl/moz.build
+@@ -534,16 +534,17 @@ WEBIDL_FILES = [
+     'SVGTransformList.webidl',
+     'SVGTSpanElement.webidl',
+     'SVGUnitTypes.webidl',
+     'SVGURIReference.webidl',
+     'SVGUseElement.webidl',
+     'SVGViewElement.webidl',
+     'SVGZoomAndPan.webidl',
+     'SVGZoomEvent.webidl',
++    'SyncEvent.webidl',
+     'SyncManager.webidl',
+     'SystemUpdate.webidl',
+     'TCPServerSocket.webidl',
+     'TCPServerSocketEvent.webidl',
+     'TCPSocket.webidl',
+     'TCPSocketErrorEvent.webidl',
+     'TCPSocketEvent.webidl',
+     'Telephony.webidl',
