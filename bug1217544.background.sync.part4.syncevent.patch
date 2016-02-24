@@ -3,11 +3,37 @@
 # Parent  97100d73c2704030811d9ee6f4858de2d0d547f5
 Bug 1217544 - Implement one-off BackgroundSync API. Part 4: Sync event. r=baku
 
+diff --git a/dom/bindings/Bindings.conf b/dom/bindings/Bindings.conf
+--- a/dom/bindings/Bindings.conf
++++ b/dom/bindings/Bindings.conf
+@@ -1264,16 +1264,22 @@ DOMInterfaces = {
+ 'SVGUnitTypes' : {
+     'concrete': False,
+ },
+ 
+ 'SVGZoomAndPan' : {
+     'concrete': False,
+ },
+ 
++'SyncEvent': {
++    'headerFile': 'ServiceWorkerEvents.h',
++    'nativeType': 'mozilla::dom::workers::SyncEvent',
++    'workers': True
++},
++
+ 'Text': {
+     # Total hack to allow binding code to realize that nsTextNode can
+     # in fact be cast to Text.
+     'headerFile': 'nsTextNode.h',
+ },
+ 
+ 'TextDecoder': {
+     'wrapperCache': False
 diff --git a/dom/webidl/SyncEvent.webidl b/dom/webidl/SyncEvent.webidl
 new file mode 100644
 --- /dev/null
 +++ b/dom/webidl/SyncEvent.webidl
-@@ -0,0 +1,21 @@
+@@ -0,0 +1,20 @@
 +/* -*- Mode: IDL; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this file,
@@ -18,16 +44,15 @@ new file mode 100644
 + */
 +
 +[Constructor(DOMString type, optional SyncEventInit eventInitDict),
-+ Func="mozilla::dom::SyncManager::PrefEnabled",
 + Exposed=ServiceWorker]
 +interface SyncEvent : ExtendableEvent {
 +  readonly attribute DOMString tag;
-+  readonly attribute boolean lastChance;
++  //readonly attribute boolean lastChance;
 +};
 +
 +dictionary SyncEventInit : ExtendableEventInit {
 +  required DOMString tag;
-+  boolean lastChance = false;
++  //boolean lastChance = false;
 +};
 diff --git a/dom/webidl/moz.build b/dom/webidl/moz.build
 --- a/dom/webidl/moz.build
@@ -50,3 +75,137 @@ diff --git a/dom/webidl/moz.build b/dom/webidl/moz.build
      'TCPSocketErrorEvent.webidl',
      'TCPSocketEvent.webidl',
      'Telephony.webidl',
+diff --git a/dom/workers/ServiceWorkerEvents.cpp b/dom/workers/ServiceWorkerEvents.cpp
+--- a/dom/workers/ServiceWorkerEvents.cpp
++++ b/dom/workers/ServiceWorkerEvents.cpp
+@@ -1110,16 +1110,45 @@ NS_IMPL_RELEASE_INHERITED(PushEvent, Ext
+ 
+ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(PushEvent)
+ NS_INTERFACE_MAP_END_INHERITING(ExtendableEvent)
+ 
+ NS_IMPL_CYCLE_COLLECTION_INHERITED(PushEvent, ExtendableEvent, mData)
+ 
+ #endif /* ! MOZ_SIMPLEPUSH */
+ 
++// Background Sync
++
++SyncEvent::SyncEvent(EventTarget* aOwner)
++  : ExtendableEvent(aOwner)
++{
++}
++
++already_AddRefed<SyncEvent>
++SyncEvent::Constructor(mozilla::dom::EventTarget* aOwner,
++                       const nsAString& aType,
++                       const SyncEventInit& aOptions,
++                       ErrorResult& aRv)
++{
++  RefPtr<SyncEvent> e = new SyncEvent(aOwner);
++  bool trusted = e->Init(aOwner);
++  e->InitEvent(aType, aOptions.mBubbles, aOptions.mCancelable);
++  e->SetTrusted(trusted);
++  e->mTag = aOptions.mTag;
++/*  if (aOptions.mLastEventId.WasPassed()) {
++    e->mLastChance = aOptions.mLastEventId.Value();
++  }*/
++  return e.forget();
++}
++
++NS_IMPL_CYCLE_COLLECTION_CLASS(SyncEvent)
++
++NS_IMPL_ADDREF_INHERITED(SyncEvent, ExtendableEvent)
++NS_IMPL_RELEASE_INHERITED(SyncEvent, ExtendableEvent)
++
+ ExtendableMessageEvent::ExtendableMessageEvent(EventTarget* aOwner)
+   : ExtendableEvent(aOwner)
+   , mData(JS::UndefinedValue())
+ {
+   mozilla::HoldJSObjects(this);
+ }
+ 
+ ExtendableMessageEvent::~ExtendableMessageEvent()
+diff --git a/dom/workers/ServiceWorkerEvents.h b/dom/workers/ServiceWorkerEvents.h
+--- a/dom/workers/ServiceWorkerEvents.h
++++ b/dom/workers/ServiceWorkerEvents.h
+@@ -16,16 +16,18 @@
+ #include "mozilla/dom/workers/bindings/ServiceWorker.h"
+ 
+ #ifndef MOZ_SIMPLEPUSH
+ #include "mozilla/dom/PushEventBinding.h"
+ #include "mozilla/dom/PushMessageDataBinding.h"
+ #include "mozilla/dom/File.h"
+ #endif
+ 
++#include "mozilla/dom/SyncEventBinding.h"
++
+ #include "nsProxyRelease.h"
+ #include "nsContentUtils.h"
+ 
+ class nsIInterceptedChannel;
+ 
+ namespace mozilla {
+ namespace dom {
+ class Blob;
+@@ -317,11 +319,62 @@ public:
+ 
+   void SetPorts(MessagePortList* aPorts);
+ 
+   void SetSource(ServiceWorkerClient* aClient);
+ 
+   void SetSource(ServiceWorker* aServiceWorker);
+ };
+ 
++class SyncEvent final : public ExtendableEvent
++{
++  nsString mTag;
++  //bool mLastChance;
++
++protected:
++  explicit SyncEvent(mozilla::dom::EventTarget* aOwner);
++  ~SyncEvent() {}
++
++public:
++  NS_DECL_ISUPPORTS_INHERITED
++  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(SyncEvent, ExtendableEvent)
++  NS_FORWARD_TO_EVENT
++
++  virtual JSObject* WrapObjectInternal(JSContext* aCx,
++                                       JS::Handle<JSObject*> aGivenProto) override
++  {
++    return mozilla::dom::SyncEventBinding_workers::Wrap(aCx, this, aGivenProto);
++  }
++
++  static already_AddRefed<SyncEvent>
++  Constructor(mozilla::dom::EventTarget* aOwner,
++              const nsAString& aType,
++              const SyncEventInit& aOptions,
++              ErrorResult& aRv);
++
++  static already_AddRefed<SyncEvent>
++  Constructor(const GlobalObject& aGlobal,
++              const nsAString& aType,
++              const SyncEventInit& aOptions,
++              ErrorResult& aRv)
++  {
++    nsCOMPtr<EventTarget> owner = do_QueryInterface(aGlobal.GetAsSupports());
++    return Constructor(owner, aType, aOptions, aRv);
++  }
++
++  NS_IMETHOD
++  GetTag(nsAString& aTag)
++  {
++    aTag = mTag;
++    return NS_OK;
++  }
++
++  /*NS_IMETHOD
++  GetLastChance(bool& aLastChance)
++  {
++    aLastChance = mLastChance;
++    return NS_OK;
++  }*/
++};
++
+ END_WORKERS_NAMESPACE
+ 
+ #endif /* mozilla_dom_workers_serviceworkerevents_h__ */
