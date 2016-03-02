@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  882e91022821cabb43cd0b2919de03ff78106f6f
+# Parent  e7576b6f06f3f66149a9fa85c35814033a04a5e8
 Bug 1217544 - Implement one-off BackgroundSync API. Part 3: IPC. r=baku
 
 diff --git a/dom/sync/PSyncManager.ipdl b/dom/sync/PSyncManager.ipdl
@@ -40,10 +40,12 @@ diff --git a/dom/sync/SyncIPCTypes.ipdlh b/dom/sync/SyncIPCTypes.ipdlh
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncIPCTypes.ipdlh
-@@ -0,0 +1,53 @@
+@@ -0,0 +1,56 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++include PBackgroundSharedTypes;
 +
 +namespace mozilla {
 +namespace dom {
@@ -65,6 +67,7 @@ new file mode 100644
 +
 +struct SyncOp
 +{
++  PrincipalInfo mPrincipal;
 +  SyncOpArgs mArgs;
 +};
 +
@@ -97,7 +100,7 @@ new file mode 100644
 diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
 --- a/dom/sync/SyncManager.cpp
 +++ b/dom/sync/SyncManager.cpp
-@@ -1,79 +1,278 @@
+@@ -1,79 +1,250 @@
  /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
  /* vim: set ts=8 sts=2 et sw=2 tw=80: */
  /* This Source Code Form is subject to the terms of the Mozilla Public
@@ -238,34 +241,6 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
 +  }
 +};
 +
-+already_AddRefed<Promise>
-+SyncManager::ExecuteOp(const SyncOpArgs& aArgs, ErrorResult& aRv)
-+{
-+  if (mShuttingDown) {
-+    mPendingOperations.Clear();
-+    return nullptr;
-+  }
-+
-+  RefPtr<Promise> p = Promise::Create(mGlobal, aRv);
-+  if (NS_WARN_IF(aRv.Failed())) {
-+    return nullptr;
-+  }
-+
-+  nsAutoPtr<SyncOp> op(new SyncOp(aArgs));
-+  RefPtr<SyncOpRunnable> runnable = new SyncOpRunnable(p, op);
-+
-+  if (mActor) {
-+    runnable->SetActor(mActor);
-+    if (NS_FAILED(NS_DispatchToCurrentThread(runnable))) {
-+      NS_WARNING("Failed to dispatch to the current thread");
-+    }
-+  } else {
-+    mPendingOperations.AppendElement(runnable);
-+  }
-+
-+  return p.forget();
-+}
-+
  // SyncManager
  
  // static
@@ -383,7 +358,7 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
  {
    return SyncManagerBinding::Wrap(aCx, this, aGivenProto);
  }
-@@ -96,42 +295,111 @@ SyncManager::PrefEnabled(JSContext* aCx,
+@@ -96,42 +267,139 @@ SyncManager::PrefEnabled(JSContext* aCx,
    WorkerPrivate* workerPrivate = GetWorkerPrivateFromContext(aCx);
    if (!workerPrivate) {
      return false;
@@ -468,23 +443,45 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
 +
 +  return NS_OK;
 +}
-+
-+// WebIDL interface methods.
  
  already_AddRefed<Promise>
 -SyncManager::Register(const nsAString& aName, ErrorResult& aRv)
-+SyncManager::Register(const nsAString& aTag, ErrorResult& aRv)
++SyncManager::ExecuteOp(const SyncOpArgs& aArgs, ErrorResult& aRv)
  {
--  RefPtr<Promise> p = Promise::Create(mGlobal, aRv);
--  if (NS_WARN_IF(aRv.Failed())) {
--    return nullptr;
--  }
--
--  return p.forget();
-+  const SyncRegisterArgs args((nsString(aTag)));
-+  return ExecuteOp(SyncOpArgs(args), aRv);
++  if (mShuttingDown) {
++    mPendingOperations.Clear();
++    return nullptr;
++  }
++
+   RefPtr<Promise> p = Promise::Create(mGlobal, aRv);
+   if (NS_WARN_IF(aRv.Failed())) {
+     return nullptr;
+   }
+ 
++  nsAutoPtr<SyncOp> op(new SyncOp(*mPrincipalInfo, aArgs));
++  RefPtr<SyncOpRunnable> runnable = new SyncOpRunnable(p, op);
++
++  if (mActor) {
++    runnable->SetActor(mActor);
++    if (NS_FAILED(NS_DispatchToCurrentThread(runnable))) {
++      NS_WARNING("Failed to dispatch to the current thread");
++    }
++  } else {
++    mPendingOperations.AppendElement(runnable);
++  }
++
+   return p.forget();
  }
  
++// WebIDL interface methods.
++
++already_AddRefed<Promise>
++SyncManager::Register(const nsAString& aTag, ErrorResult& aRv)
++{
++  const SyncRegisterArgs args((nsString(aTag)));
++  return ExecuteOp(SyncOpArgs(args), aRv);
++}
++
  already_AddRefed<Promise>
  SyncManager::GetTags(ErrorResult& aRv)
  {
@@ -723,7 +720,7 @@ new file mode 100644
 +  nsresult rv = StorePendingRequest(aPromise, requestId);
 +  NS_ENSURE_SUCCESS(rv, rv);
 +
-+  Unused << SendRequest(requestId, aOp->mArgs());
++  Unused << SendRequest(requestId, *aOp);
 +
 +  return NS_OK;
 +}
