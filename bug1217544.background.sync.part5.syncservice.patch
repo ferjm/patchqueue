@@ -1,12 +1,12 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  97100d73c2704030811d9ee6f4858de2d0d547f5
+# Parent  2897cb942c87081c44e23028f0f4849363ce708c
 Bug 1217544 - Implement one-off BackgroundSync API. Part 5: SyncService. r=baku
 
 diff --git a/dom/sync/SyncManagerParent.cpp b/dom/sync/SyncManagerParent.cpp
 --- a/dom/sync/SyncManagerParent.cpp
 +++ b/dom/sync/SyncManagerParent.cpp
-@@ -1,45 +1,56 @@
+@@ -1,49 +1,62 @@
  /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
  /* vim: set ts=8 sts=2 et sw=2 tw=80: */
  /* This Source Code Form is subject to the terms of the Mozilla Public
@@ -58,12 +58,19 @@ diff --git a/dom/sync/SyncManagerParent.cpp b/dom/sync/SyncManagerParent.cpp
    switch(aOp.mArgs().type()) {
      case SyncOpArgs::TSyncRegisterArgs:
      {
-       // XXX Do registration.
+-      // XXX Do registration.
++      // XXX this needs to be async
++      mService->Register(aOp.mPrincipal(),
++          aOp.mArgs().get_SyncRegisterArgs().mTag());
        const SyncRegisterResponse response(true);
        //const SyncOpError response(static_cast<uint32_t>(NS_ERROR_FAILURE));
        Unused << SendResponse(aRequestId, response);
        break;
-@@ -59,15 +70,19 @@ bool SyncManagerParent::RecvRequest(cons
+     }
+     case SyncOpArgs::TSyncGetTagsArgs:
+     {
+       //XXX Do GetTags.
+@@ -59,15 +72,19 @@ bool SyncManagerParent::RecvRequest(cons
    }
    return true;
  }
@@ -125,7 +132,7 @@ diff --git a/dom/sync/SyncService.cpp b/dom/sync/SyncService.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncService.cpp
-@@ -0,0 +1,83 @@
+@@ -0,0 +1,85 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -195,14 +202,16 @@ new file mode 100644
 +}
 +
 +bool
-+SyncService::Register(nsString& aTag)
++SyncService::Register(const PrincipalInfo& aPrincipal,
++                      const nsString& aTag)
 +{
 +  // XXX implement me.
 +  return true;
 +}
 +
 +void
-+SyncService::GetTags(nsTArray<nsString>& aTags)
++SyncService::GetTags(const PrincipalInfo& aPrincipal,
++                     nsTArray<nsString>& aTags)
 +{
 +  // XXX implement me.
 +}
@@ -213,7 +222,7 @@ diff --git a/dom/sync/SyncService.h b/dom/sync/SyncService.h
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncService.h
-@@ -0,0 +1,43 @@
+@@ -0,0 +1,42 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -242,9 +251,8 @@ new file mode 100644
 +  void RegisterActor(SyncManagerParent* aParent);
 +  void UnregisterActor(SyncManagerParent* aParent);
 +
-+  // XXX need to give principal or origin
-+  bool Register(nsString& aTag);
-+  void GetTags(nsTArray<nsString>& aTags);
++  bool Register(const PrincipalInfo& aPrincipal, const nsString& aTag);
++  void GetTags(const PrincipalInfo& aPrincipal, nsTArray<nsString>& aTags);
 +
 +private:
 +  SyncService();
