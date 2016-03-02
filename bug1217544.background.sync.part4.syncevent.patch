@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  97100d73c2704030811d9ee6f4858de2d0d547f5
+# Parent  68e97c6f3918b005c3852d31a6fd92aeb0bc9ad5
 Bug 1217544 - Implement one-off BackgroundSync API. Part 4: Sync event. r=baku
 
 diff --git a/dom/bindings/Bindings.conf b/dom/bindings/Bindings.conf
@@ -51,7 +51,7 @@ diff --git a/dom/interfaces/base/nsIServiceWorkerManager.idl b/dom/interfaces/ba
     * the stack. This means you must call this from content code 'within'
     * a window.
     *
-@@ -186,19 +186,24 @@ interface nsIServiceWorkerManager : nsIS
+@@ -186,19 +186,23 @@ interface nsIServiceWorkerManager : nsIS
                                    in AString aData,
                                    in AString aBehavior);
    [optional_argc] void sendPushEvent(in ACString aOriginAttributes,
@@ -67,11 +67,10 @@ diff --git a/dom/interfaces/base/nsIServiceWorkerManager.idl b/dom/interfaces/ba
  
    bool shouldReportToWindow(in mozIDOMWindowProxy aWindow, in ACString aScope);
 +
-+/*  void sendSyncEvent(in ACString aOriginAttributes,
++  void sendSyncEvent(in ACString aOriginAttributes,
 +                     in ACString scope,
 +                     in ACString aTag,
-+                     in boolean aLastChance);*/
-+  void sendSyncEvent();
++                     in boolean aLastChance);
  };
  
  %{ C++
@@ -282,7 +281,7 @@ diff --git a/dom/workers/ServiceWorkerEvents.h b/dom/workers/ServiceWorkerEvents
 diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
 --- a/dom/workers/ServiceWorkerManager.cpp
 +++ b/dom/workers/ServiceWorkerManager.cpp
-@@ -5200,9 +5200,36 @@ ServiceWorkerInfo::~ServiceWorkerInfo()
+@@ -5200,9 +5200,33 @@ ServiceWorkerInfo::~ServiceWorkerInfo()
  static uint64_t gServiceWorkerInfoCurrentID = 0;
  
  uint64_t
@@ -293,15 +292,13 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
  
 +// Background Sync
 +
-+/*NS_IMETHODIMP
++NS_IMETHODIMP
 +ServiceWorkerManager::SendSyncEvent(const nsACString& aOriginAttributes,
 +                                    const nsACString& aScope,
 +                                    const nsACString& aTag,
-+                                    const bool aLastChance)*/
-+NS_IMETHODIMP
-+ServiceWorkerManager::SendSyncEvent()
++                                    const bool aLastChance)
 +{
-+/*  PrincipalOriginAttributes attrs;
++  PrincipalOriginAttributes attrs;
 +  if (!attrs.PopulateFromSuffix(aOriginAttributes)) {
 +    return NS_ERROR_INVALID_ARG;
 +  }
@@ -313,9 +310,8 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
 +
 +  RefPtr<ServiceWorkerRegistrationInfo> registration =
 +    GetRegistration(serviceWorker->GetPrincipal(), aScope);
-+*/
-+  return NS_OK;
-+  //return serviceWorker->WorkerPrivate()->SendSyncEvent(aData, registration);
++
++  return serviceWorker->WorkerPrivate()->SendSyncEvent(aData, registration);
 +}
 +
  END_WORKERS_NAMESPACE
