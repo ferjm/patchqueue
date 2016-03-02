@@ -281,7 +281,7 @@ diff --git a/dom/workers/ServiceWorkerEvents.h b/dom/workers/ServiceWorkerEvents
 diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
 --- a/dom/workers/ServiceWorkerManager.cpp
 +++ b/dom/workers/ServiceWorkerManager.cpp
-@@ -5200,9 +5200,33 @@ ServiceWorkerInfo::~ServiceWorkerInfo()
+@@ -5200,9 +5200,35 @@ ServiceWorkerInfo::~ServiceWorkerInfo()
  static uint64_t gServiceWorkerInfoCurrentID = 0;
  
  uint64_t
@@ -303,7 +303,8 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
 +    return NS_ERROR_INVALID_ARG;
 +  }
 +
-+  ServiceWorkerInfo* serviceWorker = GetActiveWorkerInfoForScope(attrs, aScope);
++  ServiceWorkerInfo* serviceWorker =
++    GetActiveWorkerInfoForScope(attrs, aScope);
 +  if (NS_WARN_IF(!serviceWorker)) {
 +    return NS_ERROR_FAILURE;
 +  }
@@ -311,7 +312,8 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
 +  RefPtr<ServiceWorkerRegistrationInfo> registration =
 +    GetRegistration(serviceWorker->GetPrincipal(), aScope);
 +
-+  return serviceWorker->WorkerPrivate()->SendSyncEvent(aData, registration);
++  return serviceWorker->WorkerPrivate()->SendSyncEvent(
++      NS_ConvertUTF8toUTF16(aTag), aLastChance, registration);
 +}
 +
  END_WORKERS_NAMESPACE
