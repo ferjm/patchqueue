@@ -69,13 +69,34 @@ diff --git a/dom/interfaces/base/nsIServiceWorkerManager.idl b/dom/interfaces/ba
 +
 +  void sendSyncEvent(in ACString aOriginAttributes,
 +                     in ACString scope,
-+                     in ACString aTag,
++                     in AString aTag,
 +                     in boolean aLastChance);
  };
  
  %{ C++
  #define SERVICEWORKERMANAGER_CONTRACTID "@mozilla.org/serviceworkers/manager;1"
  %}
+diff --git a/dom/sync/SyncIPCTypes.ipdlh b/dom/sync/SyncIPCTypes.ipdlh
+--- a/dom/sync/SyncIPCTypes.ipdlh
++++ b/dom/sync/SyncIPCTypes.ipdlh
+@@ -4,16 +4,17 @@
+ 
+ include PBackgroundSharedTypes;
+ 
+ namespace mozilla {
+ namespace dom {
+ 
+ struct SyncRegisterArgs
+ {
++  nsString mScope;
+   nsString mTag;
+ };
+ 
+ struct SyncGetTagsArgs
+ {
+ };
+ 
+ union SyncOpArgs
 diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
 --- a/dom/sync/SyncManager.cpp
 +++ b/dom/sync/SyncManager.cpp
@@ -163,6 +184,25 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
    } else {
      MOZ_ALWAYS_TRUE(BackgroundChild::GetOrCreateForCurrentThread(this));
    }
+@@ -376,17 +382,17 @@ SyncManager::ExecuteOp(const SyncOpArgs&
+   return p.forget();
+ }
+ 
+ // WebIDL interface methods.
+ 
+ already_AddRefed<Promise>
+ SyncManager::Register(const nsAString& aTag, ErrorResult& aRv)
+ {
+-  const SyncRegisterArgs args((nsString(aTag)));
++  const SyncRegisterArgs args(mScope, (nsString(aTag)));
+   return ExecuteOp(SyncOpArgs(args), aRv);
+ }
+ 
+ already_AddRefed<Promise>
+ SyncManager::GetTags(ErrorResult& aRv)
+ {
+   const SyncGetTagsArgs args;
+   return ExecuteOp(SyncOpArgs(args), aRv);
 diff --git a/dom/sync/SyncManager.h b/dom/sync/SyncManager.h
 --- a/dom/sync/SyncManager.h
 +++ b/dom/sync/SyncManager.h
@@ -277,7 +317,7 @@ diff --git a/dom/webidl/moz.build b/dom/webidl/moz.build
 diff --git a/dom/workers/PServiceWorkerManager.ipdl b/dom/workers/PServiceWorkerManager.ipdl
 --- a/dom/workers/PServiceWorkerManager.ipdl
 +++ b/dom/workers/PServiceWorkerManager.ipdl
-@@ -28,18 +28,21 @@ parent:
+@@ -28,18 +28,23 @@ parent:
    async PropagateRemove(nsCString host);
  
    async PropagateRemoveAll();
@@ -292,7 +332,9 @@ diff --git a/dom/workers/PServiceWorkerManager.ipdl b/dom/workers/PServiceWorker
    async NotifyUnregister(PrincipalInfo principalInfo, nsString scope);
    async NotifyRemove(nsCString host);
    async NotifyRemoveAll();
-+  async SendSyncEvent(PrincipalInfo principalInfo, nsString tag,
++  async SendSyncEvent(nsString originAttributes,
++                      nsString scope,
++                      nsString tag,
 +                      bool lastChance);
  
    async __delete__();
@@ -473,7 +515,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
 +NS_IMETHODIMP
 +ServiceWorkerManager::SendSyncEvent(const nsACString& aOriginAttributes,
 +                                    const nsACString& aScope,
-+                                    const nsACString& aTag,
++                                    const nsAString& aTag,
 +                                    const bool aLastChance)
 +{
 +  PrincipalOriginAttributes attrs;
@@ -490,15 +532,15 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
 +  RefPtr<ServiceWorkerRegistrationInfo> registration =
 +    GetRegistration(serviceWorker->GetPrincipal(), aScope);
 +
-+  return serviceWorker->WorkerPrivate()->SendSyncEvent(
-+      NS_ConvertUTF8toUTF16(aTag), aLastChance, registration);
++  return serviceWorker->WorkerPrivate()->SendSyncEvent(aTag, aLastChance,
++                                                       registration);
 +}
 +
  END_WORKERS_NAMESPACE
 diff --git a/dom/workers/ServiceWorkerManagerChild.cpp b/dom/workers/ServiceWorkerManagerChild.cpp
 --- a/dom/workers/ServiceWorkerManagerChild.cpp
 +++ b/dom/workers/ServiceWorkerManagerChild.cpp
-@@ -90,11 +90,27 @@ ServiceWorkerManagerChild::RecvNotifyRem
+@@ -90,11 +90,31 @@ ServiceWorkerManagerChild::RecvNotifyRem
  
    RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
    MOZ_ASSERT(swm);
@@ -508,9 +550,11 @@ diff --git a/dom/workers/ServiceWorkerManagerChild.cpp b/dom/workers/ServiceWork
  }
  
 +bool
-+ServiceWorkerManagerChild::RecvSendSyncEvent(const PrincipalInfo& aPrincipalInfo,
-+                                             const nsString& aTag,
-+                                             const bool& aLastChance)
++ServiceWorkerManagerChild::RecvSendSyncEvent(
++    const nsString& aOriginAttributes,
++    const nsString& aScope,
++    const nsString& aTag,
++    const bool& aLastChance)
 +{
 +  if (mShuttingDown) {
 +    return true;
@@ -519,7 +563,9 @@ diff --git a/dom/workers/ServiceWorkerManagerChild.cpp b/dom/workers/ServiceWork
 +  RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
 +  MOZ_ASSERT(swm);
 +
-+  //swm->SendSyncEvent(aPrincipal, aTag, aLastChance);
++  swm->SendSyncEvent(NS_ConvertUTF16toUTF8(aOriginAttributes),
++                     NS_ConvertUTF16toUTF8(aScope),
++                     aTag, aLastChance);
 +  return true;
 +}
 +
@@ -529,7 +575,7 @@ diff --git a/dom/workers/ServiceWorkerManagerChild.cpp b/dom/workers/ServiceWork
 diff --git a/dom/workers/ServiceWorkerManagerChild.h b/dom/workers/ServiceWorkerManagerChild.h
 --- a/dom/workers/ServiceWorkerManagerChild.h
 +++ b/dom/workers/ServiceWorkerManagerChild.h
-@@ -41,16 +41,20 @@ public:
+@@ -41,16 +41,21 @@ public:
  
    virtual bool RecvNotifyUnregister(const PrincipalInfo& aPrincipalInfo,
                                      const nsString& aScope) override;
@@ -538,7 +584,8 @@ diff --git a/dom/workers/ServiceWorkerManagerChild.h b/dom/workers/ServiceWorker
  
    virtual bool RecvNotifyRemoveAll() override;
  
-+  virtual bool RecvSendSyncEvent(const PrincipalInfo& aPrincipalInfo,
++  virtual bool RecvSendSyncEvent(const nsString& aOriginAttributes,
++                                 const nsString& aScope,
 +                                 const nsString& aTag,
 +                                 const bool& aLastChance) override;
 +
