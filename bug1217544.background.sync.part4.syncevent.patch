@@ -317,7 +317,7 @@ diff --git a/dom/webidl/moz.build b/dom/webidl/moz.build
 diff --git a/dom/workers/PServiceWorkerManager.ipdl b/dom/workers/PServiceWorkerManager.ipdl
 --- a/dom/workers/PServiceWorkerManager.ipdl
 +++ b/dom/workers/PServiceWorkerManager.ipdl
-@@ -28,18 +28,23 @@ parent:
+@@ -28,18 +28,22 @@ parent:
    async PropagateRemove(nsCString host);
  
    async PropagateRemoveAll();
@@ -332,11 +332,11 @@ diff --git a/dom/workers/PServiceWorkerManager.ipdl b/dom/workers/PServiceWorker
    async NotifyUnregister(PrincipalInfo principalInfo, nsString scope);
    async NotifyRemove(nsCString host);
    async NotifyRemoveAll();
-+  async SendSyncEvent(nsString originAttributes,
-+                      nsString scope,
-+                      nsString tag,
-+                      bool lastChance);
- 
+-
++  async NotifySyncEvent(nsString originAttributes,
++                        nsString scope,
++                        nsString tag,
++                        bool lastChance);
    async __delete__();
  };
  
@@ -550,7 +550,7 @@ diff --git a/dom/workers/ServiceWorkerManagerChild.cpp b/dom/workers/ServiceWork
  }
  
 +bool
-+ServiceWorkerManagerChild::RecvSendSyncEvent(
++ServiceWorkerManagerChild::RecvNotifySyncEvent(
 +    const nsString& aOriginAttributes,
 +    const nsString& aScope,
 +    const nsString& aTag,
@@ -584,10 +584,10 @@ diff --git a/dom/workers/ServiceWorkerManagerChild.h b/dom/workers/ServiceWorker
  
    virtual bool RecvNotifyRemoveAll() override;
  
-+  virtual bool RecvSendSyncEvent(const nsString& aOriginAttributes,
-+                                 const nsString& aScope,
-+                                 const nsString& aTag,
-+                                 const bool& aLastChance) override;
++  virtual bool RecvNotifySyncEvent(const nsString& aOriginAttributes,
++                                   const nsString& aScope,
++                                   const nsString& aTag,
++                                   const bool& aLastChance) override;
 +
  private:
    ServiceWorkerManagerChild()
