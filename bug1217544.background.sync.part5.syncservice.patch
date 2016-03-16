@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  2897cb942c87081c44e23028f0f4849363ce708c
+# Parent  06d61638d4bcafcaee355e8c922f956b9f93e676
 Bug 1217544 - Implement one-off BackgroundSync API. Part 5: SyncService. r=baku
 
 diff --git a/dom/sync/SyncManagerParent.cpp b/dom/sync/SyncManagerParent.cpp
@@ -132,7 +132,7 @@ diff --git a/dom/sync/SyncService.cpp b/dom/sync/SyncService.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncService.cpp
-@@ -0,0 +1,85 @@
+@@ -0,0 +1,112 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -163,7 +163,7 @@ new file mode 100644
 +{
 +  AssertIsOnBackgroundThread();
 +  MOZ_ASSERT(sInstance == this);
-+  MOZ_ASSERT(mActors.Count() == 0);
++  MOZ_ASSERT(mSyncManagerActors.Count() == 0);
 +
 +  sInstance = nullptr;
 +}
@@ -186,9 +186,9 @@ new file mode 100644
 +{
 +  AssertIsOnBackgroundThread();
 +  MOZ_ASSERT(aParent);
-+  MOZ_ASSERT(!mActors.Contains(aParent));
++  MOZ_ASSERT(!mSyncManagerActors.Contains(aParent));
 +
-+  mActors.PutEntry(aParent);
++  mSyncManagerActors.PutEntry(aParent);
 +}
 +
 +void
@@ -196,9 +196,29 @@ new file mode 100644
 +{
 +  AssertIsOnBackgroundThread();
 +  MOZ_ASSERT(aParent);
-+  MOZ_ASSERT(mActors.Contains(aParent));
++  MOZ_ASSERT(mSyncManagerActors.Contains(aParent));
 +
-+  mActors.RemoveEntry(aParent);
++  mSyncManagerActors.RemoveEntry(aParent);
++}
++
++void
++SyncService::RegisterActor(workers::ServiceWorkerManagerParent* aParent)
++{
++  AssertIsOnBackgroundThread();
++  MOZ_ASSERT(aParent);
++  MOZ_ASSERT(!mServiceWorkerManagerActors.Contains(aParent));
++
++  mServiceWorkerManagerActors.PutEntry(aParent);
++}
++
++void
++SyncService::UnregisterActor(workers::ServiceWorkerManagerParent* aParent)
++{
++  AssertIsOnBackgroundThread();
++  MOZ_ASSERT(aParent);
++  MOZ_ASSERT(mServiceWorkerManagerActors.Contains(aParent));
++
++  mServiceWorkerManagerActors.RemoveEntry(aParent);
 +}
 +
 +bool
@@ -206,6 +226,13 @@ new file mode 100644
 +                      const nsString& aTag)
 +{
 +  // XXX implement me.
++
++  /* XXX REMOVE ME - Sync event test.
++  for (auto iter = mServiceWorkerManagerActors.Iter(); !iter.Done(); iter.Next()) {
++    RefPtr<ServiceWorkerManagerParent> parent = iter.Get()->GetKey();
++    MOZ_ASSERT(parent);
++    Unused << parent->SendNotifySyncEvent(aData);
++  }*/
 +  return true;
 +}
 +
@@ -222,7 +249,7 @@ diff --git a/dom/sync/SyncService.h b/dom/sync/SyncService.h
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncService.h
-@@ -0,0 +1,42 @@
+@@ -0,0 +1,52 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -235,9 +262,14 @@ new file mode 100644
 +#include "nsISupportsImpl.h"
 +#include "nsHashKeys.h"
 +#include "nsTHashtable.h"
++#include "ServiceWorkerManagerParent.h"
 +
 +namespace mozilla {
 +namespace dom {
++
++namespace workers {
++class ServiceWorkerManagerParent;
++} // namespace workers
 +
 +class SyncManagerParent;
 +
@@ -251,6 +283,9 @@ new file mode 100644
 +  void RegisterActor(SyncManagerParent* aParent);
 +  void UnregisterActor(SyncManagerParent* aParent);
 +
++  void RegisterActor(workers::ServiceWorkerManagerParent* aParent);
++  void UnregisterActor(workers::ServiceWorkerManagerParent* aParent);
++
 +  bool Register(const PrincipalInfo& aPrincipal, const nsString& aTag);
 +  void GetTags(const PrincipalInfo& aPrincipal, nsTArray<nsString>& aTags);
 +
@@ -258,7 +293,9 @@ new file mode 100644
 +  SyncService();
 +  ~SyncService();
 +
-+  nsTHashtable<nsPtrHashKey<SyncManagerParent>> mActors;
++  nsTHashtable<nsPtrHashKey<SyncManagerParent>> mSyncManagerActors;
++  nsTHashtable<nsPtrHashKey<workers::ServiceWorkerManagerParent>>
++    mServiceWorkerManagerActors;
 +};
 +
 +} // namespace dom
@@ -288,3 +325,219 @@ diff --git a/dom/sync/moz.build b/dom/sync/moz.build
  ]
  
  LOCAL_INCLUDES += [
+diff --git a/dom/workers/ServiceWorkerManagerParent.cpp b/dom/workers/ServiceWorkerManagerParent.cpp
+--- a/dom/workers/ServiceWorkerManagerParent.cpp
++++ b/dom/workers/ServiceWorkerManagerParent.cpp
+@@ -1,16 +1,17 @@
+ /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+ /* vim: set ts=8 sts=2 et sw=2 tw=80: */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "ServiceWorkerManagerParent.h"
+ #include "ServiceWorkerManagerService.h"
++#include "SyncService.h"
+ #include "mozilla/AppProcessChecker.h"
+ #include "mozilla/dom/ContentParent.h"
+ #include "mozilla/dom/ServiceWorkerRegistrar.h"
+ #include "mozilla/ipc/BackgroundParent.h"
+ #include "mozilla/ipc/BackgroundUtils.h"
+ #include "mozilla/unused.h"
+ #include "nsThreadUtils.h"
+ 
+@@ -143,22 +144,24 @@ private:
+   PrincipalInfo mPrincipalInfo;
+   RefPtr<nsRunnable> mCallback;
+   nsCOMPtr<nsIThread> mBackgroundThread;
+ };
+ 
+ } // namespace
+ 
+ ServiceWorkerManagerParent::ServiceWorkerManagerParent()
+-  : mService(ServiceWorkerManagerService::GetOrCreate())
++  : mServiceWorkerService(ServiceWorkerManagerService::GetOrCreate())
++  , mSyncService(SyncService::GetOrCreate())
+   , mID(++sServiceWorkerManagerParentID)
+   , mActorDestroyed(false)
+ {
+   AssertIsOnBackgroundThread();
+-  mService->RegisterActor(this);
++  mServiceWorkerService->RegisterActor(this);
++  mSyncService->RegisterActor(this);
+ }
+ 
+ ServiceWorkerManagerParent::~ServiceWorkerManagerParent()
+ {
+   AssertIsOnBackgroundThread();
+ }
+ 
+ already_AddRefed<ContentParent>
+@@ -243,89 +246,89 @@ ServiceWorkerManagerParent::RecvUnregist
+ }
+ 
+ bool
+ ServiceWorkerManagerParent::RecvPropagateSoftUpdate(const PrincipalOriginAttributes& aOriginAttributes,
+                                                     const nsString& aScope)
+ {
+   AssertIsOnBackgroundThread();
+ 
+-  if (NS_WARN_IF(!mService)) {
++  if (NS_WARN_IF(!mServiceWorkerService)) {
+     return false;
+   }
+ 
+-  mService->PropagateSoftUpdate(mID, aOriginAttributes, aScope);
++  mServiceWorkerService->PropagateSoftUpdate(mID, aOriginAttributes, aScope);
+   return true;
+ }
+ 
+ bool
+ ServiceWorkerManagerParent::RecvPropagateUnregister(const PrincipalInfo& aPrincipalInfo,
+                                                     const nsString& aScope)
+ {
+   AssertIsOnBackgroundThread();
+ 
+-  if (NS_WARN_IF(!mService)) {
++  if (NS_WARN_IF(!mServiceWorkerService)) {
+     return false;
+   }
+ 
+-  mService->PropagateUnregister(mID, aPrincipalInfo, aScope);
++  mServiceWorkerService->PropagateUnregister(mID, aPrincipalInfo, aScope);
+   return true;
+ }
+ 
+ bool
+ ServiceWorkerManagerParent::RecvPropagateRemove(const nsCString& aHost)
+ {
+   AssertIsOnBackgroundThread();
+ 
+-  if (NS_WARN_IF(!mService)) {
++  if (NS_WARN_IF(!mServiceWorkerService)) {
+     return false;
+   }
+ 
+-  mService->PropagateRemove(mID, aHost);
++  mServiceWorkerService->PropagateRemove(mID, aHost);
+   return true;
+ }
+ 
+ bool
+ ServiceWorkerManagerParent::RecvPropagateRemoveAll()
+ {
+   AssertIsOnBackgroundThread();
+ 
+-  if (NS_WARN_IF(!mService)) {
++  if (NS_WARN_IF(!mServiceWorkerService)) {
+     return false;
+   }
+ 
+-  mService->PropagateRemoveAll(mID);
++  mServiceWorkerService->PropagateRemoveAll(mID);
+   return true;
+ }
+ 
+ bool
+ ServiceWorkerManagerParent::RecvShutdown()
+ {
+   AssertIsOnBackgroundThread();
+ 
+-  if (NS_WARN_IF(!mService)) {
++  if (NS_WARN_IF(!mServiceWorkerService)) {
+     return false;
+   }
+ 
+-  mService->UnregisterActor(this);
+-  mService = nullptr;
++  mServiceWorkerService->UnregisterActor(this);
++  mServiceWorkerService = nullptr;
+ 
+   Unused << Send__delete__(this);
+   return true;
+ }
+ 
+ void
+ ServiceWorkerManagerParent::ActorDestroy(ActorDestroyReason aWhy)
+ {
+   AssertIsOnBackgroundThread();
+ 
+   mActorDestroyed = true;
+ 
+-  if (mService) {
+-    // This object is about to be released and with it, also mService will be
++  if (mServiceWorkerService) {
++    // This object is about to be released and with it, also mServiceWorkerService will be
+     // released too.
+-    mService->UnregisterActor(this);
++    mServiceWorkerService->UnregisterActor(this);
+   }
+ }
+ 
+ } // namespace workers
+ } // namespace dom
+ } // namespace mozilla
+diff --git a/dom/workers/ServiceWorkerManagerParent.h b/dom/workers/ServiceWorkerManagerParent.h
+--- a/dom/workers/ServiceWorkerManagerParent.h
++++ b/dom/workers/ServiceWorkerManagerParent.h
+@@ -13,16 +13,19 @@ namespace mozilla {
+ 
+ class PrincipalOriginAttributes;
+ 
+ namespace ipc {
+ class BackgroundParentImpl;
+ } // namespace ipc
+ 
+ namespace dom {
++
++class SyncService;
++
+ namespace workers {
+ 
+ class ServiceWorkerManagerService;
+ 
+ class ServiceWorkerManagerParent final : public PServiceWorkerManagerParent
+ {
+   friend class mozilla::ipc::BackgroundParentImpl;
+ 
+@@ -59,17 +62,18 @@ private:
+   virtual bool RecvPropagateRemove(const nsCString& aHost) override;
+ 
+   virtual bool RecvPropagateRemoveAll() override;
+ 
+   virtual bool RecvShutdown() override;
+ 
+   virtual void ActorDestroy(ActorDestroyReason aWhy) override;
+ 
+-  RefPtr<ServiceWorkerManagerService> mService;
++  RefPtr<ServiceWorkerManagerService> mServiceWorkerService;
++  RefPtr<SyncService> mSyncService;
+ 
+   // We use this ID in the Service in order to avoid the sending of messages to
+   // ourself.
+   uint64_t mID;
+ 
+   bool mActorDestroyed;
+ };
+ 
+diff --git a/dom/workers/moz.build b/dom/workers/moz.build
+--- a/dom/workers/moz.build
++++ b/dom/workers/moz.build
+@@ -92,16 +92,17 @@ IPDL_SOURCES += [
+     'PServiceWorkerManager.ipdl',
+     'ServiceWorkerRegistrarTypes.ipdlh',
+ ]
+ 
+ LOCAL_INCLUDES += [
+     '../base',
+     '../system',
+     '/dom/base',
++    '/dom/sync',
+     '/xpcom/build',
+     '/xpcom/threads',
+ ]
+ 
+ include('/ipc/chromium/chromium-config.mozbuild')
+ 
+ FINAL_LIBRARY = 'xul'
+ 
