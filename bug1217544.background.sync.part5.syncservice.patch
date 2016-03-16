@@ -6,7 +6,7 @@ Bug 1217544 - Implement one-off BackgroundSync API. Part 5: SyncService. r=baku
 diff --git a/dom/sync/SyncManagerParent.cpp b/dom/sync/SyncManagerParent.cpp
 --- a/dom/sync/SyncManagerParent.cpp
 +++ b/dom/sync/SyncManagerParent.cpp
-@@ -1,49 +1,62 @@
+@@ -1,49 +1,63 @@
  /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
  /* vim: set ts=8 sts=2 et sw=2 tw=80: */
  /* This Source Code Form is subject to the terms of the Mozilla Public
@@ -61,6 +61,7 @@ diff --git a/dom/sync/SyncManagerParent.cpp b/dom/sync/SyncManagerParent.cpp
 -      // XXX Do registration.
 +      // XXX this needs to be async
 +      mService->Register(aOp.mPrincipal(),
++          aOp.mArgs().get_SyncRegisterArgs().mScope(),
 +          aOp.mArgs().get_SyncRegisterArgs().mTag());
        const SyncRegisterResponse response(true);
        //const SyncOpError response(static_cast<uint32_t>(NS_ERROR_FAILURE));
@@ -70,7 +71,7 @@ diff --git a/dom/sync/SyncManagerParent.cpp b/dom/sync/SyncManagerParent.cpp
      case SyncOpArgs::TSyncGetTagsArgs:
      {
        //XXX Do GetTags.
-@@ -59,15 +72,19 @@ bool SyncManagerParent::RecvRequest(cons
+@@ -59,15 +73,19 @@ bool SyncManagerParent::RecvRequest(cons
    }
    return true;
  }
@@ -132,7 +133,7 @@ diff --git a/dom/sync/SyncService.cpp b/dom/sync/SyncService.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncService.cpp
-@@ -0,0 +1,115 @@
+@@ -0,0 +1,117 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -223,6 +224,7 @@ new file mode 100644
 +
 +bool
 +SyncService::Register(const PrincipalInfo& aPrincipal,
++                      const nsString& aScope,
 +                      const nsString& aTag)
 +{
 +  // XXX implement me.
@@ -232,7 +234,7 @@ new file mode 100644
 +  for (auto iter = mServiceWorkerManagerActors.Iter(); !iter.Done(); iter.Next()) {
 +    RefPtr<ServiceWorkerManagerParent> parent = iter.Get()->GetKey();
 +    MOZ_ASSERT(parent);
-+    Unused << parent->SendNotifySyncEvent(aData);
++    Unused << parent->SendNotifySyncEvent(aPrincipal, aScope, aData);
 +  }
 +  */
 +
@@ -241,6 +243,7 @@ new file mode 100644
 +
 +void
 +SyncService::GetTags(const PrincipalInfo& aPrincipal,
++                     const nsString& aScope,
 +                     nsTArray<nsString>& aTags)
 +{
 +  // XXX implement me.
@@ -252,7 +255,7 @@ diff --git a/dom/sync/SyncService.h b/dom/sync/SyncService.h
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncService.h
-@@ -0,0 +1,52 @@
+@@ -0,0 +1,56 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -289,8 +292,12 @@ new file mode 100644
 +  void RegisterActor(workers::ServiceWorkerManagerParent* aParent);
 +  void UnregisterActor(workers::ServiceWorkerManagerParent* aParent);
 +
-+  bool Register(const PrincipalInfo& aPrincipal, const nsString& aTag);
-+  void GetTags(const PrincipalInfo& aPrincipal, nsTArray<nsString>& aTags);
++  bool Register(const PrincipalInfo& aPrincipal,
++                const nsString& aScope,
++                const nsString& aTag);
++  void GetTags(const PrincipalInfo& aPrincipal,
++               const nsString& aScope,
++               nsTArray<nsString>& aTags);
 +
 +private:
 +  SyncService();
