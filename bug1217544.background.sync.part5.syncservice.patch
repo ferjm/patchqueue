@@ -132,7 +132,7 @@ diff --git a/dom/sync/SyncService.cpp b/dom/sync/SyncService.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncService.cpp
-@@ -0,0 +1,112 @@
+@@ -0,0 +1,115 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -227,12 +227,15 @@ new file mode 100644
 +{
 +  // XXX implement me.
 +
-+  /* XXX REMOVE ME - Sync event test.
++  /*
++  //XXX REMOVE ME - Sync event test.
 +  for (auto iter = mServiceWorkerManagerActors.Iter(); !iter.Done(); iter.Next()) {
 +    RefPtr<ServiceWorkerManagerParent> parent = iter.Get()->GetKey();
 +    MOZ_ASSERT(parent);
 +    Unused << parent->SendNotifySyncEvent(aData);
-+  }*/
++  }
++  */
++
 +  return true;
 +}
 +
