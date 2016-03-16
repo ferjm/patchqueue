@@ -333,7 +333,7 @@ diff --git a/dom/workers/PServiceWorkerManager.ipdl b/dom/workers/PServiceWorker
    async NotifyRemove(nsCString host);
    async NotifyRemoveAll();
 -
-+  async NotifySyncEvent(nsString originAttributes,
++  async NotifySyncEvent(PrincipalInfo principalInfo,
 +                        nsString scope,
 +                        nsString tag,
 +                        bool lastChance);
@@ -540,7 +540,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
 diff --git a/dom/workers/ServiceWorkerManagerChild.cpp b/dom/workers/ServiceWorkerManagerChild.cpp
 --- a/dom/workers/ServiceWorkerManagerChild.cpp
 +++ b/dom/workers/ServiceWorkerManagerChild.cpp
-@@ -90,11 +90,31 @@ ServiceWorkerManagerChild::RecvNotifyRem
+@@ -90,11 +90,41 @@ ServiceWorkerManagerChild::RecvNotifyRem
  
    RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
    MOZ_ASSERT(swm);
@@ -550,20 +550,30 @@ diff --git a/dom/workers/ServiceWorkerManagerChild.cpp b/dom/workers/ServiceWork
  }
  
 +bool
-+ServiceWorkerManagerChild::RecvNotifySyncEvent(
-+    const nsString& aOriginAttributes,
-+    const nsString& aScope,
-+    const nsString& aTag,
-+    const bool& aLastChance)
++ServiceWorkerManagerChild::RecvNotifySyncEvent(const PrincipalInfo& aPrincipalInfo,
++                                               const nsString& aScope,
++                                               const nsString& aTag,
++                                               const bool& aLastChance)
 +{
 +  if (mShuttingDown) {
++    return true;
++  }
++
++  nsCOMPtr<nsIPrincipal> principal = PrincipalInfoToPrincipal(aPrincipalInfo);
++  if (NS_WARN_IF(!principal)) {
++    return true;
++  }
++
++  nsAutoCString originSuffix;
++  nsresult rv = principal->GetOriginSuffix(originSuffix);
++  if (NS_WARN_IF(NS_FAILED(rv))) {
 +    return true;
 +  }
 +
 +  RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
 +  MOZ_ASSERT(swm);
 +
-+  swm->SendSyncEvent(NS_ConvertUTF16toUTF8(aOriginAttributes),
++  swm->SendSyncEvent(originSuffix,
 +                     NS_ConvertUTF16toUTF8(aScope),
 +                     aTag, aLastChance);
 +  return true;
@@ -584,7 +594,7 @@ diff --git a/dom/workers/ServiceWorkerManagerChild.h b/dom/workers/ServiceWorker
  
    virtual bool RecvNotifyRemoveAll() override;
  
-+  virtual bool RecvNotifySyncEvent(const nsString& aOriginAttributes,
++  virtual bool RecvNotifySyncEvent(const PrincipalInfo& aPrincipalInfo,
 +                                   const nsString& aScope,
 +                                   const nsString& aTag,
 +                                   const bool& aLastChance) override;
