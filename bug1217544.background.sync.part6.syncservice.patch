@@ -129,17 +129,45 @@ diff --git a/dom/sync/SyncManagerParent.h b/dom/sync/SyncManagerParent.h
  #endif // mozilla_dom_SyncManagerParent_h
  
  
+diff --git a/dom/sync/SyncRegistry.js b/dom/sync/SyncRegistry.js
+--- a/dom/sync/SyncRegistry.js
++++ b/dom/sync/SyncRegistry.js
+@@ -7,17 +7,23 @@
+ function debug(s) {
+   dump('DEBUG SyncRegistry: ' + s + '\n');
+ }
+ 
+ const { interfaces: Ci, utils: Cu } = Components;
+ 
+ Cu.import('resource://gre/modules/XPCOMUtils.jsm');
+ 
++let gInstance = null;
++
+ function SyncRegistry() {
++  if (gInstance) {
++    return gInstance;
++  }
++  gInstance = this;
+   debug("SyncRegistry created");
+ }
+ 
+ SyncStore.prototype = {
+   classDescription: "Background Sync registry",
+   classID: Components.ID("{c1200834-3ebb-45e2-81cf-986edeb107f6}"),
+   contractID: "@mozilla.org/dom/sync/registry;1",
+   QueryInterface: XPCOMUtils.generateQI([Ci.nsISyncStore, Ci.nsISupports]),
 diff --git a/dom/sync/SyncService.cpp b/dom/sync/SyncService.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncService.cpp
-@@ -0,0 +1,118 @@
+@@ -0,0 +1,141 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 +
++#include "nsISyncRegistry.h"
 +#include "SyncService.h"
 +#include "SyncManagerParent.h"
 +
@@ -151,12 +179,31 @@ new file mode 100644
 +  SyncService* sInstance = nullptr;
 +} // namespace
 +
++class SyncRegistryAddRunnable final : public nsRunnable
++{
++public:
++  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(SyncRegistryAddRunnable)
++
++  SyncRegistryAddRunnable()
++  {
++  }
++
++  NS_IMETHODIMP Run() override
++  {
++    nsCOMPtr<nsISyncRegistry> registry =
++      do_CreateInstance("@mozilla.org/dom/sync/registry;1");
++    MOZ_ASSERT(registry);
++    registry->Add();
++    return NS_OK;
++  }
++
++private:
++  ~SyncRegistryAddRunnable() {}
++};
++
 +SyncService::SyncService()
 +{
 +  AssertIsOnBackgroundThread();
-+
-+  mRegistry = do_CreateInstance("@mozilla.org/dom/sync/registry;1");
-+  MOZ_ASSERT(mRegistry);
 +
 +  // sInstance is a raw SyncService*.
 +  MOZ_ASSERT(!sInstance);
@@ -233,11 +280,14 @@ new file mode 100644
 +  // XXX implement me.
 +
 +  //XXX REMOVE ME - Sync event test.
-+  for (auto iter = mServiceWorkerManagerActors.Iter(); !iter.Done(); iter.Next()) {
++  /*for (auto iter = mServiceWorkerManagerActors.Iter(); !iter.Done(); iter.Next()) {
 +    RefPtr<ServiceWorkerManagerParent> parent = iter.Get()->GetKey();
 +    MOZ_ASSERT(parent);
 +    Unused << parent->SendNotifySyncEvent(aPrincipal, aScope, aTag, false);
-+  }
++  }*/
++
++  RefPtr<SyncRegistryAddRunnable> runnable = new SyncRegistryAddRunnable();
++  NS_DispatchToMainThread(runnable);
 +
 +  return true;
 +}
@@ -256,7 +306,7 @@ diff --git a/dom/sync/SyncService.h b/dom/sync/SyncService.h
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncService.h
-@@ -0,0 +1,59 @@
+@@ -0,0 +1,56 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -267,7 +317,6 @@ new file mode 100644
 +#define mozilla_dom_SyncService_h
 +
 +#include "nsISupportsImpl.h"
-+#include "nsISyncRegistry.h"
 +#include "nsHashKeys.h"
 +#include "nsTHashtable.h"
 +#include "ServiceWorkerManagerParent.h"
@@ -308,8 +357,6 @@ new file mode 100644
 +  nsTHashtable<nsPtrHashKey<SyncManagerParent>> mSyncManagerActors;
 +  nsTHashtable<nsPtrHashKey<workers::ServiceWorkerManagerParent>>
 +    mServiceWorkerManagerActors;
-+
-+  nsCOMPtr<nsISyncRegistry> mRegistry;
 +};
 +
 +} // namespace dom
