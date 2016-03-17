@@ -1,0 +1,100 @@
+# HG changeset patch
+# User Fernando Jimenez <ferjmoreno@gmail.com>
+# Parent  5c8cfb69c4025ec3d76b3e3bb16e825a9df0eea4
+Bug 1217544 - Implement one-off BackgroundSync API. Part 5: Sync DB. r=baku
+
+diff --git a/dom/sync/Sync.manifest b/dom/sync/Sync.manifest
+new file mode 100644
+--- /dev/null
++++ b/dom/sync/Sync.manifest
+@@ -0,0 +1,2 @@
++component {c1200834-3ebb-45e2-81cf-986edeb107f6} SyncStore.js
++contract @mozilla.org/dom/syncstore;1 {c1200834-3ebb-45e2-81cf-986edeb107f6}
+diff --git a/dom/sync/SyncStore.js b/dom/sync/SyncStore.js
+new file mode 100644
+--- /dev/null
++++ b/dom/sync/SyncStore.js
+@@ -0,0 +1,38 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++'use strict'
++
++function debug(s) {
++  dump('DEBUG SyncStore: ' + s + '\n');
++}
++
++const { interfaces: Ci, utils: Cu } = Components;
++
++function SyncStore() {
++  debug("SyncStore created");
++}
++
++SyncStore.prototype = {
++  classDescription: "Background Sync store",
++  classID: Components.ID("{c1200834-3ebb-45e2-81cf-986edeb107f6}"),
++  contractID: "@mozilla.org/dom/syncstore;1",
++  QueryInterface: XPCOMUtils.generateQI([Ci.nsISyncStore, Ci.nsISupports]),
++
++  add() {
++    debug("add");
++  },
++
++  remove() {
++    debug("remove");
++  },
++
++  get() {
++    debug("get");
++  },
++
++  getAll() {
++    debug("getAll");
++  }
++};
+diff --git a/dom/sync/moz.build b/dom/sync/moz.build
+--- a/dom/sync/moz.build
++++ b/dom/sync/moz.build
+@@ -17,11 +17,22 @@ IPDL_SOURCES += [
+     'PSyncManager.ipdl',
+     'SyncIPCTypes.ipdlh'
+ ]
+ 
+ LOCAL_INCLUDES += [
+     '/dom/workers'
+ ]
+ 
++XPIDL_SOURCES += [
++    'nsISyncStore.idl'
++]
++
++XPIDL_MODULE = 'dom_sync'
++
++EXTRA_COMPONENTS += [
++    'Sync.manifest',
++    'SyncStore.js'
++]
++
+ include('/ipc/chromium/chromium-config.mozbuild')
+ 
+ FINAL_LIBRARY = 'xul'
+diff --git a/dom/sync/nsISyncStore.idl b/dom/sync/nsISyncStore.idl
+new file mode 100644
+--- /dev/null
++++ b/dom/sync/nsISyncStore.idl
+@@ -0,0 +1,14 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#include "nsISupports.idl"
++
++[scriptable, uuid(dfcc3fb2-f40d-44f9-85ea-1127be79fbe9)]
++interface nsISyncStore : nsISupports
++{
++  void add();
++  void remove();
++  void get();
++  void getAll();
++};
