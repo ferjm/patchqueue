@@ -7,7 +7,7 @@ diff --git a/dom/sync/SyncRegistry.js b/dom/sync/SyncRegistry.js
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncRegistry.js
-@@ -0,0 +1,47 @@
+@@ -0,0 +1,49 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -35,7 +35,7 @@ new file mode 100644
 +  classDescription: "Background Sync registry",
 +  classID: Components.ID("{c1200834-3ebb-45e2-81cf-986edeb107f6}"),
 +  contractID: "@mozilla.org/dom/sync/registry;1",
-+  QueryInterface: XPCOMUtils.generateQI([Ci.nsISyncStore, Ci.nsISupports]),
++  QueryInterface: XPCOMUtils.generateQI([Ci.nsISyncRegistry, Ci.nsISupports]),
 +
 +  add() {
 +    debug("add");
@@ -54,6 +54,8 @@ new file mode 100644
 +  }
 +};
 +
++function SyncRegistration() {
++}
 +this.NSGetFactory = XPCOMUtils.generateNSGetFactory([SyncRegistry]);
 diff --git a/dom/sync/SyncRegistry.manifest b/dom/sync/SyncRegistry.manifest
 new file mode 100644
@@ -92,18 +94,46 @@ diff --git a/dom/sync/nsISyncRegistry.idl b/dom/sync/nsISyncRegistry.idl
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/nsISyncRegistry.idl
-@@ -0,0 +1,14 @@
+@@ -0,0 +1,42 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 +
 +#include "nsISupports.idl"
 +
++[scriptable, uuid(671ea934-232d-47c6-87ba-b72715088914)]
++interface SyncRegistration : nsISupports
++{
++  attribute DOMString id;
++  attribute DOMString originSuffix;
++  attribute DOMString scope;
++  attribute DOMString tag;
++  attribute unsigned short state; // pending by default
++  attribute boolean lastChance;
++};
++
++[scriptable, uuid(3084a211-3ef4-4fa3-8a20-dab42f062571)]
++interface nsISyncRegistryRequest : nsISupports
++{
++  void onsuccess([optional, array, size_is(count)]
++                 in SyncRegistration registrations,
++                 in uint32_t count);
++  void onerror(in DOMString error);
++};
++
 +[scriptable, uuid(dfcc3fb2-f40d-44f9-85ea-1127be79fbe9)]
 +interface nsISyncRegistry : nsISupports
 +{
-+  void add();
-+  void remove();
-+  void get();
-+  void getAll();
++  const unsigned short STATE_PENDING                    = 1;
++  const unsigned short STATE_WAITING                    = 2;
++  const unsigned short STATE_FIRING                     = 3;
++  const unsigned short STATE_REREGISTERING_WHILE_FIRING = 4;
++
++  nsISyncRegistryRequest add(in SyncRegistration registration);
++
++  nsISyncRegistryRequest remove(in DOMString id);
++
++  nsISyncRegistryRequest get(in DOMString id);
++
++  nsISyncRegistryRequest getAll();
 +};
