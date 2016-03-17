@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  dd72efb33ee9c21de72b9957ba63b8d4d3caae9c
+# Parent  5b5f5a3f0dee3516820cd8e2416d497c8f7e2a79
 Bug 1217544 - Implement one-off BackgroundSync API. Part 5: SyncService. r=baku
 
 diff --git a/dom/sync/SyncManagerParent.cpp b/dom/sync/SyncManagerParent.cpp
@@ -129,33 +129,6 @@ diff --git a/dom/sync/SyncManagerParent.h b/dom/sync/SyncManagerParent.h
  #endif // mozilla_dom_SyncManagerParent_h
  
  
-diff --git a/dom/sync/SyncRegistry.js b/dom/sync/SyncRegistry.js
---- a/dom/sync/SyncRegistry.js
-+++ b/dom/sync/SyncRegistry.js
-@@ -7,17 +7,23 @@
- function debug(s) {
-   dump('DEBUG SyncRegistry: ' + s + '\n');
- }
- 
- const { interfaces: Ci, utils: Cu } = Components;
- 
- Cu.import('resource://gre/modules/XPCOMUtils.jsm');
- 
-+let gInstance = null;
-+
- function SyncRegistry() {
-+  if (gInstance) {
-+    return gInstance;
-+  }
-+  gInstance = this;
-   debug("SyncRegistry created");
- }
- 
- SyncStore.prototype = {
-   classDescription: "Background Sync registry",
-   classID: Components.ID("{c1200834-3ebb-45e2-81cf-986edeb107f6}"),
-   contractID: "@mozilla.org/dom/sync/registry;1",
-   QueryInterface: XPCOMUtils.generateQI([Ci.nsISyncStore, Ci.nsISupports]),
 diff --git a/dom/sync/SyncService.cpp b/dom/sync/SyncService.cpp
 new file mode 100644
 --- /dev/null
