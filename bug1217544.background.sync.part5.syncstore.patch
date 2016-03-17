@@ -14,7 +14,7 @@ diff --git a/dom/sync/SyncStore.js b/dom/sync/SyncStore.js
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncStore.js
-@@ -0,0 +1,38 @@
+@@ -0,0 +1,42 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -26,6 +26,8 @@ new file mode 100644
 +}
 +
 +const { interfaces: Ci, utils: Cu } = Components;
++
++Cu.import('resource://gre/modules/XPCOMUtils.jsm');
 +
 +function SyncStore() {
 +  debug("SyncStore created");
@@ -53,6 +55,8 @@ new file mode 100644
 +    debug("getAll");
 +  }
 +};
++
++this.NSGetFactory = XPCOMUtils.generateNSGetFactory([SyncStore]);
 diff --git a/dom/sync/moz.build b/dom/sync/moz.build
 --- a/dom/sync/moz.build
 +++ b/dom/sync/moz.build
