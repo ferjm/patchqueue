@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  5c8cfb69c4025ec3d76b3e3bb16e825a9df0eea4
+# Parent  1aad8432f28d6b1ae5bb3c111b3fc85d310016f0
 Bug 1217544 - Implement one-off BackgroundSync API. Part 5: SyncService. r=baku
 
 diff --git a/dom/sync/SyncManagerParent.cpp b/dom/sync/SyncManagerParent.cpp
@@ -133,7 +133,7 @@ diff --git a/dom/sync/SyncService.cpp b/dom/sync/SyncService.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncService.cpp
-@@ -0,0 +1,115 @@
+@@ -0,0 +1,118 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -154,6 +154,9 @@ new file mode 100644
 +SyncService::SyncService()
 +{
 +  AssertIsOnBackgroundThread();
++
++  mStore = do_CreateInstance("@mozilla.org/dom/syncstore;1");
++  MOZ_ASSERT(mStore);
 +
 +  // sInstance is a raw SyncService*.
 +  MOZ_ASSERT(!sInstance);
@@ -253,7 +256,7 @@ diff --git a/dom/sync/SyncService.h b/dom/sync/SyncService.h
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncService.h
-@@ -0,0 +1,56 @@
+@@ -0,0 +1,58 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -264,6 +267,7 @@ new file mode 100644
 +#define mozilla_dom_SyncService_h
 +
 +#include "nsISupportsImpl.h"
++#include "nsISyncStore.h"
 +#include "nsHashKeys.h"
 +#include "nsTHashtable.h"
 +#include "ServiceWorkerManagerParent.h"
@@ -306,6 +310,7 @@ new file mode 100644
 +    mServiceWorkerManagerActors;
 +};
 +
++  nsCOMPtr<nsISyncStore> mStore;
 +} // namespace dom
 +} // namespace mozilla
 +

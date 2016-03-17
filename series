@@ -3,7 +3,7 @@ bug1217544.background.sync.part2.serviceworkerregistration.patch
 bug1217544.background.sync.part3.ipc.patch
 bug1217544.background.sync.part4.syncevent.patch
 bug1217544.background.sync.part5.syncstore.patch
-bug1217544.background.sync.part5.syncservice.patch
+bug1217544.background.sync.part6.syncservice.patch
 bug1217544.background.sync.tests.patch
 try
 350ecdaedef8
