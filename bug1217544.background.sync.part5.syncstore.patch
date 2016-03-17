@@ -95,7 +95,7 @@ new file mode 100644
 +#include "nsISupports.idl"
 +
 +[scriptable, uuid(dfcc3fb2-f40d-44f9-85ea-1127be79fbe9)]
-+interface nsISyncStore : nsISupports
++interface nsISyncRegistry : nsISupports
 +{
 +  void add();
 +  void remove();
