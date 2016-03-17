@@ -76,8 +76,8 @@ diff --git a/dom/sync/moz.build b/dom/sync/moz.build
 +XPIDL_MODULE = 'dom_sync'
 +
 +EXTRA_COMPONENTS += [
-+    'SyncRegistry.manifest',
-+    'SyncRegistry.js'
++    'SyncRegistry.js',
++    'SyncRegistry.manifest'
 +]
 +
  include('/ipc/chromium/chromium-config.mozbuild')
