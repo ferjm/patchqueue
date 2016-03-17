@@ -7,7 +7,7 @@ diff --git a/dom/sync/SyncRegistry.js b/dom/sync/SyncRegistry.js
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncRegistry.js
-@@ -0,0 +1,42 @@
+@@ -0,0 +1,47 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -22,11 +22,16 @@ new file mode 100644
 +
 +Cu.import('resource://gre/modules/XPCOMUtils.jsm');
 +
++let gInstance = null;
 +function SyncRegistry() {
++  if (gInstance) {
++    return gInstance;
++  }
++  gInstance = this;
 +  debug("SyncRegistry created");
 +}
 +
-+SyncStore.prototype = {
++SyncRegistry.prototype = {
 +  classDescription: "Background Sync registry",
 +  classID: Components.ID("{c1200834-3ebb-45e2-81cf-986edeb107f6}"),
 +  contractID: "@mozilla.org/dom/sync/registry;1",
