@@ -7,7 +7,7 @@ diff --git a/dom/sync/SyncRegistry.js b/dom/sync/SyncRegistry.js
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncRegistry.js
-@@ -0,0 +1,71 @@
+@@ -0,0 +1,89 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -22,6 +22,10 @@ new file mode 100644
 +
 +Cu.import('resource://gre/modules/XPCOMUtils.jsm');
 +
++XPCOMUtils.defineLazyServiceGetter(this, "uuidgen",
++                                   "@mozilla.org/uuid-generator;1",
++                                   "nsIUUIDGenerator");
++
 +let gInstance = null;
 +function SyncRegistry() {
 +  if (gInstance) {
@@ -29,25 +33,42 @@ new file mode 100644
 +  }
 +  gInstance = this;
 +  debug("SyncRegistry created");
++  this._requests = {};
 +}
 +
 +SyncRegistry.prototype = {
-+  classID: Components.ID("{c1200834-3ebb-45e2-81cf-986edeb107f6}"),
-+  contractID: "@mozilla.org/dom/sync/registry;1",
-+  QueryInterface: XPCOMUtils.generateQI([Ci.nsISyncRegistry,
-+                                         Ci.nsISupports]),
-+  add() {
++  getRequest() {
++    let request = new SyncRegistryRequest();
++    this._requests[request.id] = request;
++    return request;
++  },
++
++  /*  nsISyncRegistry */
++
++  add(aRegistration) {
 +    debug("add");
++    let request = this.getRequest();
++    return request;
 +  },
-+  remove() {
++  remove(aId) {
 +    debug("remove");
++    let request = this.getRequest();
++    return request;
 +  },
-+  get() {
++  get(aId) {
 +    debug("get");
++    let request = this.getRequest();
++    return request;
 +  },
 +  getAll() {
 +    debug("getAll");
-+  }
++    let request = this.getRequest();
++    return request;
++  },
++  classID: Components.ID("{c1200834-3ebb-45e2-81cf-986edeb107f6}"),
++  contractID: "@mozilla.org/dom/sync/registry;1",
++  QueryInterface: XPCOMUtils.generateQI([Ci.nsISyncRegistry,
++                                         Ci.nsISupports])
 +};
 +
 +function SyncRegistration() {
@@ -63,17 +84,14 @@ new file mode 100644
 +};
 +
 +function SyncRegistryRequest() {
++  this.id = uuidgen.generateUUID().toString();
++}
++
++SyncRegistryRequest.prototype = {
 +  classID: Components.ID("{}"),
 +  contractID: "@mozilla.org/dom/sync/request;1",
 +  QueryInterface: XPCOMUtils.generateQI([Ci.nsISyncRegistryRequest,
 +                                         Ci.nsISupports])
-+}
-+
-+SyncRegistryRequest.prototype = {
-+  onsuccess() {
-+  },
-+  onerror() {
-+  }
 +};
 +
 +this.NSGetFactory = XPCOMUtils.generateNSGetFactory([SyncRegistry,
@@ -142,12 +160,12 @@ new file mode 100644
 +
 +[scriptable, uuid(3084a211-3ef4-4fa3-8a20-dab42f062571)]
 +interface nsISyncRegistryRequest : nsISupports
-+{
++{/*
 +  void onsuccess([optional, array, size_is(count)]
 +                 in nsISyncRegistration registrations,
 +                 in uint32_t count);
 +
-+  void onerror(in DOMString error);
++  void onerror(in DOMString error);*/
 +};
 +
 +[scriptable, uuid(dfcc3fb2-f40d-44f9-85ea-1127be79fbe9)]
