@@ -7,7 +7,7 @@ diff --git a/dom/sync/SyncRegistry.js b/dom/sync/SyncRegistry.js
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncRegistry.js
-@@ -0,0 +1,49 @@
+@@ -0,0 +1,71 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -32,38 +32,66 @@ new file mode 100644
 +}
 +
 +SyncRegistry.prototype = {
-+  classDescription: "Background Sync registry",
 +  classID: Components.ID("{c1200834-3ebb-45e2-81cf-986edeb107f6}"),
 +  contractID: "@mozilla.org/dom/sync/registry;1",
-+  QueryInterface: XPCOMUtils.generateQI([Ci.nsISyncRegistry, Ci.nsISupports]),
-+
++  QueryInterface: XPCOMUtils.generateQI([Ci.nsISyncRegistry,
++                                         Ci.nsISupports]),
 +  add() {
 +    debug("add");
 +  },
-+
 +  remove() {
 +    debug("remove");
 +  },
-+
 +  get() {
 +    debug("get");
 +  },
-+
 +  getAll() {
 +    debug("getAll");
 +  }
 +};
 +
 +function SyncRegistration() {
++  this.state = Ci.nsISyncRegistry.STATE_PENDING;
++  this.lastChance = false;
 +}
-+this.NSGetFactory = XPCOMUtils.generateNSGetFactory([SyncRegistry]);
++
++SyncRegistration.prototype = {
++  classID: Components.ID("{3443e3ff-e762-4c10-90a4-204e8436b518}"),
++  contractID: "@mozilla.org/dom/sync/registration;1",
++  QueryInterface: XPCOMUtils.generateQI([Ci.nsISyncRegistration,
++                                         Ci.nsISupports])
++};
++
++function SyncRegistryRequest() {
++  classID: Components.ID("{}"),
++  contractID: "@mozilla.org/dom/sync/request;1",
++  QueryInterface: XPCOMUtils.generateQI([Ci.nsISyncRegistryRequest,
++                                         Ci.nsISupports])
++}
++
++SyncRegistryRequest.prototype = {
++  onsuccess() {
++  },
++  onerror() {
++  }
++};
++
++this.NSGetFactory = XPCOMUtils.generateNSGetFactory([SyncRegistry,
++                                                     SyncRegistration,
++                                                     SyncRegistryRequest]);
 diff --git a/dom/sync/SyncRegistry.manifest b/dom/sync/SyncRegistry.manifest
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncRegistry.manifest
-@@ -0,0 +1,2 @@
+@@ -0,0 +1,8 @@
 +component {c1200834-3ebb-45e2-81cf-986edeb107f6} SyncRegistry.js
 +contract @mozilla.org/dom/sync/registry;1 {c1200834-3ebb-45e2-81cf-986edeb107f6}
++
++component {0c47c0e6-66b9-4b91-b39e-65a7d11d322d} SyncRegistry.js
++contract @mozilla.org/dom/sync/registration;1 {0c47c0e6-66b9-4b91-b39e-65a7d11d322d}
++
++component {3443e3ff-e762-4c10-90a4-204e8436b518} SyncRegistry.js
++contract @mozilla.org/dom/sync/request;1 {3443e3ff-e762-4c10-90a4-204e8436b518}
 diff --git a/dom/sync/moz.build b/dom/sync/moz.build
 --- a/dom/sync/moz.build
 +++ b/dom/sync/moz.build
@@ -94,7 +122,7 @@ diff --git a/dom/sync/nsISyncRegistry.idl b/dom/sync/nsISyncRegistry.idl
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/nsISyncRegistry.idl
-@@ -0,0 +1,42 @@
+@@ -0,0 +1,43 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -102,7 +130,7 @@ new file mode 100644
 +#include "nsISupports.idl"
 +
 +[scriptable, uuid(671ea934-232d-47c6-87ba-b72715088914)]
-+interface SyncRegistration : nsISupports
++interface nsISyncRegistration : nsISupports
 +{
 +  attribute DOMString id;
 +  attribute DOMString originSuffix;
@@ -116,8 +144,9 @@ new file mode 100644
 +interface nsISyncRegistryRequest : nsISupports
 +{
 +  void onsuccess([optional, array, size_is(count)]
-+                 in SyncRegistration registrations,
++                 in nsISyncRegistration registrations,
 +                 in uint32_t count);
++
 +  void onerror(in DOMString error);
 +};
 +
@@ -129,7 +158,7 @@ new file mode 100644
 +  const unsigned short STATE_FIRING                     = 3;
 +  const unsigned short STATE_REREGISTERING_WHILE_FIRING = 4;
 +
-+  nsISyncRegistryRequest add(in SyncRegistration registration);
++  nsISyncRegistryRequest add(in nsISyncRegistration registration);
 +
 +  nsISyncRegistryRequest remove(in DOMString id);
 +
