@@ -7,7 +7,7 @@ diff --git a/dom/sync/SyncRegistry.js b/dom/sync/SyncRegistry.js
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncRegistry.js
-@@ -0,0 +1,89 @@
+@@ -0,0 +1,78 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -83,17 +83,6 @@ new file mode 100644
 +                                         Ci.nsISupports])
 +};
 +
-+function SyncRegistryRequest() {
-+  this.id = uuidgen.generateUUID().toString();
-+}
-+
-+SyncRegistryRequest.prototype = {
-+  classID: Components.ID("{3443e3ff-e762-4c10-90a4-204e8436b518}"),
-+  contractID: "@mozilla.org/dom/sync/request;1",
-+  QueryInterface: XPCOMUtils.generateQI([Ci.nsISyncRegistryRequest,
-+                                         Ci.nsISupports])
-+};
-+
 +this.NSGetFactory = XPCOMUtils.generateNSGetFactory([SyncRegistry,
 +                                                     SyncRegistration,
 +                                                     SyncRegistryRequest]);
@@ -101,15 +90,12 @@ diff --git a/dom/sync/SyncRegistry.manifest b/dom/sync/SyncRegistry.manifest
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncRegistry.manifest
-@@ -0,0 +1,8 @@
+@@ -0,0 +1,5 @@
 +component {c1200834-3ebb-45e2-81cf-986edeb107f6} SyncRegistry.js
 +contract @mozilla.org/dom/sync/registry;1 {c1200834-3ebb-45e2-81cf-986edeb107f6}
 +
 +component {0c47c0e6-66b9-4b91-b39e-65a7d11d322d} SyncRegistry.js
 +contract @mozilla.org/dom/sync/registration;1 {0c47c0e6-66b9-4b91-b39e-65a7d11d322d}
-+
-+component {3443e3ff-e762-4c10-90a4-204e8436b518} SyncRegistry.js
-+contract @mozilla.org/dom/sync/request;1 {3443e3ff-e762-4c10-90a4-204e8436b518}
 diff --git a/dom/sync/moz.build b/dom/sync/moz.build
 --- a/dom/sync/moz.build
 +++ b/dom/sync/moz.build
@@ -140,7 +126,7 @@ diff --git a/dom/sync/nsISyncRegistry.idl b/dom/sync/nsISyncRegistry.idl
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/nsISyncRegistry.idl
-@@ -0,0 +1,43 @@
+@@ -0,0 +1,51 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -159,13 +145,18 @@ new file mode 100644
 +};
 +
 +[scriptable, uuid(3084a211-3ef4-4fa3-8a20-dab42f062571)]
-+interface nsISyncRegistryRequest : nsISupports
-+{/*
-+  void onsuccess([optional, array, size_is(count)]
-+                 in nsISyncRegistration registrations,
-+                 in uint32_t count);
++interface nsISyncRegistryListener : nsISupports
++{
++  attribute nsID requestId;
++  attribute unsigned long long actorId;
 +
-+  void onerror(in DOMString error);*/
++  void notifyAddSuccess();
++  void notifyRemoveSuccess();
++  void notifyGetSuccess([optional] in nsISyncRegistration registration);
++  void notifyGetAllSuccess([array, size_is(count)]
++                           in nsISyncRegistration registrations,
++                           in uint32_t count);
++  void notifyError(in DOMString error);
 +};
 +
 +[scriptable, uuid(dfcc3fb2-f40d-44f9-85ea-1127be79fbe9)]
@@ -176,11 +167,14 @@ new file mode 100644
 +  const unsigned short STATE_FIRING                     = 3;
 +  const unsigned short STATE_REREGISTERING_WHILE_FIRING = 4;
 +
-+  nsISyncRegistryRequest add(in nsISyncRegistration registration);
++  void add(in nsISyncRegistration registration,
++           in nsISyncRegistryListener listener);
 +
-+  nsISyncRegistryRequest remove(in DOMString id);
++  void remove(in DOMString id,
++              in nsISyncRegistryListener listener);
 +
-+  nsISyncRegistryRequest get(in DOMString id);
++  void get(in DOMString id,
++           in nsISyncRegistryListener listener);
 +
-+  nsISyncRegistryRequest getAll();
++  void getAll(in nsISyncRegistryListener listener);
 +};
