@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  1f4f08309d914fa1754a2d9e809ed1960755436f
+# Parent  20be68b64070e2577a0ef1022907e06bd20b4402
 Bug 1217544 - Implement one-off BackgroundSync API. Part 5: SyncService. r=baku
 
 diff --git a/dom/sync/SyncIPCTypes.ipdlh b/dom/sync/SyncIPCTypes.ipdlh
@@ -179,7 +179,7 @@ diff --git a/dom/sync/SyncService.cpp b/dom/sync/SyncService.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncService.cpp
-@@ -0,0 +1,271 @@
+@@ -0,0 +1,276 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -198,17 +198,31 @@ new file mode 100644
 +  SyncService* sInstance = nullptr;
 +} // namespace
 +
++struct SyncRegistryRequest {
++  RefPtr<SyncService> mService;
++  uint64_t mActorId;
++  nsID mRequestId;
++  SyncOp mOp;
++
++  SyncRegistryRequest(SyncService* aService,
++                      const uint64_t aActorId,
++                      const nsID& aRequestId,
++                      const SyncOp& aOp)
++    : mService(aService)
++    , mActorId(aActorId)
++    , mRequestId(aRequestId)
++    , mOp(aOp)
++  {}
++};
++
 +class SyncRegistryRequestRunnableCallback final : public nsRunnable
 +{
 +public:
 +  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(SyncRegistryRequestRunnableCallback)
 +
-+  SyncRegistryRequestRunnableCallback(SyncService* aService,
-+                                      const uint64_t aActorId,
-+                                      const nsID& aRequestId)
-+    : mService(aService)
-+    , mActorId(aActorId)
-+    , mRequestId(aRequestId)
++  // XXX Use SyncRegistryResponse struct instead.
++  SyncRegistryRequestRunnableCallback(const SyncRegistryRequest aRequest)
++    : mRequest(aRequest)
 +  {
 +    AssertIsOnMainThread();
 +  }
@@ -218,16 +232,16 @@ new file mode 100644
 +    AssertIsOnBackgroundThread();
 +
 +    const SyncRegisterResponse response(true);
-+    mService->Response(mActorId, mRequestId, response);
++    mRequest.mService->Response(mRequest.mActorId,
++                                mRequest.mRequestId,
++                                response);
 +    return NS_OK;
 +  }
 +
 +private:
 +  ~SyncRegistryRequestRunnableCallback() {}
 +
-+  RefPtr<SyncService> mService;
-+  uint64_t mActorId;
-+  nsID mRequestId;
++  SyncRegistryRequest mRequest;
 +};
 +
 +class SyncRegistryRequestRunnable final : public nsRunnable
@@ -237,14 +251,8 @@ new file mode 100644
 +public:
 +  NS_DECL_THREADSAFE_ISUPPORTS
 +
-+  SyncRegistryRequestRunnable(SyncService* aService,
-+                              const uint64_t aActorId,
-+                              const nsID& aRequestId,
-+                              const SyncOp& aOp)
-+    : mService(aService)
-+    , mActorId(aActorId)
-+    , mRequestId(aRequestId)
-+    , mOp(aOp)
++  SyncRegistryRequestRunnable(SyncRegistryRequest aRequest)
++    : mRequest(aRequest)
 +    , mBackgroundThread(NS_GetCurrentThread())
 +  {
 +    AssertIsOnBackgroundThread();
@@ -253,34 +261,40 @@ new file mode 100644
 +  NS_IMETHODIMP
 +  GetRequestId(nsID* aRequestId)
 +  {
-+    aRequestId = &mRequestId;
++    aRequestId = &(mRequest.mRequestId);
 +    return NS_OK;
 +  }
 +
 +  NS_IMETHODIMP
 +  SetRequestId(const nsID aRequestId)
 +  {
-+    mRequestId = aRequestId;
 +    return NS_OK;
 +  }
 +
 +  NS_IMETHODIMP
 +  GetActorId(uint64_t* aActorId)
 +  {
-+    aActorId = &mActorId;
++    aActorId = &(mRequest.mActorId);
 +    return NS_OK;
 +  }
 +
 +  NS_IMETHODIMP
 +  SetActorId(const uint64_t aActorId)
 +  {
-+    mActorId = aActorId;
 +    return NS_OK;
 +  }
 +
 +  NS_IMETHODIMP
 +  NotifyAddSuccess()
 +  {
++    printf_stderr("SUCCESS\n");
++
++    RefPtr<SyncRegistryRequestRunnableCallback> callback =
++      new SyncRegistryRequestRunnableCallback(mRequest);
++    MOZ_ASSERT(callback);
++
++    mBackgroundThread->Dispatch(callback, NS_DISPATCH_NORMAL);
++
 +    return NS_OK;
 +  }
 +
@@ -317,20 +331,20 @@ new file mode 100644
 +      do_CreateInstance("@mozilla.org/dom/sync/registry;1");
 +    MOZ_ASSERT(registry);
 +
-+    switch(mOp.mArgs().type()) {
++    switch(mRequest.mOp.mArgs().type()) {
 +      case SyncOpArgs::TSyncRegisterArgs:
 +      {
 +        nsCOMPtr<nsISyncRegistration> registration =
 +          do_CreateInstance("@mozilla.org/dom/sync/registration;1");
 +        MOZ_ASSERT(registration);
-+        registration->SetScope(mOp.mArgs().get_SyncRegisterArgs().mScope());
-+        registration->SetTag(mOp.mArgs().get_SyncRegisterArgs().mTag());
++        registration->SetScope(mRequest.mOp.mArgs().get_SyncRegisterArgs().mScope());
++        registration->SetTag(mRequest.mOp.mArgs().get_SyncRegisterArgs().mTag());
 +        registry->Add(registration, this);
 +        break;
 +      }
 +      case SyncOpArgs::TSyncGetTagsArgs:
 +      {
-+        //registry->GetTags(mOp.mPrincipal());
++        //registry->GetTags(mRequest.mOp.mPrincipal());
 +        break;
 +      }
 +      default:
@@ -338,23 +352,13 @@ new file mode 100644
 +        MOZ_CRASH("Unknown BackgroundSync request");
 +      }
 +    }
-+/*
-+    RefPtr<SyncRegistryRequestRunnableCallback> callback =
-+      new SyncRegistryRequestRunnableCallback(mService, mActorId, mRequestId);
-+    MOZ_ASSERT(callback);
-+
-+    mBackgroundThread->Dispatch(callback, NS_DISPATCH_NORMAL);
-+*/
 +    return NS_OK;
 +  }
 +
 +private:
 +  ~SyncRegistryRequestRunnable() {}
 +
-+  RefPtr<SyncService> mService;
-+  uint64_t mActorId;
-+  nsID mRequestId;
-+  SyncOp mOp;
++  SyncRegistryRequest mRequest;
 +  nsCOMPtr<nsIThread> mBackgroundThread;
 +};
 +
@@ -437,7 +441,8 @@ new file mode 100644
 +                     const SyncOp& aOp)
 +{
 +  RefPtr<SyncRegistryRequestRunnable> runnable =
-+    new SyncRegistryRequestRunnable(this, aActorId, aRequestId, aOp);
++    new SyncRegistryRequestRunnable(SyncRegistryRequest(this, aActorId,
++                                    aRequestId, aOp));
 +  NS_DispatchToMainThread(runnable);
 +}
 +
