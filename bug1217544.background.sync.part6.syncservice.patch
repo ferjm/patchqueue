@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  5b5f5a3f0dee3516820cd8e2416d497c8f7e2a79
+# Parent  79a542952fc2808b5eaef7309dd5daed7671fe8c
 Bug 1217544 - Implement one-off BackgroundSync API. Part 5: SyncService. r=baku
 
 diff --git a/dom/sync/SyncManagerParent.cpp b/dom/sync/SyncManagerParent.cpp
@@ -133,7 +133,7 @@ diff --git a/dom/sync/SyncService.cpp b/dom/sync/SyncService.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncService.cpp
-@@ -0,0 +1,141 @@
+@@ -0,0 +1,147 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -166,7 +166,13 @@ new file mode 100644
 +    nsCOMPtr<nsISyncRegistry> registry =
 +      do_CreateInstance("@mozilla.org/dom/sync/registry;1");
 +    MOZ_ASSERT(registry);
-+    registry->Add();
++
++    nsCOMPtr<nsISyncRegistration> registration =
++      do_CreateInstance("@mozilla.org/dom/sync/registration;1");
++    MOZ_ASSERT(registration);
++
++    nsISyncRegistryRequest* request;
++    registry->Add(registration, &request);
 +    return NS_OK;
 +  }
 +
