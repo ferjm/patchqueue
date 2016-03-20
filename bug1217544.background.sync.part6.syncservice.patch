@@ -127,7 +127,7 @@ diff --git a/dom/sync/SyncManagerParent.cpp b/dom/sync/SyncManagerParent.cpp
 diff --git a/dom/sync/SyncManagerParent.h b/dom/sync/SyncManagerParent.h
 --- a/dom/sync/SyncManagerParent.h
 +++ b/dom/sync/SyncManagerParent.h
-@@ -15,30 +15,47 @@
+@@ -15,30 +15,49 @@
  namespace mozilla {
  
  namespace ipc {
@@ -143,6 +143,8 @@ diff --git a/dom/sync/SyncManagerParent.h b/dom/sync/SyncManagerParent.h
    friend class mozilla::ipc::BackgroundParentImpl;
  
  public:
++   NS_INLINE_DECL_REFCOUNTING(SyncManagerParent)
++
    virtual bool RecvRequest(const nsID& aRequestId,
                             const SyncOp& aOp) override;
  
@@ -179,7 +181,7 @@ diff --git a/dom/sync/SyncService.cpp b/dom/sync/SyncService.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncService.cpp
-@@ -0,0 +1,292 @@
+@@ -0,0 +1,300 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -468,6 +470,14 @@ new file mode 100644
 +                      const SyncOpResponse& aResponse)
 +{
 +  printf_stderr("RESPONSE\n");
++  for (auto iter = mSyncManagerActors.Iter(); !iter.Done(); iter.Next()) {
++    RefPtr<SyncManagerParent> parent = iter.Get()->GetKey();
++    MOZ_ASSERT(parent);
++    if (parent->Id() != aActorId) {
++      continue;
++    }
++    parent->NotifyResponse(aRequestId, aResponse);
++  }    
 +}
 +
 +} // namespace dom
