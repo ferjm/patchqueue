@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  b3dd7ca23f6319b797581b50d8c7e5f958c669a1
+# Parent  f7a8310256fcdcaa48358eaccf4122f51ce1f2ce
 Bug 1217544 - Implement one-off BackgroundSync API. Part 5: SyncService. r=baku
 
 diff --git a/dom/sync/SyncIPCTypes.ipdlh b/dom/sync/SyncIPCTypes.ipdlh
@@ -143,7 +143,7 @@ diff --git a/dom/sync/SyncManagerParent.h b/dom/sync/SyncManagerParent.h
    friend class mozilla::ipc::BackgroundParentImpl;
  
  public:
-+   NS_INLINE_DECL_REFCOUNTING(SyncManagerParent)
++  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(SyncManagerParent)
 +
    virtual bool RecvRequest(const nsID& aRequestId,
                             const SyncOp& aOp) override;
