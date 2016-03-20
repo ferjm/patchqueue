@@ -20,7 +20,7 @@ diff --git a/dom/sync/SyncIPCTypes.ipdlh b/dom/sync/SyncIPCTypes.ipdlh
 diff --git a/dom/sync/SyncManagerParent.cpp b/dom/sync/SyncManagerParent.cpp
 --- a/dom/sync/SyncManagerParent.cpp
 +++ b/dom/sync/SyncManagerParent.cpp
-@@ -1,73 +1,82 @@
+@@ -1,73 +1,85 @@
  /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
  /* vim: set ts=8 sts=2 et sw=2 tw=80: */
  /* This Source Code Form is subject to the terms of the Mozilla Public
@@ -46,6 +46,7 @@ diff --git a/dom/sync/SyncManagerParent.cpp b/dom/sync/SyncManagerParent.cpp
  SyncManagerParent::SyncManagerParent()
 +  : mService(SyncService::GetOrCreate())
 +  , mId(++sSyncManagerParentId)
++  , mActorDestroyed(false)
  {
    AssertIsOnBackgroundThread();
 +  mService->RegisterActor(this);
@@ -59,6 +60,8 @@ diff --git a/dom/sync/SyncManagerParent.cpp b/dom/sync/SyncManagerParent.cpp
  void SyncManagerParent::ActorDestroy(ActorDestroyReason aWhy)
  {
    AssertIsOnBackgroundThread();
++
++  mActorDestroyed = true;
 +
 +  if (mService) {
 +    mService->UnregisterActor(this);
@@ -127,7 +130,7 @@ diff --git a/dom/sync/SyncManagerParent.cpp b/dom/sync/SyncManagerParent.cpp
 diff --git a/dom/sync/SyncManagerParent.h b/dom/sync/SyncManagerParent.h
 --- a/dom/sync/SyncManagerParent.h
 +++ b/dom/sync/SyncManagerParent.h
-@@ -15,30 +15,49 @@
+@@ -15,30 +15,56 @@
  namespace mozilla {
  
  namespace ipc {
@@ -158,6 +161,11 @@ diff --git a/dom/sync/SyncManagerParent.h b/dom/sync/SyncManagerParent.h
 +    return mId;
 +  }
 +
++  bool ActorDestroyed() const
++  {
++    return mActorDestroyed;
++  }
++
  private:
    SyncManagerParent();
    ~SyncManagerParent();
@@ -169,6 +177,8 @@ diff --git a/dom/sync/SyncManagerParent.h b/dom/sync/SyncManagerParent.h
 +  // The identifier will be used by the SyncService to know which request
 +  // belongs to which parent actor.
 +  uint64_t mId;
++
++  bool mActorDestroyed;
  };
  
  } // namespace dom
@@ -181,7 +191,7 @@ diff --git a/dom/sync/SyncService.cpp b/dom/sync/SyncService.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncService.cpp
-@@ -0,0 +1,300 @@
+@@ -0,0 +1,301 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -473,7 +483,8 @@ new file mode 100644
 +  for (auto iter = mSyncManagerActors.Iter(); !iter.Done(); iter.Next()) {
 +    RefPtr<SyncManagerParent> parent = iter.Get()->GetKey();
 +    MOZ_ASSERT(parent);
-+    if (parent->Id() != aActorId) {
++    if (parent->Id() != aActorId ||
++        parent->ActorDestroyed()) {
 +      continue;
 +    }
 +    parent->NotifyResponse(aRequestId, aResponse);
