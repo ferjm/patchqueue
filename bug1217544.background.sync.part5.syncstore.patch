@@ -7,20 +7,25 @@ diff --git a/dom/sync/SyncRegistry.js b/dom/sync/SyncRegistry.js
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncRegistry.js
-@@ -0,0 +1,59 @@
+@@ -0,0 +1,97 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 +
-+'use strict'
++"use strict"
 +
 +function debug(s) {
-+  dump('DEBUG SyncRegistry: ' + s + '\n');
++  dump("DEBUG SyncRegistry: " + s + "\n");
 +}
 +
 +const { interfaces: Ci, utils: Cu } = Components;
 +
-+Cu.import('resource://gre/modules/XPCOMUtils.jsm');
++Cu.import("resource://gre/modules/IndexedDBHelper.jsm");
++Cu.import("resource://gre/modules/XPCOMUtils.jsm");
++
++const SYNC_REGISTRY_DB_NAME    = "background-sync-registry";
++const SYNC_REGISTRY_DB_NAME    = 1;
++const SYNC_REGISTRY_STORE_NAME = "registry";
 +
 +let gInstance = null;
 +function SyncRegistry() {
@@ -28,25 +33,58 @@ new file mode 100644
 +    return gInstance;
 +  }
 +  gInstance = this;
++  gInstance.init();
 +  debug("SyncRegistry created");
 +}
 +
 +SyncRegistry.prototype = {
++  __proto__: IndexedDBHelper.prototype,
++
++  init: function() {
++    debug("init");
++    this.initDBHelper(SYNC_REGISTRY_DB_NAME,
++                      SYNC_REGISTRY_DB_VERSION,
++                      [SYNC_REGISTRY_STORE_NAME]);
++  },
++
++  upgradeSchema: function(aTransaction, aDb, aOldVersion, aNewVersion) {
++    debug("upgradeSchema");
++    /**
++     * We will be storing objects like:
++     * {
++     *   id: <string> (key), // concatenation of origin + tag,
++     *   origin: <string> (index),
++     *   scope: <string>,
++     *   tag: <string>,
++     *   state: <number>,
++     *   lastChance: <boolean>
++     * }
++     */
++    let objectStore = aDb.createObjectStore(SYNC_REGISTRY_STORE_NAME, {
++      keyPath: "id"
++    });
++    objectStore.createIndex("origin", "origin", { unique: false });
++  },
++
 +  add(aRegistration, aListener) {
 +    debug("add");
 +    aListener.notifyAddSuccess();
 +  },
++
 +  remove(aId, aListener) {
 +    debug("remove");
 +    aListener.notifyRemoveSuccess();
 +  },
++
 +  get(aId, aListener) {
 +    debug("get");
 +    aListener.notifyGetSuccess();
 +  },
-+  getAll(aListener) {
++
++  getAll(aOrigin, aListener) {
 +    debug("getAll");
 +  },
++
 +  classID: Components.ID("{c1200834-3ebb-45e2-81cf-986edeb107f6}"),
 +  contractID: "@mozilla.org/dom/sync/registry;1",
 +  QueryInterface: XPCOMUtils.generateQI([Ci.nsISyncRegistry,
@@ -107,7 +145,7 @@ diff --git a/dom/sync/nsISyncRegistry.idl b/dom/sync/nsISyncRegistry.idl
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/nsISyncRegistry.idl
-@@ -0,0 +1,51 @@
+@@ -0,0 +1,52 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -118,10 +156,10 @@ new file mode 100644
 +interface nsISyncRegistration : nsISupports
 +{
 +  attribute DOMString id;
-+  attribute DOMString originSuffix;
++  attribute DOMString origin;
 +  attribute DOMString scope;
 +  attribute DOMString tag;
-+  attribute unsigned short state; // pending by default
++  attribute unsigned short state; // "pending" by default
 +  attribute boolean lastChance;
 +};
 +
@@ -157,5 +195,6 @@ new file mode 100644
 +  void get(in DOMString id,
 +           in nsISyncRegistryListener listener);
 +
-+  void getAll(in nsISyncRegistryListener listener);
++  void getAll([optional] in DOMString origin,
++              in nsISyncRegistryListener listener);
 +};
