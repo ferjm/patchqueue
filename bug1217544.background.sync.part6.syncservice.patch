@@ -179,7 +179,7 @@ diff --git a/dom/sync/SyncService.cpp b/dom/sync/SyncService.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncService.cpp
-@@ -0,0 +1,276 @@
+@@ -0,0 +1,292 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -331,20 +331,36 @@ new file mode 100644
 +      do_CreateInstance("@mozilla.org/dom/sync/registry;1");
 +    MOZ_ASSERT(registry);
 +
++    nsCOMPtr<nsIPrincipal> principal =
++      PrincipalInfoToPrincipal(mRequest.mOp.mPrincipalInfo());
++    if (NS_WARN_IF(!principal)) {
++      return NS_OK;
++    }
++
++    nsAutoCString origin;
++    nsresult rv = principal->GetOriginSuffix(origin);
++    if (NS_WARN_IF(NS_FAILED(rv))) {
++      return NS_OK;
++    }
++
 +    switch(mRequest.mOp.mArgs().type()) {
 +      case SyncOpArgs::TSyncRegisterArgs:
 +      {
 +        nsCOMPtr<nsISyncRegistration> registration =
 +          do_CreateInstance("@mozilla.org/dom/sync/registration;1");
 +        MOZ_ASSERT(registration);
++
++        registration->SetOrigin(origin);
 +        registration->SetScope(mRequest.mOp.mArgs().get_SyncRegisterArgs().mScope());
 +        registration->SetTag(mRequest.mOp.mArgs().get_SyncRegisterArgs().mTag());
++
 +        registry->Add(registration, this);
++
 +        break;
 +      }
 +      case SyncOpArgs::TSyncGetTagsArgs:
 +      {
-+        //registry->GetTags(mRequest.mOp.mPrincipal());
++        registry->GetTags(origin, this);
 +        break;
 +      }
 +      default:
