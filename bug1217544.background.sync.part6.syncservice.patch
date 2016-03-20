@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  20be68b64070e2577a0ef1022907e06bd20b4402
+# Parent  b3dd7ca23f6319b797581b50d8c7e5f958c669a1
 Bug 1217544 - Implement one-off BackgroundSync API. Part 5: SyncService. r=baku
 
 diff --git a/dom/sync/SyncIPCTypes.ipdlh b/dom/sync/SyncIPCTypes.ipdlh
@@ -332,7 +332,7 @@ new file mode 100644
 +    MOZ_ASSERT(registry);
 +
 +    nsCOMPtr<nsIPrincipal> principal =
-+      PrincipalInfoToPrincipal(mRequest.mOp.mPrincipalInfo());
++      PrincipalInfoToPrincipal(mRequest.mOp.mPrincipal());
 +    if (NS_WARN_IF(!principal)) {
 +      return NS_OK;
 +    }
@@ -350,7 +350,7 @@ new file mode 100644
 +          do_CreateInstance("@mozilla.org/dom/sync/registration;1");
 +        MOZ_ASSERT(registration);
 +
-+        registration->SetOrigin(origin);
++        registration->SetOrigin(NS_ConvertUTF8toUTF16(origin));
 +        registration->SetScope(mRequest.mOp.mArgs().get_SyncRegisterArgs().mScope());
 +        registration->SetTag(mRequest.mOp.mArgs().get_SyncRegisterArgs().mTag());
 +
@@ -360,7 +360,7 @@ new file mode 100644
 +      }
 +      case SyncOpArgs::TSyncGetTagsArgs:
 +      {
-+        registry->GetTags(origin, this);
++        registry->GetAll(NS_ConvertUTF8toUTF16(origin), this);
 +        break;
 +      }
 +      default:
