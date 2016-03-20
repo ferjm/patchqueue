@@ -24,7 +24,7 @@ new file mode 100644
 +Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 +
 +const SYNC_REGISTRY_DB_NAME    = "background-sync-registry";
-+const SYNC_REGISTRY_DB_NAME    = 1;
++const SYNC_REGISTRY_DB_VERSION = 1;
 +const SYNC_REGISTRY_STORE_NAME = "registry";
 +
 +let gInstance = null;
