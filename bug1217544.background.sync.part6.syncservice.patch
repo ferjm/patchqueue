@@ -27,7 +27,32 @@ diff --git a/dom/sync/SyncIPCTypes.ipdlh b/dom/sync/SyncIPCTypes.ipdlh
 diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
 --- a/dom/sync/SyncManager.cpp
 +++ b/dom/sync/SyncManager.cpp
-@@ -403,17 +403,17 @@ SyncManager::Register(const nsAString& a
+@@ -245,19 +245,21 @@ SyncManager::IsSyncManagerThread() {
+ 
+ void
+ SyncManager::Shutdown()
+ {
+   MOZ_ASSERT(IsSyncManagerThread());
+ 
+   mShuttingDown = true;
+ 
+-  nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
+-  if (obs) {
+-    obs->RemoveObserver(this, "inner-window-destroyed");
++  if (NS_IsMainThread()) {
++    nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
++    if (obs) {
++      obs->RemoveObserver(this, "inner-window-destroyed");
++    }
+   }
+ 
+   if (mWorkerFeature) {
+     WorkerPrivate* workerPrivate = GetCurrentThreadWorkerPrivate();
+     MOZ_ASSERT(workerPrivate);
+     workerPrivate->AssertIsOnWorkerThread();
+     workerPrivate->RemoveFeature(mWorkerFeature);
+     mWorkerFeature = nullptr;
+@@ -403,17 +405,17 @@ SyncManager::Register(const nsAString& a
    return ExecuteOp(SyncOpArgs(args), aRv);
  }
  
@@ -175,7 +200,7 @@ diff --git a/dom/sync/SyncManagerParent.h b/dom/sync/SyncManagerParent.h
    friend class mozilla::ipc::BackgroundParentImpl;
  
  public:
-+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(SyncManagerParent)
++  NS_INLINE_DECL_REFCOUNTING(SyncManagerParent)
 +
    virtual bool RecvRequest(const nsID& aRequestId,
                             const SyncOp& aOp) override;
@@ -220,7 +245,7 @@ diff --git a/dom/sync/SyncService.cpp b/dom/sync/SyncService.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncService.cpp
-@@ -0,0 +1,295 @@
+@@ -0,0 +1,297 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -262,8 +287,6 @@ new file mode 100644
 +class SyncRegistryRequestRunnableCallback final : public nsRunnable
 +{
 +public:
-+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(SyncRegistryRequestRunnableCallback)
-+
 +  // XXX Use SyncRegistryResponse struct instead.
 +  SyncRegistryRequestRunnableCallback(SyncRegistryRequest* aRequest)
 +    : mRequest(aRequest)
@@ -288,7 +311,7 @@ new file mode 100644
 +  RefPtr<SyncRegistryRequest> mRequest;
 +};
 +
-+class SyncRegistryRequestRunnable final : public nsRunnable
++class SyncRegistryRequestRunnable final : public nsIRunnable
 +                                        , public nsISyncRegistryListener
 +{
 +
@@ -492,6 +515,8 @@ new file mode 100644
 +                     const nsID& aRequestId,
 +                     const SyncOp& aOp)
 +{
++  AssertIsOnBackgroundThread();
++
 +  RefPtr<SyncRegistryRequestRunnable> runnable =
 +    new SyncRegistryRequestRunnable(
 +        new SyncRegistryRequest(aActorId, aRequestId, aOp));
@@ -503,6 +528,8 @@ new file mode 100644
 +                      const nsID& aRequestId,
 +                      const SyncOpResponse& aResponse)
 +{
++  AssertIsOnBackgroundThread();
++
 +  for (auto iter = mSyncManagerActors.Iter(); !iter.Done(); iter.Next()) {
 +    RefPtr<SyncManagerParent> parent = iter.Get()->GetKey();
 +    MOZ_ASSERT(parent);
@@ -571,8 +598,8 @@ new file mode 100644
 +private:
 +  ~SyncService();
 +
-+  nsTHashtable<nsPtrHashKey<SyncManagerParent>> mSyncManagerActors;
-+  nsTHashtable<nsPtrHashKey<workers::ServiceWorkerManagerParent>>
++  nsTHashtable<nsRefPtrHashKey<SyncManagerParent>> mSyncManagerActors;
++  nsTHashtable<nsRefPtrHashKey<workers::ServiceWorkerManagerParent>>
 +    mServiceWorkerManagerActors;
 +};
 +
