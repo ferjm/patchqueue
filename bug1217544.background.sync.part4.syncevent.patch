@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  8bf07afb7a02b452cfaac420e3227799fa2b2312
+# Parent  80556c33c6f61b1f510b85733358d0530a24601c
 Bug 1217544 - Implement one-off BackgroundSync API. Part 4: Sync event. r=baku
 
 diff --git a/dom/bindings/Bindings.conf b/dom/bindings/Bindings.conf
@@ -114,18 +114,13 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
                             false /* ownsWeak */);
      if (NS_WARN_IF(aRv.Failed())) {
        return nullptr;
-@@ -174,43 +176,47 @@ SyncManager::CreateOnMainThread(nsIGloba
-   ref->mInnerID = window->WindowID();
- 
-   return ref.forget();
+@@ -177,39 +179,42 @@ SyncManager::CreateOnMainThread(nsIGloba
  }
  
  // static
  already_AddRefed<SyncManager>
  SyncManager::CreateOnWorker(nsIGlobalObject* aGlobal,
--                            WorkerPrivate* aWorkerPrivate)
-+                            WorkerPrivate* aWorkerPrivate,
-+                            const nsAString& aScope)
+                             WorkerPrivate* aWorkerPrivate)
  {
    MOZ_ASSERT(aWorkerPrivate);
 +  MOZ_ASSERT(!aScope.IsEmpty());
@@ -137,8 +132,7 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
 +  RefPtr<SyncManager> ref = new SyncManager(aGlobal, principalInfo, aScope);
  
    ref->mWorkerFeature = new SyncManagerFeature(ref);
-   JSContext* cx = aWorkerPrivate->GetJSContext();
-   if (NS_WARN_IF(!aWorkerPrivate->AddFeature(cx, ref->mWorkerFeature))) {
+   if (NS_WARN_IF(!aWorkerPrivate->AddFeature(ref->mWorkerFeature))) {
      NS_WARNING("Failed to register SyncManager worker feature");
      ref->mWorkerFeature = nullptr;
      return nullptr;
@@ -165,7 +159,7 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
    } else {
      MOZ_ALWAYS_TRUE(BackgroundChild::GetOrCreateForCurrentThread(this));
    }
-@@ -376,17 +382,17 @@ SyncManager::ExecuteOp(const SyncOpArgs&
+@@ -375,17 +380,17 @@ SyncManager::ExecuteOp(const SyncOpArgs&
    return p.forget();
  }
  
