@@ -3,6 +3,27 @@
 # Parent  960029b66e4c3f02862d00d080a399cf15d00438
 Bug 1217544 - Implement one-off BackgroundSync API. Part 1: SyncManager interface. r=baku
 
+diff --git a/dom/moz.build b/dom/moz.build
+--- a/dom/moz.build
++++ b/dom/moz.build
+@@ -96,16 +96,17 @@ DIRS += [
+     'ipc',
+     'workers',
+     'camera',
+     'audiochannel',
+     'broadcastchannel',
+     'messagechannel',
+     'promise',
+     'smil',
++    'sync',
+     'telephony',
+     'tv',
+     'voicemail',
+     'inputmethod',
+     'webidl',
+     'xbl',
+     'xml',
+     'xslt',
 diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
 new file mode 100644
 --- /dev/null
