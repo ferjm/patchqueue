@@ -6,7 +6,7 @@ Bug 1217544 - Implement one-off BackgroundSync API. Part 5: SyncService. r=baku
 diff --git a/dom/sync/SyncIPCTypes.ipdlh b/dom/sync/SyncIPCTypes.ipdlh
 --- a/dom/sync/SyncIPCTypes.ipdlh
 +++ b/dom/sync/SyncIPCTypes.ipdlh
-@@ -10,16 +10,17 @@ namespace dom {
+@@ -10,33 +10,33 @@ namespace dom {
  struct SyncRegisterArgs
  {
    nsString mScope;
@@ -24,6 +24,23 @@ diff --git a/dom/sync/SyncIPCTypes.ipdlh b/dom/sync/SyncIPCTypes.ipdlh
    SyncGetTagsArgs;
  };
  
+ struct SyncOp
+ {
+   PrincipalInfo mPrincipal;
+   SyncOpArgs mArgs;
+ };
+ 
+ struct SyncRegisterResponse
+ {
+-  bool mSuccess;
+ };
+ 
+ struct SyncGetTagsResponse
+ {
+   nsString[] mTags;
+ };
+ 
+ struct SyncOpError
 diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
 --- a/dom/sync/SyncManager.cpp
 +++ b/dom/sync/SyncManager.cpp
@@ -245,7 +262,7 @@ diff --git a/dom/sync/SyncService.cpp b/dom/sync/SyncService.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncService.cpp
-@@ -0,0 +1,309 @@
+@@ -0,0 +1,330 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -296,12 +313,29 @@ new file mode 100644
 +  ~SyncRegistryRequest() {}
 +};
 +
++class SyncRegistryResponse final : public SyncRegistryAction {
++public:
++  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(SyncRegistryResponse)
++
++  SyncOpResponse mResponse;
++
++  SyncRegistryResponse(const uint64_t aActorId,
++                       const nsID& aRequestId,
++                       const SyncOpResponse& aResponse)
++    : SyncRegistryAction(aActorId, aRequestId)
++    , mResponse(aResponse)
++  {}
++
++private:
++  ~SyncRegistryResponse() {}
++};
++
 +class SyncRegistryRequestRunnableCallback final : public nsRunnable
 +{
 +public:
 +  // XXX Use SyncRegistryResponse struct instead.
-+  SyncRegistryRequestRunnableCallback(SyncRegistryRequest* aRequest)
-+    : mRequest(aRequest)
++  SyncRegistryRequestRunnableCallback(SyncRegistryResponse* aResponse)
++    : mResponse(aResponse)
 +  {
 +    AssertIsOnMainThread();
 +  }
@@ -310,17 +344,19 @@ new file mode 100644
 +  {
 +    AssertIsOnBackgroundThread();
 +
-+    const SyncRegisterResponse response(true);
++/*    const SyncRegisterResponse response(true);
 +    sInstance->Response(mRequest->mActorId,
 +                        mRequest->mRequestId,
-+                        response);
++                        response);*/
++    sInstance->Response(mResponse);
++
 +    return NS_OK;
 +  }
 +
 +private:
 +  ~SyncRegistryRequestRunnableCallback() {}
 +
-+  RefPtr<SyncRegistryRequest> mRequest;
++  RefPtr<SyncRegistryResponse> mResponse;
 +};
 +
 +class SyncRegistryRequestRunnable final : public nsIRunnable
@@ -366,8 +402,12 @@ new file mode 100644
 +  NS_IMETHODIMP
 +  NotifyAddSuccess()
 +  {
++    RefPtr<SyncRegistryResponse> response =
++      new SyncRegistryResponse(mRequest->mActorId,
++                               mRequest->mRequestId,
++                               SyncRegisterResponse());
 +    RefPtr<SyncRegistryRequestRunnableCallback> callback =
-+      new SyncRegistryRequestRunnableCallback(mRequest);
++      new SyncRegistryRequestRunnableCallback(response);
 +    MOZ_ASSERT(callback);
 +
 +    mBackgroundThread->Dispatch(callback, NS_DISPATCH_NORMAL);
@@ -536,20 +576,18 @@ new file mode 100644
 +}
 +
 +void
-+SyncService::Response(const uint64_t aActorId,
-+                      const nsID& aRequestId,
-+                      const SyncOpResponse& aResponse)
++SyncService::Response(SyncRegistryResponse* aResponse)
 +{
 +  AssertIsOnBackgroundThread();
 +
 +  for (auto iter = mSyncManagerActors.Iter(); !iter.Done(); iter.Next()) {
 +    RefPtr<SyncManagerParent> parent = iter.Get()->GetKey();
 +    MOZ_ASSERT(parent);
-+    if (parent->Id() != aActorId ||
++    if (parent->Id() != aResponse->mActorId ||
 +        parent->ActorDestroyed()) {
 +      continue;
 +    }
-+    parent->NotifyResponse(aRequestId, aResponse);
++    parent->NotifyResponse(aResponse->mRequestId, aResponse->mResponse);
 +  }
 +}
 +
@@ -559,7 +597,7 @@ diff --git a/dom/sync/SyncService.h b/dom/sync/SyncService.h
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncService.h
-@@ -0,0 +1,59 @@
+@@ -0,0 +1,60 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -583,9 +621,12 @@ new file mode 100644
 +} // namespace workers
 +
 +class SyncManagerParent;
++class SyncRegistryResponse;
 +
 +class SyncService final
 +{
++  friend class SyncRegistryRequestRunnableCallback;
++
 +public:
 +  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(SyncService)
 +
@@ -601,14 +642,12 @@ new file mode 100644
 +               const nsID& aRequestId,
 +               const SyncOp& aOp);
 +
-+  void Response(const uint64_t aActorId,
-+                const nsID& aRequestId,
-+                const SyncOpResponse& aResponse);
-+
 +  SyncService();
 +
 +private:
 +  ~SyncService();
++
++  void Response(SyncRegistryResponse* aResponse);
 +
 +  nsTHashtable<nsRefPtrHashKey<SyncManagerParent>> mSyncManagerActors;
 +  nsTHashtable<nsRefPtrHashKey<workers::ServiceWorkerManagerParent>>
