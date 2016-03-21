@@ -245,7 +245,7 @@ diff --git a/dom/sync/SyncService.cpp b/dom/sync/SyncService.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncService.cpp
-@@ -0,0 +1,297 @@
+@@ -0,0 +1,309 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -264,19 +264,31 @@ new file mode 100644
 +  SyncService* sInstance = nullptr;
 +} // namespace
 +
-+class SyncRegistryRequest {
++class SyncRegistryAction {
++public:
++  uint64_t mActorId;
++  nsID mRequestId;
++
++protected:
++  SyncRegistryAction(const uint64_t aActorId,
++                     const nsID& aRequestId)
++    : mActorId(aActorId)
++    , mRequestId(aRequestId)
++  {}
++
++  ~SyncRegistryAction() {}
++};
++
++class SyncRegistryRequest final : public SyncRegistryAction {
 +public:
 +  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(SyncRegistryRequest)
 +
-+  uint64_t mActorId;
-+  nsID mRequestId;
 +  SyncOp mOp;
 +
 +  SyncRegistryRequest(const uint64_t aActorId,
 +                      const nsID& aRequestId,
 +                      const SyncOp& aOp)
-+    : mActorId(aActorId)
-+    , mRequestId(aRequestId)
++    : SyncRegistryAction(aActorId, aRequestId)
 +    , mOp(aOp)
 +  {}
 +
