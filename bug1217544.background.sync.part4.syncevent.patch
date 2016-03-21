@@ -114,13 +114,18 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
                             false /* ownsWeak */);
      if (NS_WARN_IF(aRv.Failed())) {
        return nullptr;
-@@ -177,39 +179,42 @@ SyncManager::CreateOnMainThread(nsIGloba
+@@ -174,42 +176,46 @@ SyncManager::CreateOnMainThread(nsIGloba
+   ref->mInnerID = window->WindowID();
+ 
+   return ref.forget();
  }
  
  // static
  already_AddRefed<SyncManager>
  SyncManager::CreateOnWorker(nsIGlobalObject* aGlobal,
-                             WorkerPrivate* aWorkerPrivate)
+-                            WorkerPrivate* aWorkerPrivate)
++                            WorkerPrivate* aWorkerPrivate,
++                            const nsAString& aScope)
  {
    MOZ_ASSERT(aWorkerPrivate);
 +  MOZ_ASSERT(!aScope.IsEmpty());
@@ -129,7 +134,7 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
    const PrincipalInfo& principalInfo = aWorkerPrivate->GetPrincipalInfo();
  
 -  RefPtr<SyncManager> ref = new SyncManager(aGlobal, principalInfo);
-+  RefPtr<SyncManager> ref = new SyncManager(aGlobal, principalInfo, mScope);
++  RefPtr<SyncManager> ref = new SyncManager(aGlobal, principalInfo, aScope);
  
    ref->mWorkerFeature = new SyncManagerFeature(ref);
    if (NS_WARN_IF(!aWorkerPrivate->AddFeature(ref->mWorkerFeature))) {
@@ -159,7 +164,7 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
    } else {
      MOZ_ALWAYS_TRUE(BackgroundChild::GetOrCreateForCurrentThread(this));
    }
-@@ -375,17 +380,17 @@ SyncManager::ExecuteOp(const SyncOpArgs&
+@@ -375,17 +381,17 @@ SyncManager::ExecuteOp(const SyncOpArgs&
    return p.forget();
  }
  
