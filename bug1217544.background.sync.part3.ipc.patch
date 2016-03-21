@@ -100,7 +100,7 @@ new file mode 100644
 diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
 --- a/dom/sync/SyncManager.cpp
 +++ b/dom/sync/SyncManager.cpp
-@@ -1,79 +1,250 @@
+@@ -1,79 +1,249 @@
  /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
  /* vim: set ts=8 sts=2 et sw=2 tw=80: */
  /* This Source Code Form is subject to the terms of the Mozilla Public
@@ -295,8 +295,7 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
    RefPtr<SyncManager> ref = new SyncManager(aGlobal, principalInfo);
 +
 +  ref->mWorkerFeature = new SyncManagerFeature(ref);
-+  JSContext* cx = aWorkerPrivate->GetJSContext();
-+  if (NS_WARN_IF(!aWorkerPrivate->AddFeature(cx, ref->mWorkerFeature))) {
++  if (NS_WARN_IF(!aWorkerPrivate->AddFeature(ref->mWorkerFeature))) {
 +    NS_WARNING("Failed to register SyncManager worker feature");
 +    ref->mWorkerFeature = nullptr;
 +    return nullptr;
@@ -338,7 +337,7 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
 +{
 +  if (mWorkerFeature) {
 +    WorkerPrivate* workerPrivate = GetCurrentThreadWorkerPrivate();
-+    workerPrivate->RemoveFeature(workerPrivate->GetJSContext(), mWorkerFeature);
++    workerPrivate->RemoveFeature(mWorkerFeature);
 +    mWorkerFeature = nullptr;
 +  }
 +
@@ -358,7 +357,7 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
  {
    return SyncManagerBinding::Wrap(aCx, this, aGivenProto);
  }
-@@ -96,42 +267,139 @@ SyncManager::PrefEnabled(JSContext* aCx,
+@@ -96,42 +266,139 @@ SyncManager::PrefEnabled(JSContext* aCx,
    WorkerPrivate* workerPrivate = GetWorkerPrivateFromContext(aCx);
    if (!workerPrivate) {
      return false;
