@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  f7a8310256fcdcaa48358eaccf4122f51ce1f2ce
+# Parent  e465752c9e69e3010386c8f167546c8f4772c469
 Bug 1217544 - Implement one-off BackgroundSync API. Part 5: SyncService. r=baku
 
 diff --git a/dom/sync/SyncIPCTypes.ipdlh b/dom/sync/SyncIPCTypes.ipdlh
@@ -330,7 +330,7 @@ new file mode 100644
 +  }
 +
 +  NS_IMETHODIMP
-+  NotifyError(const nsAString& aError)
++  NotifyError(const uint32_t aError)
 +  {
 +    return NS_OK;
 +  }
