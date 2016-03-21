@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  e7576b6f06f3f66149a9fa85c35814033a04a5e8
+# Parent  34300d528cbe25f6703e82b6f759f17b72578be7
 Bug 1217544 - Implement one-off BackgroundSync API. Part 3: IPC. r=baku
 
 diff --git a/dom/sync/PSyncManager.ipdl b/dom/sync/PSyncManager.ipdl
@@ -1122,10 +1122,10 @@ diff --git a/ipc/glue/BackgroundParentImpl.cpp b/ipc/glue/BackgroundParentImpl.c
  namespace {
  
  void
- AssertIsInMainProcess()
+ AssertIsOnMainThread()
  {
-   MOZ_ASSERT(XRE_IsParentProcess());
-@@ -92,16 +94,17 @@ public:
+   MOZ_ASSERT(NS_IsMainThread());
+@@ -86,16 +88,17 @@ public:
  } // namespace
  
  namespace mozilla {
@@ -1143,7 +1143,7 @@ diff --git a/ipc/glue/BackgroundParentImpl.cpp b/ipc/glue/BackgroundParentImpl.c
    AssertIsOnMainThread();
  
    MOZ_COUNT_CTOR(mozilla::ipc::BackgroundParentImpl);
-@@ -741,16 +744,36 @@ BackgroundParentImpl::DeallocPQuotaParen
+@@ -735,16 +738,36 @@ BackgroundParentImpl::DeallocPQuotaParen
  {
    AssertIsInMainProcess();
    AssertIsOnBackgroundThread();
@@ -1178,7 +1178,7 @@ diff --git a/ipc/glue/BackgroundParentImpl.cpp b/ipc/glue/BackgroundParentImpl.c
  void
  TestParent::ActorDestroy(ActorDestroyReason aWhy)
  {
-   AssertIsInMainProcess();
+   mozilla::ipc::AssertIsInMainProcess();
    AssertIsOnBackgroundThread();
 diff --git a/ipc/glue/BackgroundParentImpl.h b/ipc/glue/BackgroundParentImpl.h
 --- a/ipc/glue/BackgroundParentImpl.h
