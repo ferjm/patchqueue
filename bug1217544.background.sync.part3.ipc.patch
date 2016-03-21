@@ -40,7 +40,7 @@ diff --git a/dom/sync/SyncIPCTypes.ipdlh b/dom/sync/SyncIPCTypes.ipdlh
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncIPCTypes.ipdlh
-@@ -0,0 +1,56 @@
+@@ -0,0 +1,54 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -95,12 +95,10 @@ new file mode 100644
 +
 +} // namespace dom
 +} // namespace mozilla
-+
-+
 diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
 --- a/dom/sync/SyncManager.cpp
 +++ b/dom/sync/SyncManager.cpp
-@@ -1,79 +1,249 @@
+@@ -1,92 +1,288 @@
  /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
  /* vim: set ts=8 sts=2 et sw=2 tw=80: */
  /* This Source Code Form is subject to the terms of the Mozilla Public
@@ -217,12 +215,14 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
 +
 +class SyncManagerFeature final : public workers::WorkerFeature
 +{
-+  SyncManager* mManager;
++  // The manager keeps alive this feature.
++  SyncManager* MOZ_NON_OWNING_REF mManager;
 +
 +public:
 +  explicit SyncManagerFeature(SyncManager* aManager)
 +    : mManager(aManager)
 +  {
++    MOZ_ASSERT(aManager);
 +    MOZ_COUNT_CTOR(SyncManagerFeature);
 +  }
 +
@@ -264,7 +264,7 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
  
    RefPtr<SyncManager> ref = new SyncManager(aGlobal, principalInfo);
 +
-+  // Register as observeer for inner-window-destroyed.
++  // Register as observer for inner-window-destroyed.
 +  nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
 +  if (obs) {
 +    aRv = obs->AddObserver(ref, "inner-window-destroyed",
@@ -272,6 +272,9 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
 +    if (NS_WARN_IF(aRv.Failed())) {
 +      return nullptr;
 +    }
++  } else {
++    aRv.Throw(NS_ERROR_UNEXPECTED);
++    return nullptr;
 +  }
 +
 +  nsCOMPtr<nsPIDOMWindowInner> window = do_QueryInterface(aGlobal);
@@ -296,7 +299,6 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
 +
 +  ref->mWorkerFeature = new SyncManagerFeature(ref);
 +  if (NS_WARN_IF(!aWorkerPrivate->AddFeature(ref->mWorkerFeature))) {
-+    NS_WARNING("Failed to register SyncManager worker feature");
 +    ref->mWorkerFeature = nullptr;
 +    return nullptr;
 +  }
@@ -311,10 +313,15 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
 -{}
 +  : mInnerID(0)
 +  , mGlobal(aGlobal)
-+  , mWorkerFeature(nullptr)
 +  , mShuttingDown(false)
 +  , mPrincipalInfo(MakeUnique<PrincipalInfo>(aPrincipalInfo))
 +{
++#ifdef DEBUG
++  mThread = PR_GetCurrentThread();
++#endif
++
++  MOZ_ASSERT(aGlobal);
++
 +  // Register this component to PBackground.
 +  PBackgroundChild* actor = BackgroundChild::GetForCurrentThread();
 +  if (actor) {
@@ -327,6 +334,7 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
  SyncManager::~SyncManager()
 -{}
 +{
++  MOZ_ASSERT(mThread == PR_GetCurrentThread());
 +  Shutdown();
 +  MOZ_ASSERT(!mWorkerFeature);
 +  MOZ_ASSERT(!mActor);
@@ -335,8 +343,19 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
 +void
 +SyncManager::Shutdown()
 +{
++  MOZ_ASSERT(mThread == PR_GetCurrentThread());
++
++  mShuttingDown = true;
++
++  nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
++  if (obs) {
++    obs->RemoveObserver(this, "inner-window-destroyed");
++  }
++
 +  if (mWorkerFeature) {
 +    WorkerPrivate* workerPrivate = GetCurrentThreadWorkerPrivate();
++    MOZ_ASSERT(workerPrivate);
++    workerPrivate->AssertIsOnWorkerThread();
 +    workerPrivate->RemoveFeature(mWorkerFeature);
 +    mWorkerFeature = nullptr;
 +  }
@@ -344,6 +363,7 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
 +  if (mActor) {
 +    RefPtr<TeardownRunnable> runnable = new TeardownRunnable(mActor);
 +    NS_DispatchToCurrentThread(runnable);
++    Unused << NS_WARN_IF(NS_FAILED(rv));
 +    mActor = nullptr;
 +  }
 +
@@ -355,9 +375,26 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
  JSObject*
  SyncManager::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
  {
++  MOZ_ASSERT(mThread == PR_GetCurrentThread());
++
    return SyncManagerBinding::Wrap(aCx, this, aGivenProto);
  }
-@@ -96,42 +266,139 @@ SyncManager::PrefEnabled(JSContext* aCx,
+ 
+ // static
+ bool
+ SyncManager::PrefEnabled(JSContext* aCx, JSObject* aObj)
+ {
++  MOZ_ASSERT(mThread == PR_GetCurrentThread());
++
+   using mozilla::dom::workers::WorkerPrivate;
+   using mozilla::dom::workers::GetWorkerPrivateFromContext;
+ 
+   // If we are on the main thread, then check the pref directly.
+   if (NS_IsMainThread()) {
+     bool enabled = false;
+     Preferences::GetBool("dom.background.sync.enabled", &enabled);
+     return enabled;
+@@ -96,42 +292,126 @@ SyncManager::PrefEnabled(JSContext* aCx,
    WorkerPrivate* workerPrivate = GetWorkerPrivateFromContext(aCx);
    if (!workerPrivate) {
      return false;
@@ -378,13 +415,9 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
 +void
 +SyncManager::ActorCreated(PBackgroundChild* aActor)
 +{
++  MOZ_ASSERT(mThread == PR_GetCurrentThread());
 +  MOZ_ASSERT(aActor);
 +  MOZ_ASSERT(!mActor);
-+
-+  if (mShuttingDown) {
-+    mPendingOperations.Clear();
-+    return;
-+  }
 +
 +  PSyncManagerChild* actor = aActor->SendPSyncManagerConstructor();
 +  mActor = static_cast<SyncManagerChild*>(actor);
@@ -411,6 +444,7 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
 +                     const char* aTopic,
 +                     const char16_t* aData)
 +{
++  MOZ_ASSERT(mThread == PR_GetCurrentThread());
 +  MOZ_ASSERT(NS_IsMainThread());
 +  MOZ_ASSERT(!strcmp(aTopic, "inner-window-destroyed"));
 +
@@ -425,20 +459,7 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
 +    return NS_OK;
 +  }
 +
-+  mShuttingDown = true;
-+  nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
-+  if (obs) {
-+    obs->RemoveObserver(this, "inner-window-destroyed");
-+  }
-+
-+  if (mActor) {
-+    RefPtr<TeardownRunnable> runnable = new TeardownRunnable(mActor);
-+    nsresult rv = NS_DispatchToCurrentThread(runnable);
-+    Unused << NS_WARN_IF(NS_FAILED(rv));
-+    mActor = nullptr;
-+  } else {
-+    mPendingOperations.Clear();
-+  }
++  Shutdown();
 +
 +  return NS_OK;
 +}
@@ -447,10 +468,7 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
 -SyncManager::Register(const nsAString& aName, ErrorResult& aRv)
 +SyncManager::ExecuteOp(const SyncOpArgs& aArgs, ErrorResult& aRv)
  {
-+  if (mShuttingDown) {
-+    mPendingOperations.Clear();
-+    return nullptr;
-+  }
++  MOZ_ASSERT(mThread == PR_GetCurrentThread());
 +
    RefPtr<Promise> p = Promise::Create(mGlobal, aRv);
    if (NS_WARN_IF(aRv.Failed())) {
@@ -460,13 +478,15 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
 +  nsAutoPtr<SyncOp> op(new SyncOp(*mPrincipalInfo, aArgs));
 +  RefPtr<SyncOpRunnable> runnable = new SyncOpRunnable(p, op);
 +
-+  if (mActor) {
-+    runnable->SetActor(mActor);
-+    if (NS_FAILED(NS_DispatchToCurrentThread(runnable))) {
-+      NS_WARNING("Failed to dispatch to the current thread");
-+    }
-+  } else {
++  if (!mActor) {
 +    mPendingOperations.AppendElement(runnable);
++    return p.forget();
++  }
++
++  runnable->SetActor(mActor);
++  nsresult rv = NS_DispatchToCurrentThread(runnable);
++  if (NS_WARN_IF(NS_FAILED(rv))) {
++    p->MaybeReject(rv);
 +  }
 +
    return p.forget();
@@ -477,6 +497,8 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
 +already_AddRefed<Promise>
 +SyncManager::Register(const nsAString& aTag, ErrorResult& aRv)
 +{
++  MOZ_ASSERT(mThread == PR_GetCurrentThread());
++
 +  const SyncRegisterArgs args((nsString(aTag)));
 +  return ExecuteOp(SyncOpArgs(args), aRv);
 +}
@@ -488,7 +510,8 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
 -  if (NS_WARN_IF(aRv.Failed())) {
 -    return nullptr;
 -  }
--
++  MOZ_ASSERT(mThread == PR_GetCurrentThread());
+ 
 -  return p.forget();
 +  const SyncGetTagsArgs args;
 +  return ExecuteOp(SyncOpArgs(args), aRv);
@@ -509,7 +532,7 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
 diff --git a/dom/sync/SyncManager.h b/dom/sync/SyncManager.h
 --- a/dom/sync/SyncManager.h
 +++ b/dom/sync/SyncManager.h
-@@ -2,86 +2,112 @@
+@@ -2,48 +2,60 @@
  /* vim: set ts=8 sts=2 et sw=2 tw=80: */
  /* This Source Code Form is subject to the terms of the Mozilla Public
   * License, v. 2.0. If a copy of the MPL was not distributed with this file,
@@ -573,18 +596,7 @@ diff --git a/dom/sync/SyncManager.h b/dom/sync/SyncManager.h
  
    static already_AddRefed<SyncManager>
    CreateOnWorker(nsIGlobalObject* aGlobal,
-                  workers::WorkerPrivate* aWorkerPrivate);
- 
-+  uint64_t mInnerID;
-+
-   // Binding methods.
- 
-   nsIGlobalObject*
-   GetParentObject() const
-   {
-     return mGlobal;
-   }
- 
+@@ -60,28 +72,44 @@ public:
    JSObject*
    WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
  
@@ -609,6 +621,8 @@ diff --git a/dom/sync/SyncManager.h b/dom/sync/SyncManager.h
 +  already_AddRefed<Promise>
 +  ExecuteOp(const SyncOpArgs& aArgs, ErrorResult& aRv);
 +
++  uint64_t mInnerID;
++
    nsCOMPtr<nsIGlobalObject> mGlobal;
  
 -  nsAutoPtr<mozilla::ipc::PrincipalInfo> mPrincipalInfo;
@@ -619,6 +633,8 @@ diff --git a/dom/sync/SyncManager.h b/dom/sync/SyncManager.h
 +  bool mShuttingDown;
 +
 +  UniquePtr<mozilla::ipc::PrincipalInfo> mPrincipalInfo;
++
++  RefPtr<nsThread> mThread;
 +
 +  nsTArray<RefPtr<SyncOpRunnable>> mPendingOperations;
  };
@@ -631,7 +647,7 @@ diff --git a/dom/sync/SyncManagerChild.cpp b/dom/sync/SyncManagerChild.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncManagerChild.cpp
-@@ -0,0 +1,129 @@
+@@ -0,0 +1,130 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -671,6 +687,16 @@ new file mode 100644
 +SyncManagerChild::ActorDestroy(ActorDestroyReason aWhy)
 +{
 +  mActorDestroyed = true;
++
++  // Reject pending requests.
++  for (auto iter = mPendingRequests.Iter(); !iter.Done(); iter.Next()) {
++    PendingRequest* request = mPendingRequests.Get(iter.Get()->GetKey());
++    if (NS_WARN_IF(!request)) {
++      continue;
++    }
++    request->mPromise->MaybeReject();
++  }
++
 +  mPendingRequests.Clear();
 +}
 +
@@ -698,7 +724,7 @@ new file mode 100644
 +SyncManagerChild::GetPendingRequest(const nsID& aID)
 +{
 +  PendingRequest* request = mPendingRequests.Get(aID);
-+  if (!request) {
++  if (NS_WARN_IF(!request)) {
 +    return nullptr;
 +  }
 +
@@ -735,28 +761,19 @@ new file mode 100644
 +
 +  switch(aResponse.type()) {
 +    case SyncOpResponse::TSyncRegisterResponse:
-+    {
 +      p->MaybeResolve(true);
-+      break;
-+    }
++      return true;
 +    case SyncOpResponse::TSyncGetTagsResponse:
-+    {
 +      p->MaybeResolve(aResponse.get_SyncGetTagsResponse().mTags());
-+      break;
-+    }
++      return true;
 +    case SyncOpResponse::TSyncOpError:
-+    {
 +      p->MaybeReject(
 +          static_cast<nsresult>(aResponse.get_SyncOpError().mCode()));
-+      break;
-+    }
++      return true;
 +    default:
-+    {
 +      MOZ_CRASH("Unknown BackgroundSync response");
-+    }
++      return false;
 +  }
-+  p->MaybeResolve(true);
-+  return true;
 +}
 +
 +} // namespace dom
@@ -810,7 +827,7 @@ new file mode 100644
 +                            const SyncOpResponse& aResponse) override;
 +
 +private:
-+  explicit SyncManagerChild();
++  SyncManagerChild();
 +  ~SyncManagerChild();
 +
 +  virtual void ActorDestroy(ActorDestroyReason aWhy) override;
