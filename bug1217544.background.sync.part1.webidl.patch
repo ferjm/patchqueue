@@ -1,204 +1,8 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  7da7f2d03209a9c6b0e9c314a9d85d5b8ac82897
+# Parent  960029b66e4c3f02862d00d080a399cf15d00438
 Bug 1217544 - Implement one-off BackgroundSync API. Part 1: SyncManager interface. r=baku
 
-diff --git a/dom/moz.build b/dom/moz.build
---- a/dom/moz.build
-+++ b/dom/moz.build
-@@ -2,124 +2,125 @@
- # vim: set filetype=python:
- # This Source Code Form is subject to the terms of the Mozilla Public
- # License, v. 2.0. If a copy of the MPL was not distributed with this
- # file, You can obtain one at http://mozilla.org/MPL/2.0/.
- 
- JAR_MANIFESTS += ['jar.mn']
- 
- interfaces = [
-+    'apps',
-     'base',
-     'canvas',
-     'core',
-+    'css',
-+    'events',
-+    'gamepad',
-+    'geolocation',
-     'html',
--    'events',
-+    'json',
-+    'notification',
-+    'offline',
-+    'permission',
-+    'range',
-+    'security',
-     'settings',
-+    'smil',
-+    'storage',
-     'stylesheets',
-+    'svg',
-     'sidebar',
--    'css',
-     'traversal',
--    'range',
-     'xbl',
-     'xpath',
--    'xul',
--    'security',
--    'storage',
--    'json',
--    'offline',
--    'geolocation',
--    'notification',
--    'permission',
--    'svg',
--    'smil',
--    'apps',
--    'gamepad',
-+    'xul'
- ]
- 
- if not CONFIG['MOZ_SIMPLEPUSH']:
-     interfaces += ['push']
- 
- DIRS += ['interfaces/' + i for i in interfaces]
- 
- DIRS += [
-+    'activities',
-+    'alarm',
-     'animation',
-     'apps',
-+    'archivereader',
-+    'asmjscache',
-+    'audiochannel',
-     'base',
-+    'battery',
-+    'bindings',
-     'bluetooth',
--    'activities',
--    'archivereader',
--    'requestsync',
--    'bindings',
--    'battery',
-+    'broadcastchannel',
-     'browser-element',
-     'cache',
-+    'camera',
-     'canvas',
-     'cellbroadcast',
-     'contacts',
-     'crypto',
--    'phonenumberutils',
--    'alarm',
-     'datastore',
-     'devicestorage',
-     'encoding',
-     'events',
-     'fetch',
-     'filehandle',
-     'filesystem',
-     'fmradio',
-     'geolocation',
-     'html',
-     'icc',
-+    'indexedDB',
-+    'inputmethod',
-     'inputport',
-+    'ipc',
-     'json',
-     'jsurl',
--    'asmjscache',
-+    'locales',
-+    'manifest',
-     'mathml',
-     'media',
-+    'messagechannel',
-     'messages',
-     'mobileconnection',
-+    'mobilemessage',
-+    'network',
-+    'newapps',
-     'notification',
-     'offline',
-+    'permission',
-+    'phonenumberutils',
-+    'plugins/base',
-+    'plugins/ipc',
-     'power',
-+    'promise',
-     'quota',
-+    'requestsync',
-+    'resourcestats',
-     'security',
-     'settings',
-     'storage',
-     'svg',
--    'mobilemessage',
-+    'sync',
-+    'system',
-     'time',
--    'locales',
--    'network',
--    'permission',
--    'plugins/base',
--    'plugins/ipc',
--    'indexedDB',
--    'system',
--    'ipc',
-     'workers',
--    'camera',
--    'audiochannel',
--    'broadcastchannel',
--    'messagechannel',
--    'promise',
-     'smil',
-     'telephony',
-     'tv',
-+    'u2f',
-     'voicemail',
--    'inputmethod',
-+    'vr',
-     'webidl',
-     'xbl',
-     'xml',
-     'xslt',
--    'xul',
--    'resourcestats',
--    'manifest',
--    'vr',
--    'newapps',
--    'u2f',
-+    'xul'
- ]
- 
- if CONFIG['OS_ARCH'] == 'WINNT':
-     DIRS += ['plugins/ipc/hangui']
- 
- if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
-     DIRS += [
-         'speakermanager',
-@@ -146,20 +147,20 @@ if CONFIG['MOZ_SIMPLEPUSH']:
- else:
-     DIRS += ['push']
- 
- if CONFIG['MOZ_SECUREELEMENT']:
-     DIRS += ['secureelement']
- 
- if CONFIG['MOZ_B2G']:
-     DIRS += [
-+        'engineeringmode',
-         'downloads',
-         'identity',
--        'mobileid',
--        'engineeringmode'
-+        'mobileid'
-     ]
- 
- DIRS += ['presentation']
- 
- TEST_DIRS += [
-     'tests',
-     'imptests',
- ]
 diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
 new file mode 100644
 --- /dev/null
@@ -525,17 +329,16 @@ diff --git a/dom/webidl/moz.build b/dom/webidl/moz.build
 diff --git a/dom/workers/WorkerPrefs.h b/dom/workers/WorkerPrefs.h
 --- a/dom/workers/WorkerPrefs.h
 +++ b/dom/workers/WorkerPrefs.h
-@@ -30,16 +30,17 @@ WORKER_SIMPLE_PREF("dom.performance.enab
+@@ -28,16 +28,17 @@ WORKER_SIMPLE_PREF("dom.caches.enabled",
+ WORKER_SIMPLE_PREF("dom.caches.testing.enabled", DOMCachesTestingEnabled, DOM_CACHES_TESTING)
+ WORKER_SIMPLE_PREF("dom.performance.enable_user_timing_logging", PerformanceLoggingEnabled, PERFORMANCE_LOGGING_ENABLED)
  WORKER_SIMPLE_PREF("dom.webnotifications.enabled", DOMWorkerNotificationEnabled, DOM_WORKERNOTIFICATION)
  WORKER_SIMPLE_PREF("dom.webnotifications.serviceworker.enabled", DOMServiceWorkerNotificationEnabled, DOM_SERVICEWORKERNOTIFICATION)
  WORKER_SIMPLE_PREF("dom.serviceWorkers.enabled", ServiceWorkersEnabled, SERVICEWORKERS_ENABLED)
  WORKER_SIMPLE_PREF("dom.serviceWorkers.testing.enabled", ServiceWorkersTestingEnabled, SERVICEWORKERS_TESTING_ENABLED)
- WORKER_SIMPLE_PREF("dom.serviceWorkers.interception.enabled", InterceptionEnabled, INTERCEPTION_ENABLED)
- WORKER_SIMPLE_PREF("dom.serviceWorkers.interception.opaque.enabled", OpaqueInterceptionEnabled, INTERCEPTION_OPAQUE_ENABLED)
  WORKER_SIMPLE_PREF("dom.serviceWorkers.openWindow.enabled", OpenWindowEnabled, OPEN_WINDOW_ENABLED)
  WORKER_SIMPLE_PREF("dom.push.enabled", PushEnabled, PUSH_ENABLED)
 +WORKER_SIMPLE_PREF("dom.background.sync.enabled", BackgroundSyncEnabled, BACKGROUND_SYNC_ENABLED)
- WORKER_SIMPLE_PREF("dom.requestcache.enabled", RequestCacheEnabled, REQUESTCACHE_ENABLED)
  WORKER_SIMPLE_PREF("dom.requestcontext.enabled", RequestContextEnabled, REQUESTCONTEXT_ENABLED)
  WORKER_SIMPLE_PREF("gfx.offscreencanvas.enabled", OffscreenCanvasEnabled, OFFSCREENCANVAS_ENABLED)
  WORKER_PREF("dom.workers.latestJSVersion", JSVersionChanged)
@@ -543,3 +346,4 @@ diff --git a/dom/workers/WorkerPrefs.h b/dom/workers/WorkerPrefs.h
  WORKER_PREF("general.appname.override", AppNameOverrideChanged)
  WORKER_PREF("general.appversion.override", AppVersionOverrideChanged)
  WORKER_PREF("general.platform.override", PlatformOverrideChanged)
+ #ifdef JS_GC_ZEAL
