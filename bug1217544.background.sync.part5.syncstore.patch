@@ -73,7 +73,7 @@ new file mode 100644
 +  },
 +
 +  getId(aRegistration) {
-+    return aRegistration.tag + '@' + aRegistration.origin;
++    return aRegistration.tag + '@' + aRegistration.scope;
 +  },
 +
 +  add(aRegistration, aListener) {
