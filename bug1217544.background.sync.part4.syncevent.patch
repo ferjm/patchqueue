@@ -616,7 +616,7 @@ diff --git a/dom/workers/ServiceWorkerPrivate.cpp b/dom/workers/ServiceWorkerPri
  
    mIdleWorkerTimer = do_CreateInstance(NS_TIMER_CONTRACTID);
    MOZ_ASSERT(mIdleWorkerTimer);
-@@ -1406,16 +1406,103 @@ ServiceWorkerPrivate::SendFetchEvent(nsI
+@@ -1406,16 +1406,101 @@ ServiceWorkerPrivate::SendFetchEvent(nsI
  
    if (NS_WARN_IF(!r->Dispatch())) {
      return NS_ERROR_FAILURE;
@@ -703,9 +703,7 @@ diff --git a/dom/workers/ServiceWorkerPrivate.cpp b/dom/workers/ServiceWorkerPri
 +
 +  MOZ_ASSERT(mInfo->State() == ServiceWorkerState::Activated);
 +
-+  AutoJSAPI jsapi;
-+  jsapi.Init();
-+  if (NS_WARN_IF(!runnable->Dispatch(jsapi.cx()))) {
++  if (NS_WARN_IF(!runnable->Dispatch())) {
 +    return NS_ERROR_FAILURE;
 +  }
 +
@@ -720,7 +718,7 @@ diff --git a/dom/workers/ServiceWorkerPrivate.cpp b/dom/workers/ServiceWorkerPri
    AssertIsOnMainThread();
  
    // XXXcatalinb: We need to have a separate load group that's linked to
-@@ -1500,17 +1587,17 @@ ServiceWorkerPrivate::SpawnWorkerIfNeede
+@@ -1500,17 +1585,17 @@ ServiceWorkerPrivate::SpawnWorkerIfNeede
    mWorkerPrivate = WorkerPrivate::Constructor(jsapi.cx(),
                                                scriptSpec,
                                                false, WorkerTypeService,
@@ -739,7 +737,7 @@ diff --git a/dom/workers/ServiceWorkerPrivate.cpp b/dom/workers/ServiceWorkerPri
  void
  ServiceWorkerPrivate::StoreISupports(nsISupports* aSupports)
  {
-@@ -1565,17 +1652,17 @@ ServiceWorkerPrivate::NoteDeadServiceWor
+@@ -1565,17 +1650,17 @@ ServiceWorkerPrivate::NoteDeadServiceWor
    mInfo = nullptr;
    TerminateWorker();
  }
@@ -758,7 +756,7 @@ diff --git a/dom/workers/ServiceWorkerPrivate.cpp b/dom/workers/ServiceWorkerPri
  
  void
  ServiceWorkerPrivate::Activated()
-@@ -1703,18 +1790,19 @@ ServiceWorkerPrivate::TerminateWorkerCal
+@@ -1703,18 +1788,19 @@ ServiceWorkerPrivate::TerminateWorkerCal
  }
  
  void
