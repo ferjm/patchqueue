@@ -2,5 +2,4 @@
 e7576b6f06f3f66149a9fa85c35814033a04a5e8:bug1217544.background.sync.part2.serviceworkerregistration.patch
 68e97c6f3918b005c3852d31a6fd92aeb0bc9ad5:bug1217544.background.sync.part3.ipc.patch
 5c8cfb69c4025ec3d76b3e3bb16e825a9df0eea4:bug1217544.background.sync.part4.syncevent.patch
-e465752c9e69e3010386c8f167546c8f4772c469:bug1217544.background.sync.part5.syncstore.patch
-9dd17a222bb9654f25831a7d656ea99b06f2781b:bug1217544.background.sync.part6.syncservice.patch
+3680d9b3c7fbb416e37e8c8fc1a5aa88845bdd5d:bug1217544.background.sync.part5.syncstore.patch
