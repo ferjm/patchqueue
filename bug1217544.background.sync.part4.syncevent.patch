@@ -129,7 +129,7 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
    const PrincipalInfo& principalInfo = aWorkerPrivate->GetPrincipalInfo();
  
 -  RefPtr<SyncManager> ref = new SyncManager(aGlobal, principalInfo);
-+  RefPtr<SyncManager> ref = new SyncManager(aGlobal, principalInfo, aScope);
++  RefPtr<SyncManager> ref = new SyncManager(aGlobal, principalInfo, mScope);
  
    ref->mWorkerFeature = new SyncManagerFeature(ref);
    if (NS_WARN_IF(!aWorkerPrivate->AddFeature(ref->mWorkerFeature))) {
