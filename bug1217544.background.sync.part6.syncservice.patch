@@ -71,8 +71,6 @@ diff --git a/dom/sync/SyncManagerParent.cpp b/dom/sync/SyncManagerParent.cpp
  bool SyncManagerParent::RecvRequest(const nsID& aRequestId,
                                      const SyncOp& aOp)
  {
-+  printf_stderr("RecvRequest");
-+
    AssertIsOnBackgroundThread();
  
 -  switch(aOp.mArgs().type()) {
@@ -113,6 +111,9 @@ diff --git a/dom/sync/SyncManagerParent.cpp b/dom/sync/SyncManagerParent.cpp
 +    return false;
 +  }
 +
++  mService->UnregisterActor(this);
++  mService = nullptr;
++
    Unused << Send__delete__(this);
  
    return true;
@@ -121,7 +122,6 @@ diff --git a/dom/sync/SyncManagerParent.cpp b/dom/sync/SyncManagerParent.cpp
 +void SyncManagerParent::NotifyResponse(const nsID& aRequestId,
 +                                       const SyncOpResponse& aResponse)
 +{
-+  printf_stderr("NotifyResponse\n");
 +  Unused << SendResponse(aRequestId, aResponse);
 +}
 +
@@ -210,21 +210,24 @@ new file mode 100644
 +  SyncService* sInstance = nullptr;
 +} // namespace
 +
-+struct SyncRegistryRequest {
-+  RefPtr<SyncService> mService;
++class SyncRegistryRequest {
++public:
++  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(SyncRegistryRequest)
++
 +  uint64_t mActorId;
 +  nsID mRequestId;
 +  SyncOp mOp;
 +
-+  SyncRegistryRequest(SyncService* aService,
-+                      const uint64_t aActorId,
++  SyncRegistryRequest(const uint64_t aActorId,
 +                      const nsID& aRequestId,
 +                      const SyncOp& aOp)
-+    : mService(aService)
-+    , mActorId(aActorId)
++    : mActorId(aActorId)
 +    , mRequestId(aRequestId)
 +    , mOp(aOp)
 +  {}
++
++private:
++  ~SyncRegistryRequest() {}
 +};
 +
 +class SyncRegistryRequestRunnableCallback final : public nsRunnable
@@ -233,7 +236,7 @@ new file mode 100644
 +  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(SyncRegistryRequestRunnableCallback)
 +
 +  // XXX Use SyncRegistryResponse struct instead.
-+  SyncRegistryRequestRunnableCallback(const SyncRegistryRequest aRequest)
++  SyncRegistryRequestRunnableCallback(SyncRegistryRequest* aRequest)
 +    : mRequest(aRequest)
 +  {
 +    AssertIsOnMainThread();
@@ -244,16 +247,16 @@ new file mode 100644
 +    AssertIsOnBackgroundThread();
 +
 +    const SyncRegisterResponse response(true);
-+    mRequest.mService->Response(mRequest.mActorId,
-+                                mRequest.mRequestId,
-+                                response);
++    sInstance->Response(mRequest->mActorId,
++                        mRequest->mRequestId,
++                        response);
 +    return NS_OK;
 +  }
 +
 +private:
 +  ~SyncRegistryRequestRunnableCallback() {}
 +
-+  SyncRegistryRequest mRequest;
++  RefPtr<SyncRegistryRequest> mRequest;
 +};
 +
 +class SyncRegistryRequestRunnable final : public nsRunnable
@@ -263,7 +266,7 @@ new file mode 100644
 +public:
 +  NS_DECL_THREADSAFE_ISUPPORTS
 +
-+  SyncRegistryRequestRunnable(SyncRegistryRequest aRequest)
++  SyncRegistryRequestRunnable(SyncRegistryRequest* aRequest)
 +    : mRequest(aRequest)
 +    , mBackgroundThread(NS_GetCurrentThread())
 +  {
@@ -273,7 +276,7 @@ new file mode 100644
 +  NS_IMETHODIMP
 +  GetRequestId(nsID* aRequestId)
 +  {
-+    aRequestId = &(mRequest.mRequestId);
++    aRequestId = &(mRequest->mRequestId);
 +    return NS_OK;
 +  }
 +
@@ -286,7 +289,7 @@ new file mode 100644
 +  NS_IMETHODIMP
 +  GetActorId(uint64_t* aActorId)
 +  {
-+    aActorId = &(mRequest.mActorId);
++    aActorId = &(mRequest->mActorId);
 +    return NS_OK;
 +  }
 +
@@ -299,8 +302,6 @@ new file mode 100644
 +  NS_IMETHODIMP
 +  NotifyAddSuccess()
 +  {
-+    printf_stderr("SUCCESS\n");
-+
 +    RefPtr<SyncRegistryRequestRunnableCallback> callback =
 +      new SyncRegistryRequestRunnableCallback(mRequest);
 +    MOZ_ASSERT(callback);
@@ -344,7 +345,7 @@ new file mode 100644
 +    MOZ_ASSERT(registry);
 +
 +    nsCOMPtr<nsIPrincipal> principal =
-+      PrincipalInfoToPrincipal(mRequest.mOp.mPrincipal());
++      PrincipalInfoToPrincipal(mRequest->mOp.mPrincipal());
 +    if (NS_WARN_IF(!principal)) {
 +      return NS_OK;
 +    }
@@ -355,7 +356,7 @@ new file mode 100644
 +      return NS_OK;
 +    }
 +
-+    switch(mRequest.mOp.mArgs().type()) {
++    switch(mRequest->mOp.mArgs().type()) {
 +      case SyncOpArgs::TSyncRegisterArgs:
 +      {
 +        nsCOMPtr<nsISyncRegistration> registration =
@@ -363,8 +364,8 @@ new file mode 100644
 +        MOZ_ASSERT(registration);
 +
 +        registration->SetOrigin(NS_ConvertUTF8toUTF16(origin));
-+        registration->SetScope(mRequest.mOp.mArgs().get_SyncRegisterArgs().mScope());
-+        registration->SetTag(mRequest.mOp.mArgs().get_SyncRegisterArgs().mTag());
++        registration->SetScope(mRequest->mOp.mArgs().get_SyncRegisterArgs().mScope());
++        registration->SetTag(mRequest->mOp.mArgs().get_SyncRegisterArgs().mTag());
 +
 +        registry->Add(registration, this);
 +
@@ -386,7 +387,7 @@ new file mode 100644
 +private:
 +  ~SyncRegistryRequestRunnable() {}
 +
-+  SyncRegistryRequest mRequest;
++  RefPtr<SyncRegistryRequest> mRequest;
 +  nsCOMPtr<nsIThread> mBackgroundThread;
 +};
 +
@@ -469,8 +470,8 @@ new file mode 100644
 +                     const SyncOp& aOp)
 +{
 +  RefPtr<SyncRegistryRequestRunnable> runnable =
-+    new SyncRegistryRequestRunnable(SyncRegistryRequest(this, aActorId,
-+                                    aRequestId, aOp));
++    new SyncRegistryRequestRunnable(
++        new SyncRegistryRequest(aActorId, aRequestId, aOp));
 +  NS_DispatchToMainThread(runnable);
 +}
 +
@@ -479,7 +480,6 @@ new file mode 100644
 +                      const nsID& aRequestId,
 +                      const SyncOpResponse& aResponse)
 +{
-+  printf_stderr("RESPONSE\n");
 +  for (auto iter = mSyncManagerActors.Iter(); !iter.Done(); iter.Next()) {
 +    RefPtr<SyncManagerParent> parent = iter.Get()->GetKey();
 +    MOZ_ASSERT(parent);
@@ -488,7 +488,7 @@ new file mode 100644
 +      continue;
 +    }
 +    parent->NotifyResponse(aRequestId, aResponse);
-+  }    
++  }
 +}
 +
 +} // namespace dom
