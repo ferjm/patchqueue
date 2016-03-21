@@ -685,15 +685,15 @@ new file mode 100644
 +{
 +  mActorDestroyed = true;
 +
-+  // Reject pending requests.
-+  for (auto iter = mPendingRequests.Iter(); !iter.Done(); iter.Next()) {
-+    PendingRequest* request = mPendingRequests.Get(iter.Get()->GetKey());
++  // XXX Reject pending requests.
++/*  for (auto iter = mPendingRequests.Iter(); !iter.Done(); iter.Next()) {
++    PendingRequest* request = iter.Get();
 +    if (NS_WARN_IF(!request)) {
 +      continue;
 +    }
 +    request->mPromise->MaybeReject();
 +  }
-+
++*/
 +  mPendingRequests.Clear();
 +}
 +
