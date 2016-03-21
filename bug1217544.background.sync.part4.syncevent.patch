@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  f553148c41f9b9742cfd8e490fdb5a610f2260f7
+# Parent  4c5b20e39b982e4be7e3cfc729689041432905f9
 Bug 1217544 - Implement one-off BackgroundSync API. Part 4: Sync event. r=baku
 
 diff --git a/dom/bindings/Bindings.conf b/dom/bindings/Bindings.conf
@@ -156,20 +156,20 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
 +  , mScope(aScope)
  {
  #ifdef DEBUG
-   mThread = PR_GetCurrentThread();
+   mThread = do_GetCurrentThread();
  #endif
  
    MOZ_ASSERT(aGlobal);
  
    // Register this component to PBackground.
-@@ -386,17 +392,17 @@ SyncManager::ExecuteOp(const SyncOpArgs&
+@@ -388,17 +394,17 @@ SyncManager::ExecuteOp(const SyncOpArgs&
  
  // WebIDL interface methods.
  
  already_AddRefed<Promise>
  SyncManager::Register(const nsAString& aTag, ErrorResult& aRv)
  {
-   MOZ_ASSERT(mThread == PR_GetCurrentThread());
+   MOZ_ASSERT(IsSyncManagerThread());
  
 -  const SyncRegisterArgs args((nsString(aTag)));
 +  const SyncRegisterArgs args(mScope, (nsString(aTag)));
@@ -179,7 +179,7 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
  already_AddRefed<Promise>
  SyncManager::GetTags(ErrorResult& aRv)
  {
-   MOZ_ASSERT(mThread == PR_GetCurrentThread());
+   MOZ_ASSERT(IsSyncManagerThread());
  
 diff --git a/dom/sync/SyncManager.h b/dom/sync/SyncManager.h
 --- a/dom/sync/SyncManager.h
@@ -224,19 +224,19 @@ diff --git a/dom/sync/SyncManager.h b/dom/sync/SyncManager.h
  
    ~SyncManager();
  
+   bool IsSyncManagerThread();
+ 
    already_AddRefed<Promise>
    ExecuteOp(const SyncOpArgs& aArgs, ErrorResult& aRv);
  
-   uint64_t mInnerID;
- 
-@@ -101,15 +104,17 @@ private:
+@@ -103,15 +106,17 @@ private:
    RefPtr<SyncManagerChild> mActor;
  
    bool mShuttingDown;
  
    UniquePtr<mozilla::ipc::PrincipalInfo> mPrincipalInfo;
  
-   RefPtr<nsThread> mThread;
+   nsCOMPtr<nsIThread> mThread;
  
 +  nsString mScope;
 +
