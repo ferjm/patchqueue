@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  bb7cba90a9f5d13a13d7a616314eeb54c464eae6
+# Parent  a6c50c8766aee20d220bd92f50ac87c5c2e5afef
 Bug 1217544 - Implement one-off BackgroundSync API. Part 5: SyncService. r=baku
 
 diff --git a/dom/sync/SyncIPCTypes.ipdlh b/dom/sync/SyncIPCTypes.ipdlh
@@ -27,14 +27,14 @@ diff --git a/dom/sync/SyncIPCTypes.ipdlh b/dom/sync/SyncIPCTypes.ipdlh
 diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
 --- a/dom/sync/SyncManager.cpp
 +++ b/dom/sync/SyncManager.cpp
-@@ -401,17 +401,17 @@ SyncManager::Register(const nsAString& a
+@@ -403,17 +403,17 @@ SyncManager::Register(const nsAString& a
    return ExecuteOp(SyncOpArgs(args), aRv);
  }
  
  already_AddRefed<Promise>
  SyncManager::GetTags(ErrorResult& aRv)
  {
-   MOZ_ASSERT(mThread == PR_GetCurrentThread());
+   MOZ_ASSERT(IsSyncManagerThread());
  
 -  const SyncGetTagsArgs args;
 +  const SyncGetTagsArgs args(mScope);
