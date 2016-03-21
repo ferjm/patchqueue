@@ -7,7 +7,7 @@ diff --git a/dom/sync/SyncRegistry.js b/dom/sync/SyncRegistry.js
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncRegistry.js
-@@ -0,0 +1,124 @@
+@@ -0,0 +1,128 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -86,10 +86,14 @@ new file mode 100644
 +      return;
 +    }
 +
-+    aRegistration.id = this.getId(aRegistration);
-+
 +    this.newTxn(RW, SYNC_REGISTRY_STORE_NAME, (aTxn, aStore) => {
-+      aStore.add(aRegistration);
++      aStore.add({
++        id: this.getId(aRegistration),
++        scope: aRegistration.scope,
++        tag: aRegistration.tag,
++        state: aRegistration.state,
++        lastChance: aRegistration.lastChance
++      });
 +    }, () => {
 +      aListener.notifyAddSuccess();
 +    }, (error) => {
