@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  80556c33c6f61b1f510b85733358d0530a24601c
+# Parent  f553148c41f9b9742cfd8e490fdb5a610f2260f7
 Bug 1217544 - Implement one-off BackgroundSync API. Part 4: Sync event. r=baku
 
 diff --git a/dom/bindings/Bindings.conf b/dom/bindings/Bindings.conf
@@ -81,7 +81,7 @@ diff --git a/dom/sync/SyncIPCTypes.ipdlh b/dom/sync/SyncIPCTypes.ipdlh
 diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
 --- a/dom/sync/SyncManager.cpp
 +++ b/dom/sync/SyncManager.cpp
-@@ -139,29 +139,31 @@ private:
+@@ -141,29 +141,31 @@ private:
  };
  
  // SyncManager
@@ -107,14 +107,14 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
 -  RefPtr<SyncManager> ref = new SyncManager(aGlobal, principalInfo);
 +  RefPtr<SyncManager> ref = new SyncManager(aGlobal, principalInfo, aScope);
  
-   // Register as observeer for inner-window-destroyed.
+   // Register as observer for inner-window-destroyed.
    nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
    if (obs) {
      aRv = obs->AddObserver(ref, "inner-window-destroyed",
                             false /* ownsWeak */);
      if (NS_WARN_IF(aRv.Failed())) {
        return nullptr;
-@@ -174,42 +176,46 @@ SyncManager::CreateOnMainThread(nsIGloba
+@@ -179,40 +181,44 @@ SyncManager::CreateOnMainThread(nsIGloba
    ref->mInnerID = window->WindowID();
  
    return ref.forget();
@@ -138,7 +138,6 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
  
    ref->mWorkerFeature = new SyncManagerFeature(ref);
    if (NS_WARN_IF(!aWorkerPrivate->AddFeature(ref->mWorkerFeature))) {
-     NS_WARNING("Failed to register SyncManager worker feature");
      ref->mWorkerFeature = nullptr;
      return nullptr;
    }
@@ -152,27 +151,26 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
 +                         const nsAString& aScope)
    : mInnerID(0)
    , mGlobal(aGlobal)
-   , mWorkerFeature(nullptr)
    , mShuttingDown(false)
    , mPrincipalInfo(MakeUnique<PrincipalInfo>(aPrincipalInfo))
 +  , mScope(aScope)
  {
+ #ifdef DEBUG
+   mThread = PR_GetCurrentThread();
+ #endif
+ 
+   MOZ_ASSERT(aGlobal);
+ 
    // Register this component to PBackground.
-   PBackgroundChild* actor = BackgroundChild::GetForCurrentThread();
-   if (actor) {
-     ActorCreated(actor);
-   } else {
-     MOZ_ALWAYS_TRUE(BackgroundChild::GetOrCreateForCurrentThread(this));
-   }
-@@ -375,17 +381,17 @@ SyncManager::ExecuteOp(const SyncOpArgs&
-   return p.forget();
- }
+@@ -386,17 +392,17 @@ SyncManager::ExecuteOp(const SyncOpArgs&
  
  // WebIDL interface methods.
  
  already_AddRefed<Promise>
  SyncManager::Register(const nsAString& aTag, ErrorResult& aRv)
  {
+   MOZ_ASSERT(mThread == PR_GetCurrentThread());
+ 
 -  const SyncRegisterArgs args((nsString(aTag)));
 +  const SyncRegisterArgs args(mScope, (nsString(aTag)));
    return ExecuteOp(SyncOpArgs(args), aRv);
@@ -181,8 +179,8 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
  already_AddRefed<Promise>
  SyncManager::GetTags(ErrorResult& aRv)
  {
-   const SyncGetTagsArgs args;
-   return ExecuteOp(SyncOpArgs(args), aRv);
+   MOZ_ASSERT(mThread == PR_GetCurrentThread());
+ 
 diff --git a/dom/sync/SyncManager.h b/dom/sync/SyncManager.h
 --- a/dom/sync/SyncManager.h
 +++ b/dom/sync/SyncManager.h
@@ -204,14 +202,14 @@ diff --git a/dom/sync/SyncManager.h b/dom/sync/SyncManager.h
 +                 workers::WorkerPrivate* aWorkerPrivate,
 +                 const nsAString& aScope);
  
-   uint64_t mInnerID;
- 
    // Binding methods.
  
    nsIGlobalObject*
    GetParentObject() const
    {
-@@ -82,32 +84,35 @@ public:
+     return mGlobal;
+   }
+@@ -80,17 +82,18 @@ public:
    Register(const nsAString& aTag, ErrorResult& aRv);
  
    already_AddRefed<Promise>
@@ -229,15 +227,16 @@ diff --git a/dom/sync/SyncManager.h b/dom/sync/SyncManager.h
    already_AddRefed<Promise>
    ExecuteOp(const SyncOpArgs& aArgs, ErrorResult& aRv);
  
-   nsCOMPtr<nsIGlobalObject> mGlobal;
+   uint64_t mInnerID;
  
-   nsAutoPtr<workers::WorkerFeature> mWorkerFeature;
- 
+@@ -101,15 +104,17 @@ private:
    RefPtr<SyncManagerChild> mActor;
  
    bool mShuttingDown;
  
    UniquePtr<mozilla::ipc::PrincipalInfo> mPrincipalInfo;
+ 
+   RefPtr<nsThread> mThread;
  
 +  nsString mScope;
 +
