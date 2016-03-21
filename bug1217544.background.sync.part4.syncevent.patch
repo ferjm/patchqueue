@@ -1,12 +1,12 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  68e97c6f3918b005c3852d31a6fd92aeb0bc9ad5
+# Parent  8bf07afb7a02b452cfaac420e3227799fa2b2312
 Bug 1217544 - Implement one-off BackgroundSync API. Part 4: Sync event. r=baku
 
 diff --git a/dom/bindings/Bindings.conf b/dom/bindings/Bindings.conf
 --- a/dom/bindings/Bindings.conf
 +++ b/dom/bindings/Bindings.conf
-@@ -1264,16 +1264,22 @@ DOMInterfaces = {
+@@ -1260,16 +1260,22 @@ DOMInterfaces = {
  'SVGUnitTypes' : {
      'concrete': False,
  },
@@ -21,14 +21,14 @@ diff --git a/dom/bindings/Bindings.conf b/dom/bindings/Bindings.conf
 +    'workers': True
 +},
 +
+ 'TestFunctions': {
+     'wrapperCache': False
+ },
+ 
  'Text': {
      # Total hack to allow binding code to realize that nsTextNode can
      # in fact be cast to Text.
      'headerFile': 'nsTextNode.h',
- },
- 
- 'TextDecoder': {
-     'wrapperCache': False
 diff --git a/dom/interfaces/base/nsIServiceWorkerManager.idl b/dom/interfaces/base/nsIServiceWorkerManager.idl
 --- a/dom/interfaces/base/nsIServiceWorkerManager.idl
 +++ b/dom/interfaces/base/nsIServiceWorkerManager.idl
@@ -326,7 +326,7 @@ diff --git a/dom/workers/PServiceWorkerManager.ipdl b/dom/workers/PServiceWorker
 diff --git a/dom/workers/ServiceWorkerEvents.cpp b/dom/workers/ServiceWorkerEvents.cpp
 --- a/dom/workers/ServiceWorkerEvents.cpp
 +++ b/dom/workers/ServiceWorkerEvents.cpp
-@@ -979,17 +979,17 @@ ExtractBytesFromData(const OwningArrayBu
+@@ -1004,17 +1004,17 @@ ExtractBytesFromData(const OwningArrayBu
      const ArrayBuffer& buffer = aDataInit.GetAsArrayBuffer();
      return ExtractBytesFromArrayBuffer(buffer, aBytes);
    } else if (aDataInit.IsUSVString()) {
@@ -345,12 +345,12 @@ diff --git a/dom/workers/ServiceWorkerEvents.cpp b/dom/workers/ServiceWorkerEven
  PushMessageData::~PushMessageData()
  {
  }
-@@ -1110,16 +1110,50 @@ NS_IMPL_RELEASE_INHERITED(PushEvent, Ext
- 
- NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(PushEvent)
- NS_INTERFACE_MAP_END_INHERITING(ExtendableEvent)
- 
- NS_IMPL_CYCLE_COLLECTION_INHERITED(PushEvent, ExtendableEvent, mData)
+@@ -1147,16 +1147,50 @@ NS_IMPL_CYCLE_COLLECTION_INHERITED(PushE
+ JSObject*
+ PushEvent::WrapObjectInternal(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
+ {
+   return mozilla::dom::PushEventBinding::Wrap(aCx, this, aGivenProto);
+ }
  
  #endif /* ! MOZ_SIMPLEPUSH */
  
@@ -399,12 +399,12 @@ diff --git a/dom/workers/ServiceWorkerEvents.cpp b/dom/workers/ServiceWorkerEven
 diff --git a/dom/workers/ServiceWorkerEvents.h b/dom/workers/ServiceWorkerEvents.h
 --- a/dom/workers/ServiceWorkerEvents.h
 +++ b/dom/workers/ServiceWorkerEvents.h
-@@ -16,16 +16,18 @@
+@@ -14,16 +14,18 @@
+ #include "mozilla/dom/Promise.h"
+ #include "mozilla/dom/Response.h"
  #include "mozilla/dom/workers/bindings/ServiceWorker.h"
  
  #ifndef MOZ_SIMPLEPUSH
- #include "mozilla/dom/PushEventBinding.h"
- #include "mozilla/dom/PushMessageDataBinding.h"
  #include "mozilla/dom/File.h"
  #endif
  
@@ -418,7 +418,7 @@ diff --git a/dom/workers/ServiceWorkerEvents.h b/dom/workers/ServiceWorkerEvents
  namespace mozilla {
  namespace dom {
  class Blob;
-@@ -317,11 +319,60 @@ public:
+@@ -311,11 +313,60 @@ public:
  
    void SetPorts(MessagePortList* aPorts);
  
@@ -482,7 +482,7 @@ diff --git a/dom/workers/ServiceWorkerEvents.h b/dom/workers/ServiceWorkerEvents
 diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
 --- a/dom/workers/ServiceWorkerManager.cpp
 +++ b/dom/workers/ServiceWorkerManager.cpp
-@@ -5200,9 +5200,35 @@ ServiceWorkerInfo::~ServiceWorkerInfo()
+@@ -5265,16 +5265,42 @@ ServiceWorkerInfo::~ServiceWorkerInfo()
  static uint64_t gServiceWorkerInfoCurrentID = 0;
  
  uint64_t
@@ -517,7 +517,14 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
 +                                                       registration);
 +}
 +
- END_WORKERS_NAMESPACE
+ already_AddRefed<ServiceWorker>
+ ServiceWorkerInfo::GetOrCreateInstance(nsPIDOMWindowInner* aWindow)
+ {
+   AssertIsOnMainThread();
+   MOZ_ASSERT(aWindow);
+ 
+   RefPtr<ServiceWorker> ref;
+ 
 diff --git a/dom/workers/ServiceWorkerManagerChild.cpp b/dom/workers/ServiceWorkerManagerChild.cpp
 --- a/dom/workers/ServiceWorkerManagerChild.cpp
 +++ b/dom/workers/ServiceWorkerManagerChild.cpp
@@ -591,7 +598,7 @@ diff --git a/dom/workers/ServiceWorkerManagerChild.h b/dom/workers/ServiceWorker
 diff --git a/dom/workers/ServiceWorkerPrivate.cpp b/dom/workers/ServiceWorkerPrivate.cpp
 --- a/dom/workers/ServiceWorkerPrivate.cpp
 +++ b/dom/workers/ServiceWorkerPrivate.cpp
-@@ -56,17 +56,17 @@ private:
+@@ -76,17 +76,17 @@ private:
  
    RefPtr<ServiceWorkerPrivate> mPrivate;
  };
@@ -610,30 +617,9 @@ diff --git a/dom/workers/ServiceWorkerPrivate.cpp b/dom/workers/ServiceWorkerPri
  
    mIdleWorkerTimer = do_CreateInstance(NS_TIMER_CONTRACTID);
    MOZ_ASSERT(mIdleWorkerTimer);
-@@ -478,18 +478,18 @@ public:
-   {
-     MOZ_ASSERT(GetCurrentThreadWorkerPrivate() == mWorkerPrivate);
-     mWorkerPrivate->AssertIsOnWorkerThread();
+@@ -1406,16 +1406,103 @@ ServiceWorkerPrivate::SendFetchEvent(nsI
  
-     ReportResult(aCx, false);
- 
-     // Note, all WaitUntil() rejections are reported to client consoles
-     // by the WaitUntilHandler in ServiceWorkerEvents.  This ensures that
--    // errors in non-lifecycle events like FetchEvent and PushEvent are
--    // reported properly.
-+    // errors in non-lifecycle events like FetchEvent, PushEvent or SyncEvent
-+    // are reported properly.
-   }
- };
- 
- NS_IMPL_ISUPPORTS0(LifeCycleEventWatcher)
- 
- bool
- LifecycleEventWorkerRunnable::DispatchLifecycleEvent(JSContext* aCx,
-                                                      WorkerPrivate* aWorkerPrivate)
-@@ -1357,16 +1357,103 @@ ServiceWorkerPrivate::SendFetchEvent(nsI
-   jsapi.Init();
-   if (NS_WARN_IF(!r->Dispatch(jsapi.cx()))) {
+   if (NS_WARN_IF(!r->Dispatch())) {
      return NS_ERROR_FAILURE;
    }
  
@@ -735,7 +721,7 @@ diff --git a/dom/workers/ServiceWorkerPrivate.cpp b/dom/workers/ServiceWorkerPri
    AssertIsOnMainThread();
  
    // XXXcatalinb: We need to have a separate load group that's linked to
-@@ -1451,17 +1538,17 @@ ServiceWorkerPrivate::SpawnWorkerIfNeede
+@@ -1500,17 +1587,17 @@ ServiceWorkerPrivate::SpawnWorkerIfNeede
    mWorkerPrivate = WorkerPrivate::Constructor(jsapi.cx(),
                                                scriptSpec,
                                                false, WorkerTypeService,
@@ -754,7 +740,7 @@ diff --git a/dom/workers/ServiceWorkerPrivate.cpp b/dom/workers/ServiceWorkerPri
  void
  ServiceWorkerPrivate::StoreISupports(nsISupports* aSupports)
  {
-@@ -1518,17 +1605,17 @@ ServiceWorkerPrivate::NoteDeadServiceWor
+@@ -1565,17 +1652,17 @@ ServiceWorkerPrivate::NoteDeadServiceWor
    mInfo = nullptr;
    TerminateWorker();
  }
@@ -773,7 +759,7 @@ diff --git a/dom/workers/ServiceWorkerPrivate.cpp b/dom/workers/ServiceWorkerPri
  
  void
  ServiceWorkerPrivate::Activated()
-@@ -1658,18 +1745,19 @@ ServiceWorkerPrivate::TerminateWorkerCal
+@@ -1703,18 +1790,19 @@ ServiceWorkerPrivate::TerminateWorkerCal
  }
  
  void
@@ -798,7 +784,7 @@ diff --git a/dom/workers/ServiceWorkerPrivate.cpp b/dom/workers/ServiceWorkerPri
 diff --git a/dom/workers/ServiceWorkerPrivate.h b/dom/workers/ServiceWorkerPrivate.h
 --- a/dom/workers/ServiceWorkerPrivate.h
 +++ b/dom/workers/ServiceWorkerPrivate.h
-@@ -101,16 +101,21 @@ public:
+@@ -104,16 +104,21 @@ public:
                               const nsAString& aScope);
  
    nsresult
@@ -820,7 +806,7 @@ diff --git a/dom/workers/ServiceWorkerPrivate.h b/dom/workers/ServiceWorkerPriva
  
    // This will terminate the current running worker thread and drop the
    // workerPrivate reference.
-@@ -141,17 +146,18 @@ public:
+@@ -144,17 +149,18 @@ public:
  private:
    enum WakeUpReason {
      FetchEvent = 0,
@@ -840,7 +826,7 @@ diff --git a/dom/workers/ServiceWorkerPrivate.h b/dom/workers/ServiceWorkerPriva
  
    static void
    TerminateWorkerCallback(nsITimer* aTimer, void *aPrivate);
-@@ -184,20 +190,20 @@ private:
+@@ -187,20 +193,20 @@ private:
  
    // The WorkerPrivate object can only be closed by this class or by the
    // RuntimeService class if gecko is shutting down. Closing the worker
@@ -868,7 +854,7 @@ diff --git a/dom/workers/ServiceWorkerPrivate.h b/dom/workers/ServiceWorkerPriva
 diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWorkerRegistration.cpp
 --- a/dom/workers/ServiceWorkerRegistration.cpp
 +++ b/dom/workers/ServiceWorkerRegistration.cpp
-@@ -837,17 +837,17 @@ ServiceWorkerRegistrationMainThread::Get
+@@ -821,17 +821,17 @@ ServiceWorkerRegistrationMainThread::Get
  
      nsCOMPtr<nsIPrincipal> principal = document->NodePrincipal();
      if (!principal) {
@@ -887,7 +873,7 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
  ////////////////////////////////////////////////////
  // Worker Thread implementation
  class WorkerListener final : public ServiceWorkerRegistrationListener
-@@ -1291,16 +1291,17 @@ ServiceWorkerRegistrationWorkerThread::G
+@@ -1272,16 +1272,17 @@ ServiceWorkerRegistrationWorkerThread::G
    #endif /* ! MOZ_SIMPLEPUSH */
  }
  
