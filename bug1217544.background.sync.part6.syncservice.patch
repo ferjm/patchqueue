@@ -1,12 +1,30 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  e465752c9e69e3010386c8f167546c8f4772c469
+# Parent  5d827bf8e1b160c01fce38ff95d6618fde0019c6
 Bug 1217544 - Implement one-off BackgroundSync API. Part 5: SyncService. r=baku
 
 diff --git a/dom/sync/SyncIPCTypes.ipdlh b/dom/sync/SyncIPCTypes.ipdlh
 --- a/dom/sync/SyncIPCTypes.ipdlh
 +++ b/dom/sync/SyncIPCTypes.ipdlh
-@@ -48,10 +48,8 @@ union SyncOpResponse
+@@ -10,16 +10,17 @@ namespace dom {
+ struct SyncRegisterArgs
+ {
+   nsString mScope;
+   nsString mTag;
+ };
+ 
+ struct SyncGetTagsArgs
+ {
++  nsString mScope;
+ };
+ 
+ union SyncOpArgs
+ {
+   SyncRegisterArgs;
+   SyncGetTagsArgs;
+ };
+ 
+@@ -48,10 +49,8 @@ union SyncOpResponse
  {
    SyncRegisterResponse;
    SyncGetTagsResponse;
@@ -17,6 +35,28 @@ diff --git a/dom/sync/SyncIPCTypes.ipdlh b/dom/sync/SyncIPCTypes.ipdlh
  } // namespace mozilla
 -
 -
+diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
+--- a/dom/sync/SyncManager.cpp
++++ b/dom/sync/SyncManager.cpp
+@@ -389,17 +389,17 @@ SyncManager::Register(const nsAString& a
+ {
+   const SyncRegisterArgs args(mScope, (nsString(aTag)));
+   return ExecuteOp(SyncOpArgs(args), aRv);
+ }
+ 
+ already_AddRefed<Promise>
+ SyncManager::GetTags(ErrorResult& aRv)
+ {
+-  const SyncGetTagsArgs args;
++  const SyncGetTagsArgs args(mScope);
+   return ExecuteOp(SyncOpArgs(args), aRv);
+ }
+ 
+ NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(SyncManager, mGlobal)
+ NS_IMPL_CYCLE_COLLECTING_ADDREF(SyncManager)
+ NS_IMPL_CYCLE_COLLECTING_RELEASE(SyncManager)
+ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(SyncManager)
+   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
 diff --git a/dom/sync/SyncManagerParent.cpp b/dom/sync/SyncManagerParent.cpp
 --- a/dom/sync/SyncManagerParent.cpp
 +++ b/dom/sync/SyncManagerParent.cpp
@@ -191,7 +231,7 @@ diff --git a/dom/sync/SyncService.cpp b/dom/sync/SyncService.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncService.cpp
-@@ -0,0 +1,301 @@
+@@ -0,0 +1,295 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -350,12 +390,6 @@ new file mode 100644
 +      return NS_OK;
 +    }
 +
-+    nsAutoCString origin;
-+    nsresult rv = principal->GetOriginSuffix(origin);
-+    if (NS_WARN_IF(NS_FAILED(rv))) {
-+      return NS_OK;
-+    }
-+
 +    switch(mRequest->mOp.mArgs().type()) {
 +      case SyncOpArgs::TSyncRegisterArgs:
 +      {
@@ -363,7 +397,6 @@ new file mode 100644
 +          do_CreateInstance("@mozilla.org/dom/sync/registration;1");
 +        MOZ_ASSERT(registration);
 +
-+        registration->SetOrigin(NS_ConvertUTF8toUTF16(origin));
 +        registration->SetScope(mRequest->mOp.mArgs().get_SyncRegisterArgs().mScope());
 +        registration->SetTag(mRequest->mOp.mArgs().get_SyncRegisterArgs().mTag());
 +
@@ -373,7 +406,8 @@ new file mode 100644
 +      }
 +      case SyncOpArgs::TSyncGetTagsArgs:
 +      {
-+        registry->GetAll(NS_ConvertUTF8toUTF16(origin), this);
++        registry->GetAll(mRequest->mOp.mArgs().get_SyncGetTagsArgs().mScope(),
++                         this);
 +        break;
 +      }
 +      default:
