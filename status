@@ -3,3 +3,4 @@
 4c5b20e39b982e4be7e3cfc729689041432905f9:bug1217544.background.sync.part3.ipc.patch
 9e3bf62b0b64cb5c1945797eb8c5a5c33d68c62d:bug1217544.background.sync.part4.syncevent.patch
 8fe39a372fbf464b2c1f72821fdba1a6b0cf64b6:bug1217544.background.sync.part5.syncstore.patch
+2a76dd648ae6b5f764f36842a98ea023812cb615:bug1217544.background.sync.part6.syncservice.patch
