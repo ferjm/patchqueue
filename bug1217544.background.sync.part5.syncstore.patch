@@ -176,11 +176,12 @@ diff --git a/dom/sync/nsISyncRegistry.idl b/dom/sync/nsISyncRegistry.idl
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/nsISyncRegistry.idl
-@@ -0,0 +1,49 @@
+@@ -0,0 +1,48 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 +
++#include "nsIArray.idl"
 +#include "nsISupports.idl"
 +
 +[scriptable, uuid(671ea934-232d-47c6-87ba-b72715088914)]
@@ -200,9 +201,7 @@ new file mode 100644
 +  attribute unsigned long long actorId;
 +
 +  void notifyAddSuccess();
-+  void notifyGetAllSuccess([array, size_is(count)]
-+                           in nsISyncRegistration registrations,
-+                           in uint32_t count);
++  void notifyGetAllSuccess(in nsIArray registrations);
 +  void notifyError(in uint32_t error);
 +};
 +
