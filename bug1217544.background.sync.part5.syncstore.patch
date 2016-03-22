@@ -7,7 +7,7 @@ diff --git a/dom/sync/SyncRegistry.js b/dom/sync/SyncRegistry.js
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncRegistry.js
-@@ -0,0 +1,136 @@
+@@ -0,0 +1,152 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -22,7 +22,7 @@ new file mode 100644
 +  dump("ERROR SyncRegistry: " + s + "\n");
 +}
 +
-+const { interfaces: Ci, results: Cr, utils: Cu } = Components;
++const { classes: Cc, interfaces: Ci, results: Cr, utils: Cu } = Components;
 +
 +Cu.import("resource://gre/modules/IndexedDBHelper.jsm");
 +Cu.import("resource://gre/modules/XPCOMUtils.jsm");
@@ -115,10 +115,26 @@ new file mode 100644
 +  getAll(aScope, aListener) {
 +    debug("getAll " + aScope);
 +    this.newTxn(RO, SYNC_REGISTRY_STORE_NAME, (aTxn, aStore) => {
-+      aStore.getAll();
-+    }, result => {
-+      debug("getAll result " + result);
-+    }, error => {
++      aStore.getAll().onsuccess = event => {
++        let results = event.target.result;
++        let registrations = Cc["@mozilla.org/array;1"]
++                              .createInstance(Ci.nsIMutableArray);;
++        for (let i = 0; i < results.length; i++) {
++          let registration = Cc["@mozilla.org/dom/sync/registration;1"]
++                               .createInstance(Ci.nsISyncRegistration);
++          ["id", "scope", "tag", "state", "lastChance"].forEach(property => {
++            registration[property] = results[i][property];
++          });
++          debug("registration " + JSON.stringify(registration));
++          try {
++            registrations.appendElement(registration, false /* weak */);
++          } catch(e) {
++            return aListener.notifyError(Cr.NS_ERROR_OUT_OF_MEMORY);
++          }
++        }
++        aListener.notifyGetAllSuccess(registrations);
++      };
++    }, null, error => {
 +      error = isNaN(error) ? Cr.NS_ERROR_FAILURE : error;
 +      aListener.notifyError(error);
 +    });
