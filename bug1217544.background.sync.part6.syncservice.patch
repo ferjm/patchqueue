@@ -262,7 +262,7 @@ diff --git a/dom/sync/SyncService.cpp b/dom/sync/SyncService.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncService.cpp
-@@ -0,0 +1,330 @@
+@@ -0,0 +1,319 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -330,10 +330,9 @@ new file mode 100644
 +  ~SyncRegistryResponse() {}
 +};
 +
-+class SyncRegistryRequestRunnableCallback final : public nsRunnable
++class SyncRegistryRequestRunnableCallback : public nsRunnable
 +{
 +public:
-+  // XXX Use SyncRegistryResponse struct instead.
 +  SyncRegistryRequestRunnableCallback(SyncRegistryResponse* aResponse)
 +    : mResponse(aResponse)
 +  {
@@ -344,10 +343,6 @@ new file mode 100644
 +  {
 +    AssertIsOnBackgroundThread();
 +
-+/*    const SyncRegisterResponse response(true);
-+    sInstance->Response(mRequest->mActorId,
-+                        mRequest->mRequestId,
-+                        response);*/
 +    sInstance->Response(mResponse);
 +
 +    return NS_OK;
@@ -399,13 +394,13 @@ new file mode 100644
 +    return NS_OK;
 +  }
 +
-+  NS_IMETHODIMP
-+  NotifyAddSuccess()
++  nsresult
++  Callback(const SyncOpResponse& aResponse)
 +  {
 +    RefPtr<SyncRegistryResponse> response =
 +      new SyncRegistryResponse(mRequest->mActorId,
 +                               mRequest->mRequestId,
-+                               SyncRegisterResponse());
++                               aResponse);
 +    RefPtr<SyncRegistryRequestRunnableCallback> callback =
 +      new SyncRegistryRequestRunnableCallback(response);
 +    MOZ_ASSERT(callback);
@@ -416,15 +411,9 @@ new file mode 100644
 +  }
 +
 +  NS_IMETHODIMP
-+  NotifyRemoveSuccess()
++  NotifyAddSuccess()
 +  {
-+    return NS_OK;
-+  }
-+
-+  NS_IMETHODIMP
-+  NotifyGetSuccess(nsISyncRegistration* registration)
-+  {
-+    return NS_OK;
++    return Callback(SyncRegisterResponse());
 +  }
 +
 +  NS_IMETHODIMP
@@ -436,7 +425,7 @@ new file mode 100644
 +  NS_IMETHODIMP
 +  NotifyError(const uint32_t aError)
 +  {
-+    return NS_OK;
++    return Callback(SyncOpError(aError));
 +  }
 +
 +  NS_IMETHODIMP
