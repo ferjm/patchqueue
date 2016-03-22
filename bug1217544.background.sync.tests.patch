@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  4ce452643692b12bffe17ab800bbe53bbfee8167
+# Parent  a038b048edf4b39f7731af39b893927995a7bfdf
 Bug 1217544 - Implement one-off BackgroundSync API. Tests. r=baku
 
 diff --git a/dom/sync/moz.build b/dom/sync/moz.build
@@ -42,7 +42,7 @@ diff --git a/dom/sync/tests/test_backgroundsync_basic.html b/dom/sync/tests/test
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/tests/test_backgroundsync_basic.html
-@@ -0,0 +1,56 @@
+@@ -0,0 +1,57 @@
 +<!DOCTYPE HTML>
 +<html>
 +<!--
@@ -95,6 +95,7 @@ new file mode 100644
 +    is(result.tags.length, 2, "Should have 2 registered tags");
 +    ok(result.tags.indexOf("workerTag") > -1,
 +       "Should have a tag named 'workerTag' registered");
++    yield unregisterWorker(".");
 +  });
 +</script>
 +</body>
@@ -103,7 +104,7 @@ diff --git a/dom/sync/tests/test_utils.js b/dom/sync/tests/test_utils.js
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/tests/test_utils.js
-@@ -0,0 +1,31 @@
+@@ -0,0 +1,37 @@
 +// Remove permissions and prefs when the test finishes.
 +SimpleTest.registerCleanupFunction(() =>
 +  new Promise(resolve => {
@@ -133,6 +134,12 @@ new file mode 100644
 +      };
 +      registration.active.postMessage(request, [channel.port2]);
 +    });
++  });
++}
++
++function unregisterWorker(scope) {
++  return navigator.serviceWorker.getRegistration(scope).then(registration => {
++    return registration.unregister();
 +  });
 +}
 diff --git a/dom/sync/tests/worker.js b/dom/sync/tests/worker.js
