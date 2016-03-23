@@ -218,7 +218,7 @@ new file mode 100644
 +  attribute boolean lastChance;
 +};
 +
-+[uuid(3084a211-3ef4-4fa3-8a20-dab42f062571)]
++[builtinclass, uuid(3084a211-3ef4-4fa3-8a20-dab42f062571)]
 +interface nsISyncRegistryListener : nsISupports
 +{
 +  attribute nsID requestId;
