@@ -113,7 +113,7 @@ new file mode 100644
 +  },
 +
 +  getAll(aListener) {
-+    debug("getAll);
++    debug("getAll");
 +    this.newTxn(RO, SYNC_REGISTRY_STORE_NAME, (aTxn, aStore) => {
 +      aStore.getAll().onsuccess = event => {
 +        let results = event.target.result;
