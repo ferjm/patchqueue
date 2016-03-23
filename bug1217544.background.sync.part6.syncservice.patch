@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  52a590cb0177b0f702ffbe5e05d5e077c4dfebcb
+# Parent  8f550920414a2f092cbe523f96ce830c8355ffef
 Bug 1217544 - Implement one-off BackgroundSync API. Part 5: SyncService. r=baku
 
 diff --git a/dom/sync/SyncIPCTypes.ipdlh b/dom/sync/SyncIPCTypes.ipdlh
@@ -282,7 +282,7 @@ diff --git a/dom/sync/SyncService.cpp b/dom/sync/SyncService.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncService.cpp
-@@ -0,0 +1,488 @@
+@@ -0,0 +1,498 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -527,7 +527,17 @@ new file mode 100644
 +      }
 +
 +    } else if (mRequest->mOpOrIOp.type() == SyncOpOrInternalOp::TSyncInternalOp) {
-+        registry->GetAll(this);
++
++      SyncInternalOp op = mRequest->mOpOrIOp.get_SyncInternalOp();
++
++      switch (op.mArgs().type()) {
++        case SyncInternalOpArgs::TSyncGetAllArgs:
++          registry->GetAll(this);
++          break;
++        default:
++          MOZ_CRASH("Unknown BackgroundSync internal request");
++      }
++
 +    } else {
 +      MOZ_CRASH("Unknown BackgroundSync registry request");
 +    }
