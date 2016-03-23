@@ -6,7 +6,7 @@ Bug 1217544 - Implement one-off BackgroundSync API. Part 5: SyncService. r=baku
 diff --git a/dom/sync/SyncIPCTypes.ipdlh b/dom/sync/SyncIPCTypes.ipdlh
 --- a/dom/sync/SyncIPCTypes.ipdlh
 +++ b/dom/sync/SyncIPCTypes.ipdlh
-@@ -10,33 +10,33 @@ namespace dom {
+@@ -10,33 +10,53 @@ namespace dom {
  struct SyncRegisterArgs
  {
    nsString mScope;
@@ -30,6 +30,26 @@ diff --git a/dom/sync/SyncIPCTypes.ipdlh b/dom/sync/SyncIPCTypes.ipdlh
    SyncOpArgs mArgs;
  };
  
++struct SyncGetAllArgs
++{
++};
++
++union SyncInternalOpArgs
++{
++  SyncGetAllArgs;
++};
++
++struct SyncInternalOp
++{
++  SyncInternalOpArgs mArgs;
++};
++
++union SyncOpOrInternalOp
++{
++  SyncOp;
++  SyncInternalOp;
++};
++
  struct SyncRegisterResponse
  {
 -  bool mSuccess;
@@ -262,7 +282,7 @@ diff --git a/dom/sync/SyncService.cpp b/dom/sync/SyncService.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncService.cpp
-@@ -0,0 +1,467 @@
+@@ -0,0 +1,488 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -283,7 +303,8 @@ new file mode 100644
 +  SyncService* sInstance = nullptr;
 +} // namespace
 +
-+class SyncRegistryAction {
++class SyncRegistryAction
++{
 +public:
 +  uint64_t mActorId;
 +  nsID mRequestId;
@@ -298,24 +319,26 @@ new file mode 100644
 +  ~SyncRegistryAction() {}
 +};
 +
-+class SyncRegistryRequest final : public SyncRegistryAction {
++class SyncRegistryRequest final : public SyncRegistryAction
++{
 +public:
 +  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(SyncRegistryRequest)
 +
-+  SyncOp mOp;
++  SyncOpOrInternalOp mOpOrIOp;
 +
 +  SyncRegistryRequest(const uint64_t aActorId,
 +                      const nsID& aRequestId,
-+                      const SyncOp& aOp)
++                      const SyncOpOrInternalOp& aOpOrIOp)
 +    : SyncRegistryAction(aActorId, aRequestId)
-+    , mOp(aOp)
++    , mOpOrIOp(aOpOrIOp)
 +  {}
 +
 +private:
 +  ~SyncRegistryRequest() {}
 +};
 +
-+class SyncRegistryResponse final : public SyncRegistryAction {
++class SyncRegistryResponse final : public SyncRegistryAction
++{
 +public:
 +  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(SyncRegistryResponse)
 +
@@ -474,37 +497,41 @@ new file mode 100644
 +      do_CreateInstance("@mozilla.org/dom/sync/registry;1");
 +    MOZ_ASSERT(registry);
 +
-+    nsCOMPtr<nsIPrincipal> principal =
-+      PrincipalInfoToPrincipal(mRequest->mOp.mPrincipal());
-+    if (NS_WARN_IF(!principal)) {
-+      return NS_OK;
++    if (mRequest->mOpOrIOp.type() == SyncOpOrInternalOp::TSyncOp) {
++      SyncOp op = mRequest->mOpOrIOp.get_SyncOp();
++      nsCOMPtr<nsIPrincipal> principal =
++        PrincipalInfoToPrincipal(op.mPrincipal());
++      if (NS_WARN_IF(!principal)) {
++        return NS_OK;
++      }
++
++      switch(op.mArgs().type()) {
++        case SyncOpArgs::TSyncRegisterArgs:
++        {
++          nsCOMPtr<nsISyncRegistration> registration =
++            do_CreateInstance("@mozilla.org/dom/sync/registration;1");
++          MOZ_ASSERT(registration);
++
++          registration->SetScope(op.mArgs().get_SyncRegisterArgs().mScope());
++          registration->SetTag(op.mArgs().get_SyncRegisterArgs().mTag());
++
++          registry->Add(registration, this);
++
++          break;
++        }
++        case SyncOpArgs::TSyncGetTagsArgs:
++          registry->GetAll(this);
++          break;
++        default:
++          MOZ_CRASH("Unknown BackgroundSync request");
++      }
++
++    } else if (mRequest->mOpOrIOp.type() == SyncOpOrInternalOp::TSyncInternalOp) {
++        registry->GetAll(this);
++    } else {
++      MOZ_CRASH("Unknown BackgroundSync registry request");
 +    }
 +
-+    switch(mRequest->mOp.mArgs().type()) {
-+      case SyncOpArgs::TSyncRegisterArgs:
-+      {
-+        nsCOMPtr<nsISyncRegistration> registration =
-+          do_CreateInstance("@mozilla.org/dom/sync/registration;1");
-+        MOZ_ASSERT(registration);
-+
-+        registration->SetScope(mRequest->mOp.mArgs().get_SyncRegisterArgs().mScope());
-+        registration->SetTag(mRequest->mOp.mArgs().get_SyncRegisterArgs().mTag());
-+
-+        registry->Add(registration, this);
-+
-+        break;
-+      }
-+      case SyncOpArgs::TSyncGetTagsArgs:
-+      {
-+        registry->GetAll(mRequest->mOp.mArgs().get_SyncGetTagsArgs().mScope(),
-+                         this);
-+        break;
-+      }
-+      default:
-+      {
-+        MOZ_CRASH("Unknown BackgroundSync request");
-+      }
-+    }
 +    return NS_OK;
 +  }
 +
@@ -718,6 +745,17 @@ new file mode 100644
 +}
 +
 +void
++SyncService::MaybeTriggerSyncEvents()
++{
++  const SyncInternalOp op((SyncGetAllArgs()));
++
++  RefPtr<SyncRegistryRequestRunnable> runnable =
++    new SyncRegistryRequestRunnable(
++        new SyncRegistryRequest(0 /* internal request */, nsID(), op));
++  NS_DispatchToMainThread(runnable);
++}
++
++void
 +SyncService::OnlineStateChange(const OnlineState& aState)
 +{
 +  mOnlineState = aState;
@@ -726,6 +764,9 @@ new file mode 100644
 +    return;
 +  }
 +
++  // If we are online we need to get the list of registered sync requests
++  // to trigger the corresponding 'sync' events.
++  MaybeTriggerSyncEvents();
 +}
 +
 +} // namespace dom
@@ -734,7 +775,7 @@ diff --git a/dom/sync/SyncService.h b/dom/sync/SyncService.h
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncService.h
-@@ -0,0 +1,73 @@
+@@ -0,0 +1,75 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -794,6 +835,8 @@ new file mode 100644
 +  void Init();
 +
 +  void Response(SyncRegistryResponse* aResponse);
++
++  void MaybeTriggerSyncEvents();
 +
 +  void OnlineStateChange(const OnlineState& aState);
 +
