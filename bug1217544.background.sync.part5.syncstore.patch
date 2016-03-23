@@ -112,8 +112,8 @@ new file mode 100644
 +    aListener.notifyGetSuccess();
 +  },
 +
-+  getAll(aScope, aListener) {
-+    debug("getAll " + aScope);
++  getAll(aListener) {
++    debug("getAll);
 +    this.newTxn(RO, SYNC_REGISTRY_STORE_NAME, (aTxn, aStore) => {
 +      aStore.getAll().onsuccess = event => {
 +        let results = event.target.result;
@@ -200,7 +200,7 @@ diff --git a/dom/sync/nsISyncRegistry.idl b/dom/sync/nsISyncRegistry.idl
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/nsISyncRegistry.idl
-@@ -0,0 +1,48 @@
+@@ -0,0 +1,47 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -218,7 +218,7 @@ new file mode 100644
 +  attribute boolean lastChance;
 +};
 +
-+[scriptable, uuid(3084a211-3ef4-4fa3-8a20-dab42f062571)]
++[uuid(3084a211-3ef4-4fa3-8a20-dab42f062571)]
 +interface nsISyncRegistryListener : nsISupports
 +{
 +  attribute nsID requestId;
@@ -246,6 +246,5 @@ new file mode 100644
 +  void get(in DOMString id,
 +           in nsISyncRegistryListener listener);
 +
-+  void getAll([optional] in DOMString scope,
-+              in nsISyncRegistryListener listener);
++  void getAll(in nsISyncRegistryListener listener);
 +};
