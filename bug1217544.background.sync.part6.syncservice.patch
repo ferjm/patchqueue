@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  8fe39a372fbf464b2c1f72821fdba1a6b0cf64b6
+# Parent  52a590cb0177b0f702ffbe5e05d5e077c4dfebcb
 Bug 1217544 - Implement one-off BackgroundSync API. Part 5: SyncService. r=baku
 
 diff --git a/dom/sync/SyncIPCTypes.ipdlh b/dom/sync/SyncIPCTypes.ipdlh
@@ -262,7 +262,7 @@ diff --git a/dom/sync/SyncService.cpp b/dom/sync/SyncService.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncService.cpp
-@@ -0,0 +1,355 @@
+@@ -0,0 +1,467 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -270,6 +270,7 @@ new file mode 100644
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 +
 +#include "nsArrayUtils.h"
++#include "nsIOService.h"
 +#include "nsISyncRegistry.h"
 +#include "SyncService.h"
 +#include "SyncManagerParent.h"
@@ -516,7 +517,100 @@ new file mode 100644
 +
 +NS_IMPL_ISUPPORTS(SyncRegistryRequestRunnable, nsIRunnable, nsISyncRegistryListener);
 +
++class SyncServiceNotifyOnlineStateRunnable final : public nsRunnable
++{
++public:
++  SyncServiceNotifyOnlineStateRunnable(const OnlineState aState)
++    : mOnlineState(aState)
++  {
++    AssertIsOnMainThread();
++  }
++
++  NS_IMETHOD
++  Run() override
++  {
++    AssertIsOnBackgroundThread();
++
++    sInstance->OnlineStateChange(mOnlineState);
++
++    return NS_OK;
++  }
++
++private:
++  ~SyncServiceNotifyOnlineStateRunnable() {}
++
++  OnlineState mOnlineState;
++};
++
++class SyncServiceInitRunnable final : public nsIRunnable
++                                    , public nsIObserver
++{
++public:
++  NS_DECL_THREADSAFE_ISUPPORTS
++
++  SyncServiceInitRunnable()
++    : mBackgroundThread(NS_GetCurrentThread())
++  {
++    AssertIsOnBackgroundThread();
++  }
++
++  NS_IMETHOD
++  Observe(nsISupports* aSubject, const char* aTopic,
++          const char16_t* aData) override
++  {
++    AssertIsOnMainThread();
++
++    OnlineState state = OFFLINE;
++    if (nsDependentString(aData).EqualsLiteral(NS_IOSERVICE_ONLINE)) {
++      state = ONLINE;
++    }
++
++    mBackgroundThread->Dispatch(
++        new SyncServiceNotifyOnlineStateRunnable(state), NS_DISPATCH_NORMAL);
++
++    return NS_OK;
++  }
++
++  NS_IMETHOD
++  Run() override
++  {
++    AssertIsOnMainThread();
++
++    nsCOMPtr<nsIObserverService> os = services::GetObserverService();
++    NS_ENSURE_STATE(os);
++    // The observer service holds us alive.
++    os->AddObserver(this, NS_IOSERVICE_OFFLINE_STATUS_TOPIC,
++                    /* holdsWeak */ false);
++
++    bool offline = true;
++    nsCOMPtr<nsIIOService> ioService = services::GetIOService();
++    NS_ENSURE_STATE(ioService);
++    ioService->GetOffline(&offline);
++    NS_WARN_IF(NS_FAILED(ioService->GetOffline(&offline)));
++
++    OnlineState state = UNKNOWN;
++    if (offline) {
++      state = OFFLINE;
++    } else {
++      state = ONLINE;
++    }
++
++    mBackgroundThread->Dispatch(
++        new SyncServiceNotifyOnlineStateRunnable(state), NS_DISPATCH_NORMAL);
++
++    return NS_OK;
++  }
++
++private:
++  ~SyncServiceInitRunnable() {}
++
++  nsCOMPtr<nsIThread> mBackgroundThread;
++};
++
++NS_IMPL_ISUPPORTS(SyncServiceInitRunnable, nsIRunnable, nsIObserver)
++
 +SyncService::SyncService()
++  : mOnlineState(UNKNOWN)
 +{
 +  AssertIsOnBackgroundThread();
 +
@@ -543,8 +637,15 @@ new file mode 100644
 +  RefPtr<SyncService> instance = sInstance;
 +  if (!instance) {
 +    instance = new SyncService();
++    instance->Init();
 +  }
 +  return instance.forget();
++}
++
++void
++SyncService::Init()
++{
++  NS_DispatchToMainThread(new SyncServiceInitRunnable());
 +}
 +
 +void
@@ -616,13 +717,24 @@ new file mode 100644
 +  }
 +}
 +
++void
++SyncService::OnlineStateChange(const OnlineState& aState)
++{
++  mOnlineState = aState;
++
++  if (mOnlineState != ONLINE) {
++    return;
++  }
++
++}
++
 +} // namespace dom
 +} // namespace mozilla
 diff --git a/dom/sync/SyncService.h b/dom/sync/SyncService.h
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncService.h
-@@ -0,0 +1,60 @@
+@@ -0,0 +1,73 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -648,9 +760,16 @@ new file mode 100644
 +class SyncManagerParent;
 +class SyncRegistryResponse;
 +
++typedef enum {
++  ONLINE,
++  OFFLINE,
++  UNKNOWN
++} OnlineState;
++
 +class SyncService final
 +{
 +  friend class SyncRegistryRequestRunnableCallback;
++  friend class SyncServiceNotifyOnlineStateRunnable;
 +
 +public:
 +  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(SyncService)
@@ -672,7 +791,13 @@ new file mode 100644
 +private:
 +  ~SyncService();
 +
++  void Init();
++
 +  void Response(SyncRegistryResponse* aResponse);
++
++  void OnlineStateChange(const OnlineState& aState);
++
++  OnlineState mOnlineState;
 +
 +  nsTHashtable<nsRefPtrHashKey<SyncManagerParent>> mSyncManagerActors;
 +  nsTHashtable<nsRefPtrHashKey<workers::ServiceWorkerManagerParent>>
@@ -686,7 +811,7 @@ new file mode 100644
 diff --git a/dom/sync/moz.build b/dom/sync/moz.build
 --- a/dom/sync/moz.build
 +++ b/dom/sync/moz.build
-@@ -5,17 +5,18 @@
+@@ -5,26 +5,28 @@
  
  EXPORTS.mozilla.dom += [
      'SyncManager.h'
@@ -706,6 +831,17 @@ diff --git a/dom/sync/moz.build b/dom/sync/moz.build
  ]
  
  LOCAL_INCLUDES += [
+-    '/dom/workers'
++    '/dom/workers',
++    '/netwerk/base'
+ ]
+ 
+ XPIDL_SOURCES += [
+     'nsISyncRegistry.idl'
+ ]
+ 
+ XPIDL_MODULE = 'dom_sync'
+ 
 diff --git a/dom/workers/ServiceWorkerManagerParent.cpp b/dom/workers/ServiceWorkerManagerParent.cpp
 --- a/dom/workers/ServiceWorkerManagerParent.cpp
 +++ b/dom/workers/ServiceWorkerManagerParent.cpp
