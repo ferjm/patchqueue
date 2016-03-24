@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  8f550920414a2f092cbe523f96ce830c8355ffef
+# Parent  4d309066f8eb1d67d245609875912823e96973a1
 Bug 1217544 - Implement one-off BackgroundSync API. Part 5: SyncService. r=baku
 
 diff --git a/dom/sync/SyncIPCTypes.ipdlh b/dom/sync/SyncIPCTypes.ipdlh
@@ -282,7 +282,7 @@ diff --git a/dom/sync/SyncService.cpp b/dom/sync/SyncService.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncService.cpp
-@@ -0,0 +1,498 @@
+@@ -0,0 +1,521 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -423,24 +423,6 @@ new file mode 100644
 +    return NS_OK;
 +  }
 +
-+  nsresult
-+  Callback(const SyncOpResponse& aResponse)
-+  {
-+    AssertIsOnMainThread();
-+
-+    RefPtr<SyncRegistryResponse> response =
-+      new SyncRegistryResponse(mRequest->mActorId,
-+                               mRequest->mRequestId,
-+                               aResponse);
-+    RefPtr<SyncRegistryRequestRunnableCallback> callback =
-+      new SyncRegistryRequestRunnableCallback(response);
-+    MOZ_ASSERT(callback);
-+
-+    mBackgroundThread->Dispatch(callback, NS_DISPATCH_NORMAL);
-+
-+    return NS_OK;
-+  }
-+
 +  NS_IMETHODIMP
 +  NotifyAddSuccess()
 +  {
@@ -456,6 +438,10 @@ new file mode 100644
 +
 +    if (!aRegistrations) {
 +      return Callback(SyncOpError(static_cast<uint32_t>(NS_ERROR_INVALID_ARG)));
++    }
++
++    if (mRequest->mActorId == 0) {
++      return NotifyInternalGetAllSuccess(aRegistrations);
 +    }
 +
 +    nsTArray<nsString> tags;
@@ -547,6 +533,30 @@ new file mode 100644
 +
 +private:
 +  ~SyncRegistryRequestRunnable() {}
++
++  nsresult
++  Callback(const SyncOpResponse& aResponse)
++  {
++    AssertIsOnMainThread();
++
++    RefPtr<SyncRegistryResponse> response =
++      new SyncRegistryResponse(mRequest->mActorId,
++                               mRequest->mRequestId,
++                               aResponse);
++    RefPtr<SyncRegistryRequestRunnableCallback> callback =
++      new SyncRegistryRequestRunnableCallback(response);
++    MOZ_ASSERT(callback);
++
++    mBackgroundThread->Dispatch(callback, NS_DISPATCH_NORMAL);
++
++    return NS_OK;
++  }
++
++  nsresult
++  NotifyInternalGetAllSuccess(nsIArray* aRegistrations)
++  {
++    //nsTArray<nsISyncRegistration>
++  }
 +
 +  RefPtr<SyncRegistryRequest> mRequest;
 +  nsCOMPtr<nsIThread> mBackgroundThread;
@@ -755,10 +765,23 @@ new file mode 100644
 +}
 +
 +void
++SyncService::MaybeTriggerSyncEvents(nsIArray* aRegistrations,
++                                    const OnlineState& aState)
++{
++  // At this point we got the list of registered sync requests from
++  // the main thread. If we are still online, we try to trigger a sync
++  // event for each request.
++}
++
++void
 +SyncService::MaybeTriggerSyncEvents()
 +{
 +  const SyncInternalOp op((SyncGetAllArgs()));
 +
++  // We need to jump to the main thread to get the list of registered
++  // sync requests. If we are still online while coming back to the
++  // background thread with this list of sync requests, we will fire
++  // a sync event for each of them.
 +  RefPtr<SyncRegistryRequestRunnable> runnable =
 +    new SyncRegistryRequestRunnable(
 +        new SyncRegistryRequest(0 /* internal request */, nsID(), op));
@@ -785,7 +808,7 @@ diff --git a/dom/sync/SyncService.h b/dom/sync/SyncService.h
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncService.h
-@@ -0,0 +1,75 @@
+@@ -0,0 +1,78 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -796,6 +819,7 @@ new file mode 100644
 +#define mozilla_dom_SyncService_h
 +
 +#include "mozilla/dom/SyncIPCTypes.h"
++#include "nsIArray.h"
 +#include "nsISupportsImpl.h"
 +#include "nsHashKeys.h"
 +#include "nsTHashtable.h"
@@ -846,6 +870,8 @@ new file mode 100644
 +
 +  void Response(SyncRegistryResponse* aResponse);
 +
++  void MaybeTriggerSyncEvents(nsIArray* aRegistrations,
++                              const OnlineState& aState);
 +  void MaybeTriggerSyncEvents();
 +
 +  void OnlineStateChange(const OnlineState& aState);
