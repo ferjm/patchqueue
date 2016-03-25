@@ -1,3 +1,4 @@
+bug1252570.remove.mozpay.patch
 bug1217544.background.sync.part1.webidl.patch
 bug1217544.background.sync.part2.serviceworkerregistration.patch
 bug1217544.background.sync.part3.ipc.patch
