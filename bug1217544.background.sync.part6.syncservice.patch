@@ -282,7 +282,7 @@ diff --git a/dom/sync/SyncService.cpp b/dom/sync/SyncService.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncService.cpp
-@@ -0,0 +1,562 @@
+@@ -0,0 +1,578 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -292,7 +292,6 @@ new file mode 100644
 +#include "nsArrayUtils.h"
 +#include "nsIMutableArray.h"
 +#include "nsIOService.h"
-+#include "nsISyncRegistry.h"
 +#include "SyncManagerParent.h"
 +#include "SyncService.h"
 +#include "SyncTypes.h"
@@ -812,20 +811,37 @@ new file mode 100644
 +
 +    // Otherwise, we set the registration state to STATE_FIRING.
 +    // XXX
++    TriggerSyncEvent(registration);
 +  }
 +}
 +
 +void
-+SyncService::TriggerSyncEvent(const nsString& aOriginSuffix,
-+                              const nsString& aScope,
-+                              const nsString& aTag,
-+                              const bool aLastChance)
++SyncService::TriggerSyncEvent(nsISyncRegistration* aRegistration)
 +{
-+  for (auto iter = mServiceWorkerManagerActors.Iter(); !iter.Done(); iter.Next()) {
++  AssertIsOnBackgroundThread();
++  MOZ_ASSERT(aRegistration);
++
++  nsString originSuffix;
++  aRegistration->GetOriginSuffix(originSuffix);
++  MOZ_ASSERT(!originSuffix.IsEmpty());
++
++  nsString scope;
++  aRegistration->GetScope(scope);
++  MOZ_ASSERT(!scope.IsEmpty());
++
++  nsString tag;
++  aRegistration->GetTag(tag);
++  MOZ_ASSERT(!tag.IsEmpty());
++
++  bool lastChance;
++  aRegistration->GetLastChance(&lastChance);
++
++  for (auto iter = mServiceWorkerManagerActors.Iter(); !iter.Done();
++       iter.Next()) {
 +    RefPtr<ServiceWorkerManagerParent> parent = iter.Get()->GetKey();
 +    MOZ_ASSERT(parent);
-+    Unused << parent->SendNotifySyncEvent(aOriginSuffix, aScope, aTag,
-+                                          aLastChance);
++    Unused << parent->SendNotifySyncEvent(originSuffix, scope, tag,
++                                          lastChance);
 +  }
 +}
 +
@@ -849,7 +865,7 @@ diff --git a/dom/sync/SyncService.h b/dom/sync/SyncService.h
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncService.h
-@@ -0,0 +1,82 @@
+@@ -0,0 +1,80 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -862,6 +878,7 @@ new file mode 100644
 +#include "mozilla/dom/SyncIPCTypes.h"
 +#include "nsIArray.h"
 +#include "nsISupportsImpl.h"
++#include "nsISyncRegistry.h"
 +#include "nsHashKeys.h"
 +#include "nsTHashtable.h"
 +#include "ServiceWorkerManagerParent.h"
@@ -914,10 +931,7 @@ new file mode 100644
 +  void InternalResponse(SyncRegistryInternalResponse* aResponse);
 +
 +  void MaybeTriggerSyncEvents(nsIArray* aRegistrations);
-+  void TriggerSyncEvent(const nsString& aOriginSuffix,
-+                        const nsString& aScope,
-+                        const nsString& aTag,
-+                        const bool aLastChance);
++  void TriggerSyncEvent(nsISyncRegistration* aRegistration);
 +
 +  void OnlineStateChange(const OnlineState& aState);
 +
