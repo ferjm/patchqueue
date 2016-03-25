@@ -282,7 +282,7 @@ diff --git a/dom/sync/SyncService.cpp b/dom/sync/SyncService.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncService.cpp
-@@ -0,0 +1,521 @@
+@@ -0,0 +1,554 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -290,10 +290,12 @@ new file mode 100644
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 +
 +#include "nsArrayUtils.h"
++#include "nsIMutableArray.h"
 +#include "nsIOService.h"
 +#include "nsISyncRegistry.h"
-+#include "SyncService.h"
 +#include "SyncManagerParent.h"
++#include "SyncService.h"
++#include "SyncTypes.h"
 +
 +namespace mozilla {
 +
@@ -303,63 +305,17 @@ new file mode 100644
 +  SyncService* sInstance = nullptr;
 +} // namespace
 +
-+class SyncRegistryAction
++class SyncRegistryResponseRunnable : public nsRunnable
 +{
 +public:
-+  uint64_t mActorId;
-+  nsID mRequestId;
-+
-+protected:
-+  SyncRegistryAction(const uint64_t aActorId,
-+                     const nsID& aRequestId)
-+    : mActorId(aActorId)
-+    , mRequestId(aRequestId)
-+  {}
-+
-+  ~SyncRegistryAction() {}
-+};
-+
-+class SyncRegistryRequest final : public SyncRegistryAction
-+{
-+public:
-+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(SyncRegistryRequest)
-+
-+  SyncOpOrInternalOp mOpOrIOp;
-+
-+  SyncRegistryRequest(const uint64_t aActorId,
-+                      const nsID& aRequestId,
-+                      const SyncOpOrInternalOp& aOpOrIOp)
-+    : SyncRegistryAction(aActorId, aRequestId)
-+    , mOpOrIOp(aOpOrIOp)
-+  {}
-+
-+private:
-+  ~SyncRegistryRequest() {}
-+};
-+
-+class SyncRegistryResponse final : public SyncRegistryAction
-+{
-+public:
-+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(SyncRegistryResponse)
-+
-+  SyncOpResponse mResponse;
-+
-+  SyncRegistryResponse(const uint64_t aActorId,
-+                       const nsID& aRequestId,
-+                       const SyncOpResponse& aResponse)
-+    : SyncRegistryAction(aActorId, aRequestId)
-+    , mResponse(aResponse)
-+  {}
-+
-+private:
-+  ~SyncRegistryResponse() {}
-+};
-+
-+class SyncRegistryRequestRunnableCallback : public nsRunnable
-+{
-+public:
-+  SyncRegistryRequestRunnableCallback(SyncRegistryResponse* aResponse)
++  SyncRegistryResponseRunnable(SyncRegistryResponse* aResponse)
 +    : mResponse(aResponse)
++  {
++    AssertIsOnMainThread();
++  }
++
++  SyncRegistryResponseRunnable(SyncRegistryInternalResponse* aResponse)
++    : mInternalResponse(aResponse)
 +  {
 +    AssertIsOnMainThread();
 +  }
@@ -368,15 +324,20 @@ new file mode 100644
 +  {
 +    AssertIsOnBackgroundThread();
 +
-+    sInstance->Response(mResponse);
++    if (mResponse) {
++      sInstance->Response(mResponse);
++    } else if (mInternalResponse) {
++      sInstance->InternalResponse(mInternalResponse);
++    }
 +
 +    return NS_OK;
 +  }
 +
 +private:
-+  ~SyncRegistryRequestRunnableCallback() {}
++  ~SyncRegistryResponseRunnable() {}
 +
 +  RefPtr<SyncRegistryResponse> mResponse;
++  RefPtr<SyncRegistryInternalResponse> mInternalResponse;
 +};
 +
 +class SyncRegistryRequestRunnable final : public nsIRunnable
@@ -543,8 +504,8 @@ new file mode 100644
 +      new SyncRegistryResponse(mRequest->mActorId,
 +                               mRequest->mRequestId,
 +                               aResponse);
-+    RefPtr<SyncRegistryRequestRunnableCallback> callback =
-+      new SyncRegistryRequestRunnableCallback(response);
++    RefPtr<SyncRegistryResponseRunnable> callback =
++      new SyncRegistryResponseRunnable(response);
 +    MOZ_ASSERT(callback);
 +
 +    mBackgroundThread->Dispatch(callback, NS_DISPATCH_NORMAL);
@@ -555,7 +516,18 @@ new file mode 100644
 +  nsresult
 +  NotifyInternalGetAllSuccess(nsIArray* aRegistrations)
 +  {
-+    //nsTArray<nsISyncRegistration>
++    AssertIsOnMainThread();
++
++    RefPtr<SyncRegistryInternalResponse> response =
++      new SyncRegistryInternalResponse(aRegistrations);
++
++    RefPtr<SyncRegistryResponseRunnable> callback =
++      new SyncRegistryResponseRunnable(response);
++    MOZ_ASSERT(callback);
++
++    mBackgroundThread->Dispatch(callback, NS_DISPATCH_NORMAL);
++
++    return NS_OK;
 +  }
 +
 +  RefPtr<SyncRegistryRequest> mRequest;
@@ -762,30 +734,91 @@ new file mode 100644
 +    }
 +    parent->NotifyResponse(aResponse->mRequestId, aResponse->mResponse);
 +  }
++
++  // If we just successfully added a new sync request we try to trigger
++  // the corresponding sync event.
++  if (aResponse->mResponse.type() == SyncOpResponse::TSyncRegisterResponse) {
++    MaybeTriggerSyncEvents(nullptr);
++  }
 +}
 +
 +void
-+SyncService::MaybeTriggerSyncEvents(nsIArray* aRegistrations,
-+                                    const OnlineState& aState)
++SyncService::InternalResponse(SyncRegistryInternalResponse* aResponse)
 +{
++  AssertIsOnBackgroundThread();
++  MOZ_ASSERT(aResponse);
++
++  MaybeTriggerSyncEvents(aResponse->GetRegistrations());
++}
++
++void
++SyncService::MaybeTriggerSyncEvents(nsIArray* aRegistrations)
++{
++  AssertIsOnBackgroundThread();
++
++  if (!aRegistrations) {
++    // We need to jump to the main thread to get the list of registered
++    // sync requests. If we are still online while coming back to the
++    // background thread with this list of sync requests, we will fire
++    // a sync event for each of them.
++
++    const SyncInternalOp op((SyncGetAllArgs()));
++
++    RefPtr<SyncRegistryRequestRunnable> runnable =
++      new SyncRegistryRequestRunnable(
++          new SyncRegistryRequest(0 /* internal request */, nsID(), op));
++    NS_DispatchToMainThread(runnable);
++    return;
++  }
++
 +  // At this point we got the list of registered sync requests from
 +  // the main thread. If we are still online, we try to trigger a sync
 +  // event for each request.
++  if (mOnlineState != ONLINE) {
++    return;
++  }
++
++  // Before actually triggering the sync event, we need to set each
++  // registration entry state to STATE_FIRING.
++
++  uint32_t length;
++  nsresult rv = aRegistrations->GetLength(&length);
++  if (NS_WARN_IF(NS_FAILED(rv))) {
++    return;
++  }
++
++  for (uint32_t i = 0; i < length; i++) {
++    nsCOMPtr<nsISyncRegistration> registration =
++      do_QueryElementAt(aRegistrations, i);
++    if (NS_WARN_IF(!registration)) {
++      continue;
++    }
++
++    // If we are already firing a sync event for this registration
++    // entry, we ignore it.
++    uint16_t state;
++    registration->GetState(&state);
++    if (state == nsISyncRegistry::STATE_FIRING) {
++      continue;
++    }
++
++    // Otherwise, we set the registration state to STATE_FIRING.
++    // XXX
++  }
 +}
 +
 +void
-+SyncService::MaybeTriggerSyncEvents()
++SyncService::TriggerSyncEvent(const nsString& aOriginSuffix,
++                              const nsString& aScope,
++                              const nsString& aTag,
++                              const bool aLastChance)
 +{
-+  const SyncInternalOp op((SyncGetAllArgs()));
-+
-+  // We need to jump to the main thread to get the list of registered
-+  // sync requests. If we are still online while coming back to the
-+  // background thread with this list of sync requests, we will fire
-+  // a sync event for each of them.
-+  RefPtr<SyncRegistryRequestRunnable> runnable =
-+    new SyncRegistryRequestRunnable(
-+        new SyncRegistryRequest(0 /* internal request */, nsID(), op));
-+  NS_DispatchToMainThread(runnable);
++  for (auto iter = mServiceWorkerManagerActors.Iter(); !iter.Done(); iter.Next()) {
++    RefPtr<ServiceWorkerManagerParent> parent = iter.Get()->GetKey();
++    MOZ_ASSERT(parent);
++    Unused << parent->SendNotifySyncEvent(aOriginSuffix, aScope, aTag,
++                                          aLastChance);
++  }
 +}
 +
 +void
@@ -799,7 +832,7 @@ new file mode 100644
 +
 +  // If we are online we need to get the list of registered sync requests
 +  // to trigger the corresponding 'sync' events.
-+  MaybeTriggerSyncEvents();
++  MaybeTriggerSyncEvents(nullptr);
 +}
 +
 +} // namespace dom
@@ -808,7 +841,7 @@ diff --git a/dom/sync/SyncService.h b/dom/sync/SyncService.h
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncService.h
-@@ -0,0 +1,78 @@
+@@ -0,0 +1,82 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -834,6 +867,7 @@ new file mode 100644
 +
 +class SyncManagerParent;
 +class SyncRegistryResponse;
++class SyncRegistryInternalResponse;
 +
 +typedef enum {
 +  ONLINE,
@@ -843,7 +877,7 @@ new file mode 100644
 +
 +class SyncService final
 +{
-+  friend class SyncRegistryRequestRunnableCallback;
++  friend class SyncRegistryResponseRunnable;
 +  friend class SyncServiceNotifyOnlineStateRunnable;
 +
 +public:
@@ -869,10 +903,13 @@ new file mode 100644
 +  void Init();
 +
 +  void Response(SyncRegistryResponse* aResponse);
++  void InternalResponse(SyncRegistryInternalResponse* aResponse);
 +
-+  void MaybeTriggerSyncEvents(nsIArray* aRegistrations,
-+                              const OnlineState& aState);
-+  void MaybeTriggerSyncEvents();
++  void MaybeTriggerSyncEvents(nsIArray* aRegistrations);
++  void TriggerSyncEvent(const nsString& aOriginSuffix,
++                        const nsString& aScope,
++                        const nsString& aTag,
++                        const bool aLastChance);
 +
 +  void OnlineStateChange(const OnlineState& aState);
 +
@@ -921,6 +958,96 @@ diff --git a/dom/sync/moz.build b/dom/sync/moz.build
  
  XPIDL_MODULE = 'dom_sync'
  
+diff --git a/dom/workers/PServiceWorkerManager.ipdl b/dom/workers/PServiceWorkerManager.ipdl
+--- a/dom/workers/PServiceWorkerManager.ipdl
++++ b/dom/workers/PServiceWorkerManager.ipdl
+@@ -33,17 +33,17 @@ parent:
+ 
+ child:
+   async NotifyRegister(ServiceWorkerRegistrationData data);
+   async NotifySoftUpdate(PrincipalOriginAttributes originAttributes,
+                          nsString scope);
+   async NotifyUnregister(PrincipalInfo principalInfo, nsString scope);
+   async NotifyRemove(nsCString host);
+   async NotifyRemoveAll();
+-  async NotifySyncEvent(PrincipalInfo principalInfo,
++  async NotifySyncEvent(nsString originSuffix,
+                         nsString scope,
+                         nsString tag,
+                         bool lastChance);
+   async __delete__();
+ };
+ 
+ } // namespace dom
+ } // namespace mozilla
+diff --git a/dom/workers/ServiceWorkerManagerChild.cpp b/dom/workers/ServiceWorkerManagerChild.cpp
+--- a/dom/workers/ServiceWorkerManagerChild.cpp
++++ b/dom/workers/ServiceWorkerManagerChild.cpp
+@@ -91,40 +91,29 @@ ServiceWorkerManagerChild::RecvNotifyRem
+   RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
+   MOZ_ASSERT(swm);
+ 
+   swm->RemoveAll();
+   return true;
+ }
+ 
+ bool
+-ServiceWorkerManagerChild::RecvNotifySyncEvent(const PrincipalInfo& aPrincipalInfo,
++ServiceWorkerManagerChild::RecvNotifySyncEvent(const nsString& aOriginSuffix,
+                                                const nsString& aScope,
+                                                const nsString& aTag,
+                                                const bool& aLastChance)
+ {
+   if (mShuttingDown) {
+     return true;
+   }
+ 
+-  nsCOMPtr<nsIPrincipal> principal = PrincipalInfoToPrincipal(aPrincipalInfo);
+-  if (NS_WARN_IF(!principal)) {
+-    return true;
+-  }
+-
+-  nsAutoCString originSuffix;
+-  nsresult rv = principal->GetOriginSuffix(originSuffix);
+-  if (NS_WARN_IF(NS_FAILED(rv))) {
+-    return true;
+-  }
+-
+   RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
+   MOZ_ASSERT(swm);
+ 
+-  swm->SendSyncEvent(originSuffix,
++  swm->SendSyncEvent(NS_ConvertUTF16toUTF8(aOriginSuffix),
+                      NS_ConvertUTF16toUTF8(aScope),
+                      aTag, aLastChance);
+   return true;
+ }
+ 
+ } // namespace workers
+ } // namespace dom
+ } // namespace mozilla
+diff --git a/dom/workers/ServiceWorkerManagerChild.h b/dom/workers/ServiceWorkerManagerChild.h
+--- a/dom/workers/ServiceWorkerManagerChild.h
++++ b/dom/workers/ServiceWorkerManagerChild.h
+@@ -41,17 +41,17 @@ public:
+ 
+   virtual bool RecvNotifyUnregister(const PrincipalInfo& aPrincipalInfo,
+                                     const nsString& aScope) override;
+ 
+   virtual bool RecvNotifyRemove(const nsCString& aHost) override;
+ 
+   virtual bool RecvNotifyRemoveAll() override;
+ 
+-  virtual bool RecvNotifySyncEvent(const PrincipalInfo& aPrincipalInfo,
++  virtual bool RecvNotifySyncEvent(const nsString& aOriginSuffix,
+                                    const nsString& aScope,
+                                    const nsString& aTag,
+                                    const bool& aLastChance) override;
+ 
+ private:
+   ServiceWorkerManagerChild()
+     : mShuttingDown(false)
+   {}
 diff --git a/dom/workers/ServiceWorkerManagerParent.cpp b/dom/workers/ServiceWorkerManagerParent.cpp
 --- a/dom/workers/ServiceWorkerManagerParent.cpp
 +++ b/dom/workers/ServiceWorkerManagerParent.cpp
