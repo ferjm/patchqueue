@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  4d309066f8eb1d67d245609875912823e96973a1
+# Parent  02a74347ff37683ac2e966a940aa64122a306c02
 Bug 1217544 - Implement one-off BackgroundSync API. Part 5: SyncService. r=baku
 
 diff --git a/dom/sync/SyncIPCTypes.ipdlh b/dom/sync/SyncIPCTypes.ipdlh
@@ -282,7 +282,7 @@ diff --git a/dom/sync/SyncService.cpp b/dom/sync/SyncService.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncService.cpp
-@@ -0,0 +1,554 @@
+@@ -0,0 +1,562 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -446,11 +446,6 @@ new file mode 100644
 +
 +    if (mRequest->mOpOrIOp.type() == SyncOpOrInternalOp::TSyncOp) {
 +      SyncOp op = mRequest->mOpOrIOp.get_SyncOp();
-+      nsCOMPtr<nsIPrincipal> principal =
-+        PrincipalInfoToPrincipal(op.mPrincipal());
-+      if (NS_WARN_IF(!principal)) {
-+        return NS_OK;
-+      }
 +
 +      switch(op.mArgs().type()) {
 +        case SyncOpArgs::TSyncRegisterArgs:
@@ -459,6 +454,19 @@ new file mode 100644
 +            do_CreateInstance("@mozilla.org/dom/sync/registration;1");
 +          MOZ_ASSERT(registration);
 +
++          nsCOMPtr<nsIPrincipal> principal =
++            PrincipalInfoToPrincipal(op.mPrincipal());
++          if (NS_WARN_IF(!principal)) {
++            return NotifyError(static_cast<uint32_t>(NS_ERROR_INVALID_ARG));
++          }
++
++          nsAutoCString originSuffix;
++          nsresult rv = principal->GetOriginSuffix(originSuffix);
++          if (NS_WARN_IF(NS_FAILED(rv))) {
++            return NotifyError(static_cast<uint32_t>(NS_ERROR_INVALID_ARG));
++          }
++
++          registration->SetOriginSuffix(NS_ConvertUTF8toUTF16(originSuffix));
 +          registration->SetScope(op.mArgs().get_SyncRegisterArgs().mScope());
 +          registration->SetTag(op.mArgs().get_SyncRegisterArgs().mTag());
 +
