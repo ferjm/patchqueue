@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  02a74347ff37683ac2e966a940aa64122a306c02
+# Parent  0a667d0c9222249d723014afee934f0fe37acbe5
 Bug 1217544 - Implement one-off BackgroundSync API. Part 5: SyncService. r=baku
 
 diff --git a/dom/sync/SyncIPCTypes.ipdlh b/dom/sync/SyncIPCTypes.ipdlh
@@ -282,7 +282,7 @@ diff --git a/dom/sync/SyncService.cpp b/dom/sync/SyncService.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncService.cpp
-@@ -0,0 +1,578 @@
+@@ -0,0 +1,587 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -400,18 +400,28 @@ new file mode 100644
 +      return Callback(SyncOpError(static_cast<uint32_t>(NS_ERROR_INVALID_ARG)));
 +    }
 +
-+    if (mRequest->mActorId == 0) {
-+      return NotifyInternalGetAllSuccess(aRegistrations);
-+    }
-+
-+    nsTArray<nsString> tags;
-+
 +    uint32_t length;
 +    nsresult rv = aRegistrations->GetLength(&length);
 +    if (NS_WARN_IF(NS_FAILED(rv))) {
 +      return Callback(SyncOpError(static_cast<uint32_t>(rv)));
 +    }
 +
++    if (mRequest->mActorId == 0) {
++      // Internal request.
++      nsTArray<UniquePtr<nsISyncRegistration>> registrations;
++      for (uint32_t i = 0; i < length; i++) {
++        nsCOMPtr<nsISyncRegistration> registration =
++          do_QueryElementAt(aRegistrations, i);
++        if (NS_WARN_IF(!registration)) {
++          continue;
++        }
++        registrations.AppendElement(registration);
++      }
++      return NotifyInternalGetAllSuccess(registrations);
++    }
++
++    // DOM request.
++    nsTArray<nsString> tags;
 +    for (uint32_t i = 0; i < length; i++) {
 +      nsCOMPtr<nsISyncRegistration> registration =
 +        do_QueryElementAt(aRegistrations, i);
@@ -521,7 +531,8 @@ new file mode 100644
 +  }
 +
 +  nsresult
-+  NotifyInternalGetAllSuccess(nsIArray* aRegistrations)
++  NotifyInternalGetAllSuccess(
++      nsTArray<UniquePtr<nsISyncRegistration>> &aRegistrations)
 +  {
 +    AssertIsOnMainThread();
 +
@@ -745,7 +756,7 @@ new file mode 100644
 +  // If we just successfully added a new sync request we try to trigger
 +  // the corresponding sync event.
 +  if (aResponse->mResponse.type() == SyncOpResponse::TSyncRegisterResponse) {
-+    MaybeTriggerSyncEvents(nullptr);
++    StartTriggerSyncEvents();
 +  }
 +}
 +
@@ -755,28 +766,34 @@ new file mode 100644
 +  AssertIsOnBackgroundThread();
 +  MOZ_ASSERT(aResponse);
 +
-+  MaybeTriggerSyncEvents(aResponse->GetRegistrations());
++  nsTArray<UniquePtr<nsISyncRegistration>> registrations;
++  aResponse->GetRegistrations(registrations);
++  ContinueTriggerSyncEvents(registrations);
 +}
 +
 +void
-+SyncService::MaybeTriggerSyncEvents(nsIArray* aRegistrations)
++SyncService::StartTriggerSyncEvents()
 +{
 +  AssertIsOnBackgroundThread();
 +
-+  if (!aRegistrations) {
-+    // We need to jump to the main thread to get the list of registered
-+    // sync requests. If we are still online while coming back to the
-+    // background thread with this list of sync requests, we will fire
-+    // a sync event for each of them.
++  // We need to jump to the main thread to get the list of registered
++  // sync requests. If we are still online while coming back to the
++  // background thread with this list of sync requests, we will fire
++  // a sync event for each of them.
 +
-+    const SyncInternalOp op((SyncGetAllArgs()));
++  const SyncInternalOp op((SyncGetAllArgs()));
 +
-+    RefPtr<SyncRegistryRequestRunnable> runnable =
-+      new SyncRegistryRequestRunnable(
-+          new SyncRegistryRequest(0 /* internal request */, nsID(), op));
-+    NS_DispatchToMainThread(runnable);
-+    return;
-+  }
++  RefPtr<SyncRegistryRequestRunnable> runnable =
++    new SyncRegistryRequestRunnable(
++        new SyncRegistryRequest(0 /* internal request */, nsID(), op));
++  NS_DispatchToMainThread(runnable);
++}
++
++void
++SyncService::ContinueTriggerSyncEvents(
++    nsTArray<UniquePtr<nsISyncRegistration>>& aRegistrations)
++{
++  AssertIsOnBackgroundThread();
 +
 +  // At this point we got the list of registered sync requests from
 +  // the main thread. If we are still online, we try to trigger a sync
@@ -787,16 +804,8 @@ new file mode 100644
 +
 +  // Before actually triggering the sync event, we need to set each
 +  // registration entry state to STATE_FIRING.
-+
-+  uint32_t length;
-+  nsresult rv = aRegistrations->GetLength(&length);
-+  if (NS_WARN_IF(NS_FAILED(rv))) {
-+    return;
-+  }
-+
-+  for (uint32_t i = 0; i < length; i++) {
-+    nsCOMPtr<nsISyncRegistration> registration =
-+      do_QueryElementAt(aRegistrations, i);
++  for (uint32_t i = 0; i < aRegistrations.Length(); i++) {
++    UniquePtr<nsISyncRegistration> registration(Move(aRegistrations[i]));
 +    if (NS_WARN_IF(!registration)) {
 +      continue;
 +    }
@@ -811,12 +820,12 @@ new file mode 100644
 +
 +    // Otherwise, we set the registration state to STATE_FIRING.
 +    // XXX
-+    TriggerSyncEvent(registration);
++    TriggerSyncEvent(Move(registration));
 +  }
 +}
 +
 +void
-+SyncService::TriggerSyncEvent(nsISyncRegistration* aRegistration)
++SyncService::TriggerSyncEvent(UniquePtr<nsISyncRegistration> aRegistration)
 +{
 +  AssertIsOnBackgroundThread();
 +  MOZ_ASSERT(aRegistration);
@@ -856,7 +865,7 @@ new file mode 100644
 +
 +  // If we are online we need to get the list of registered sync requests
 +  // to trigger the corresponding 'sync' events.
-+  MaybeTriggerSyncEvents(nullptr);
++  StartTriggerSyncEvents();
 +}
 +
 +} // namespace dom
@@ -865,7 +874,7 @@ diff --git a/dom/sync/SyncService.h b/dom/sync/SyncService.h
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncService.h
-@@ -0,0 +1,80 @@
+@@ -0,0 +1,82 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -876,10 +885,10 @@ new file mode 100644
 +#define mozilla_dom_SyncService_h
 +
 +#include "mozilla/dom/SyncIPCTypes.h"
-+#include "nsIArray.h"
 +#include "nsISupportsImpl.h"
 +#include "nsISyncRegistry.h"
 +#include "nsHashKeys.h"
++#include "nsTArray.h"
 +#include "nsTHashtable.h"
 +#include "ServiceWorkerManagerParent.h"
 +
@@ -930,8 +939,10 @@ new file mode 100644
 +  void Response(SyncRegistryResponse* aResponse);
 +  void InternalResponse(SyncRegistryInternalResponse* aResponse);
 +
-+  void MaybeTriggerSyncEvents(nsIArray* aRegistrations);
-+  void TriggerSyncEvent(nsISyncRegistration* aRegistration);
++  void StartTriggerSyncEvents();
++  void ContinueTriggerSyncEvents(
++      nsTArray<UniquePtr<nsISyncRegistration>>& aRegistrations);
++  void TriggerSyncEvent(UniquePtr<nsISyncRegistration> aRegistration);
 +
 +  void OnlineStateChange(const OnlineState& aState);
 +
