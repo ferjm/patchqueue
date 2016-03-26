@@ -1,7 +1,7 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
 # Parent  f66ab359f3ef5f651e85ff1194366a27b54d3120
-Bug 1252570 - Remove mozPay. r=ehsan,mfinkle
+Bug 1252570 - Remove mozPay. r=ehsan,mfinkle,fabrice
 
 diff --git a/b2g/app/b2g.js b/b2g/app/b2g.js
 --- a/b2g/app/b2g.js
