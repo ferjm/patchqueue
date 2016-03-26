@@ -1,6 +1,3 @@
-bug1252573.mobileid.patch
-bug1252570.remove.mozpay.patch
-try-all
 bug1217544.background.sync.part1.webidl.patch
 bug1217544.background.sync.part2.serviceworkerregistration.patch
 bug1217544.background.sync.part3.ipc.patch
@@ -8,6 +5,9 @@ bug1217544.background.sync.part4.syncevent.patch
 bug1217544.background.sync.part5.syncstore.patch
 bug1217544.background.sync.part6.syncservice.patch
 bug1217544.background.sync.tests.patch
+bug1252573.mobileid.patch
+try-all
+bug1252570.remove.mozpay.patch
 try
 350ecdaedef8
 bug1239701.datastore.certified.patch

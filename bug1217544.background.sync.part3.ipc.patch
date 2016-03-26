@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  34300d528cbe25f6703e82b6f759f17b72578be7
+# Parent  9a89fabdc6277003cc34d50a1dff9ad424761faf
 Bug 1217544 - Implement one-off BackgroundSync API. Part 3: IPC. r=baku
 
 diff --git a/dom/sync/PSyncManager.ipdl b/dom/sync/PSyncManager.ipdl
@@ -1278,10 +1278,10 @@ diff --git a/ipc/glue/PBackground.ipdl b/ipc/glue/PBackground.ipdl
 diff --git a/ipc/glue/moz.build b/ipc/glue/moz.build
 --- a/ipc/glue/moz.build
 +++ b/ipc/glue/moz.build
-@@ -135,16 +135,17 @@ SOURCES += [
-     'GeckoChildProcessHost.cpp',
-     'URIUtils.cpp',
- ]
+@@ -141,16 +141,17 @@ if CONFIG['_MSC_VER']:
+     # 'reinterpret_cast': conversion from 'DWORD' to 'HANDLE' of greater size
+     SOURCES['BackgroundChildImpl.cpp'].flags += ['-wd4312']
+     SOURCES['BackgroundParentImpl.cpp'].flags += ['-wd4312']
  
  LOCAL_INCLUDES += [
      '/caps',
