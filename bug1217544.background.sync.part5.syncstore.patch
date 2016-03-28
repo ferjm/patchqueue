@@ -169,7 +169,7 @@ diff --git a/dom/sync/SyncRegistry.js b/dom/sync/SyncRegistry.js
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncRegistry.js
-@@ -0,0 +1,163 @@
+@@ -0,0 +1,168 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -317,7 +317,12 @@ new file mode 100644
 +        // XXX state machine.
 +        registration.state = aState;
 +        aStore.put(registration).onsuccess = event => {
-+          aListener.notifyChangeStateSuccess(registration);
++          let result = Cc["@mozilla.org/dom/sync/registration;1"]
++                         .createInstance(Ci.nsISyncRegistration);
++          ["id", "scope", "tag", "state", "lastChance"].forEach(property => {
++            result[property] = registration[property];
++          });
++          aListener.notifyChangeStateSuccess(result);
 +        };
 +      };
 +    }, null, error => {
