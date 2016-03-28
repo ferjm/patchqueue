@@ -7,7 +7,7 @@ diff --git a/dom/sync/SyncRegistration.cpp b/dom/sync/SyncRegistration.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncRegistration.cpp
-@@ -0,0 +1,100 @@
+@@ -0,0 +1,117 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this file,
 + * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -26,61 +26,78 @@ new file mode 100644
 +/* attribute DOMString originSuffix; */
 +NS_IMETHODIMP nsSyncRegistration::GetOriginSuffix(nsAString & aOriginSuffix)
 +{
-+    return NS_ERROR_NOT_IMPLEMENTED;
++  aOriginSuffix = mOriginSuffix;
++  return NS_OK;
 +}
++
 +NS_IMETHODIMP nsSyncRegistration::SetOriginSuffix(const nsAString & aOriginSuffix)
 +{
-+    return NS_ERROR_NOT_IMPLEMENTED;
++  mOriginSuffix = aOriginSuffix;
++  return NS_OK;
 +}
 +
 +/* attribute DOMString id; */
 +NS_IMETHODIMP nsSyncRegistration::GetId(nsAString & aId)
 +{
-+    return NS_ERROR_NOT_IMPLEMENTED;
++  aId = mId;
++  return NS_OK;
 +}
++
 +NS_IMETHODIMP nsSyncRegistration::SetId(const nsAString & aId)
 +{
-+    return NS_ERROR_NOT_IMPLEMENTED;
++  mId = aId;
++  return NS_OK;
 +}
 +
 +/* attribute DOMString scope; */
 +NS_IMETHODIMP nsSyncRegistration::GetScope(nsAString & aScope)
 +{
-+    return NS_ERROR_NOT_IMPLEMENTED;
++  aScope = mScope;
++  return NS_OK;
 +}
++
 +NS_IMETHODIMP nsSyncRegistration::SetScope(const nsAString & aScope)
 +{
-+    return NS_ERROR_NOT_IMPLEMENTED;
++  mScope = aScope;
++  return NS_OK;
 +}
 +
 +/* attribute DOMString tag; */
 +NS_IMETHODIMP nsSyncRegistration::GetTag(nsAString & aTag)
 +{
-+    return NS_ERROR_NOT_IMPLEMENTED;
++  aTag = mTag;
++  return NS_OK;
 +}
++
 +NS_IMETHODIMP nsSyncRegistration::SetTag(const nsAString & aTag)
 +{
-+    return NS_ERROR_NOT_IMPLEMENTED;
++  mTag = aTag;
++  return NS_OK;
 +}
 +
 +/* attribute unsigned short state; */
 +NS_IMETHODIMP nsSyncRegistration::GetState(uint16_t *aState)
 +{
-+    return NS_ERROR_NOT_IMPLEMENTED;
++  aState = mState;
++  return NS_OK;
 +}
++
 +NS_IMETHODIMP nsSyncRegistration::SetState(uint16_t aState)
 +{
-+    return NS_ERROR_NOT_IMPLEMENTED;
++  mState = aState;
++  return NS_OK;
 +}
 +
 +/* attribute boolean lastChance; */
 +NS_IMETHODIMP nsSyncRegistration::GetLastChance(bool *aLastChance)
 +{
-+    return NS_ERROR_NOT_IMPLEMENTED;
++  aLastChance = mLastChance;
++  return NS_OK;
 +}
 +NS_IMETHODIMP nsSyncRegistration::SetLastChance(bool aLastChance)
 +{
-+    return NS_ERROR_NOT_IMPLEMENTED;
++  mLastChance = aLastChance;
++  return NS_OK;
 +}
 +
 +NS_GENERIC_FACTORY_CONSTRUCTOR(nsSyncRegistration);
@@ -134,7 +151,7 @@ new file mode 100644
 +  nsSyncRegistration() {}
 +
 +private:
-+  virtual ~nsSyncRegistration() {}
++  ~nsSyncRegistration() {}
 +
 +  nsString mOriginSuffix;
 +  nsString mId;
