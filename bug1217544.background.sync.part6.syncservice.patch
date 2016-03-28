@@ -1,12 +1,12 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  23efe5ffa6d5a10702883983f1041d56904f9fc5
+# Parent  d49586cf130a9088bf32504b844ee05443a8f415
 Bug 1217544 - Implement one-off BackgroundSync API. Part 5: SyncService. r=baku
 
 diff --git a/dom/sync/SyncIPCTypes.ipdlh b/dom/sync/SyncIPCTypes.ipdlh
 --- a/dom/sync/SyncIPCTypes.ipdlh
 +++ b/dom/sync/SyncIPCTypes.ipdlh
-@@ -10,33 +10,60 @@ namespace dom {
+@@ -10,33 +10,66 @@ namespace dom {
  struct SyncRegisterArgs
  {
    nsString mScope;
@@ -40,10 +40,16 @@ diff --git a/dom/sync/SyncIPCTypes.ipdlh b/dom/sync/SyncIPCTypes.ipdlh
 +  uint16_t mState;
 +};
 +
++struct SyncRemoveArgs
++{
++  nsString mId;
++};
++
 +union SyncInternalOpArgs
 +{
 +  SyncGetAllArgs;
 +  SyncChangeStateArgs;
++  SyncRemoveArgs;
 +};
 +
 +struct SyncInternalOp
@@ -358,7 +364,7 @@ diff --git a/dom/sync/SyncService.cpp b/dom/sync/SyncService.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncService.cpp
-@@ -0,0 +1,631 @@
+@@ -0,0 +1,651 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -491,7 +497,7 @@ new file mode 100644
 +        if (NS_WARN_IF(!registration)) {
 +          continue;
 +        }
-+        registrations.AppendElement(registration);
++        registrations.AppendElement(UniquePtr<nsISyncRegistration>(registration));
 +      }
 +
 +      return Callback(new SyncRegistryInternalResponse(
@@ -881,6 +887,18 @@ new file mode 100644
 +  }
 +}
 +
++void SyncService::InternalRequest(const SyncInternalOpArgs& aArgs)
++{
++  AssertIsOnBackgroundThread();
++
++  const SyncInternalOp op(aArgs);
++
++  RefPtr<SyncRegistryRequestRunnable> runnable =
++    new SyncRegistryRequestRunnable(
++        new SyncRegistryRequest(0 /* internal request */, nsID(), op));
++  NS_DispatchToMainThread(runnable);
++}
++
 +void
 +SyncService::StartTriggerSyncEvents()
 +{
@@ -890,13 +908,17 @@ new file mode 100644
 +  // sync requests. If we are still online while coming back to the
 +  // background thread with this list of sync requests, we will fire
 +  // a sync event for each of them.
++  const SyncGetAllArgs args;
++  InternalRequest(args);
++}
 +
-+  const SyncInternalOp op((SyncGetAllArgs()));
++void
++SyncService::RemoveSyncRegistration(const nsString& aId)
++{
++  AssertIsOnBackgroundThread();
 +
-+  RefPtr<SyncRegistryRequestRunnable> runnable =
-+    new SyncRegistryRequestRunnable(
-+        new SyncRegistryRequest(0 /* internal request */, nsID(), op));
-+  NS_DispatchToMainThread(runnable);
++  const SyncRemoveArgs args(aId);
++  InternalRequest(args);
 +}
 +
 +void
@@ -920,15 +942,14 @@ new file mode 100644
 +      continue;
 +    }
 +
-+    // If we are already firing a sync event for this registration
-+    // entry, we ignore it.
++    // If the state of this registration entry is not 'pending', we ignore it.
 +    uint16_t state;
 +    registration->GetState(&state);
-+    if (state == nsISyncRegistry::STATE_FIRING) {
++    if (state != nsISyncRegistry::STATE_PENDING) {
 +      continue;
 +    }
 +
-+    // Otherwise, we set the registration state to STATE_FIRING.
++    // Otherwise, we set the registration state to 'firing'.
 +    nsString id;
 +    registration->GetId(id);
 +    MOZ_ASSERT(!id.IsEmpty());
@@ -971,6 +992,11 @@ new file mode 100644
 +    MOZ_ASSERT(parent);
 +    Unused << parent->SendNotifySyncEvent(originSuffix, scope, tag,
 +                                          lastChance);
++    // XXX Bug 1260141. For now we simply remove the sync registration, but
++    // we need to implement the sync event handling logic.
++    nsString id;
++    aRegistration->GetId(id);
++    RemoveSyncRegistration(id);
 +  }
 +}
 +
@@ -994,7 +1020,7 @@ diff --git a/dom/sync/SyncService.h b/dom/sync/SyncService.h
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncService.h
-@@ -0,0 +1,82 @@
+@@ -0,0 +1,86 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -1059,10 +1085,14 @@ new file mode 100644
 +  void Response(SyncRegistryResponse* aResponse);
 +  void InternalResponse(SyncRegistryInternalResponse* aResponse);
 +
++  void InternalRequest(const SyncInternalOpArgs& aArgs);
++
 +  void StartTriggerSyncEvents();
 +  void ContinueTriggerSyncEvents(
 +      nsTArray<UniquePtr<nsISyncRegistration>>& aRegistrations);
 +  void TriggerSyncEvent(UniquePtr<nsISyncRegistration> aRegistration);
++
++  void RemoveSyncRegistration(const nsString& aId);
 +
 +  void OnlineStateChange(const OnlineState& aState);
 +
