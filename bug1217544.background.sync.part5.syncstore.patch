@@ -255,8 +255,8 @@ new file mode 100644
 +        originSuffix: aRegistration.originSuffix,
 +        scope: aRegistration.scope,
 +        tag: aRegistration.tag,
-+        state: aRegistration.state,
-+        lastChance: aRegistration.lastChance
++        state: Ci.nsISyncRegistry.STATE_PENDING,
++        lastChance: true // XXX Bug 1260138
 +      });
 +    }, () => {
 +      aListener.notifyAddSuccess();
