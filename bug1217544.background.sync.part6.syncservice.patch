@@ -1,12 +1,12 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  62a4970bf8b3b9707c6188186c3d7951599ec59e
+# Parent  9c6272adaec94450f4569872680203e53cd6c133
 Bug 1217544 - Implement one-off BackgroundSync API. Part 5: SyncService. r=baku
 
 diff --git a/dom/sync/SyncIPCTypes.ipdlh b/dom/sync/SyncIPCTypes.ipdlh
 --- a/dom/sync/SyncIPCTypes.ipdlh
 +++ b/dom/sync/SyncIPCTypes.ipdlh
-@@ -10,33 +10,53 @@ namespace dom {
+@@ -10,33 +10,60 @@ namespace dom {
  struct SyncRegisterArgs
  {
    nsString mScope;
@@ -34,9 +34,16 @@ diff --git a/dom/sync/SyncIPCTypes.ipdlh b/dom/sync/SyncIPCTypes.ipdlh
 +{
 +};
 +
++struct SyncChangeStateArgs
++{
++  nsString mId;
++  uint16_t mState;
++};
++
 +union SyncInternalOpArgs
 +{
 +  SyncGetAllArgs;
++  SyncChangeStateArgs;
 +};
 +
 +struct SyncInternalOp
@@ -351,7 +358,7 @@ diff --git a/dom/sync/SyncService.cpp b/dom/sync/SyncService.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncService.cpp
-@@ -0,0 +1,586 @@
+@@ -0,0 +1,599 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -506,6 +513,14 @@ new file mode 100644
 +  }
 +
 +  NS_IMETHODIMP
++  NotifyChangeStateSuccess(nsISyncRegistration* aRegistration)
++  {
++    AssertIsOnMainThread();
++
++    return NS_OK;
++  }
++
++  NS_IMETHODIMP
 +  NotifyError(const uint32_t aError)
 +  {
 +    AssertIsOnMainThread();
@@ -566,6 +581,11 @@ new file mode 100644
 +      switch (op.mArgs().type()) {
 +        case SyncInternalOpArgs::TSyncGetAllArgs:
 +          registry->GetAll(this);
++          break;
++        case SyncInternalOpArgs::TSyncChangeStateArgs:
++          registry->changeState(op.mArgs().get_SyncChangeStateArgs().mId,
++                                op.mArgs().get_SyncChangeStateArgs().mState,
++                                this);
 +          break;
 +        default:
 +          MOZ_CRASH("Unknown BackgroundSync internal request");
@@ -1029,7 +1049,7 @@ diff --git a/dom/sync/SyncTypes.h b/dom/sync/SyncTypes.h
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncTypes.h
-@@ -0,0 +1,96 @@
+@@ -0,0 +1,108 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -1100,12 +1120,22 @@ new file mode 100644
 +public:
 +  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(SyncRegistryInternalResponse)
 +
++  enum Type {
++    TGetAllResponse,
++    TChangeStateResponse
++  };
++
 +  SyncRegistryInternalResponse(
 +      nsTArray<UniquePtr<nsISyncRegistration>> &aRegistrations)
 +  {
 +    for (uint32_t i = 0; i < aRegistrations.Length(); i++) {
 +      mRegistrations.AppendElement(Move(aRegistrations[i]));
 +    }
++  }
++
++  Type
++  type() {
++    return mType;
 +  }
 +
 +  void
@@ -1118,6 +1148,8 @@ new file mode 100644
 +
 +private:
 +  ~SyncRegistryInternalResponse() {}
++
++  Type mType;
 +
 +  nsTArray<UniquePtr<nsISyncRegistration>> mRegistrations;
 +};
