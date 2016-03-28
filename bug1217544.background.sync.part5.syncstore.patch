@@ -169,7 +169,7 @@ diff --git a/dom/sync/SyncRegistry.js b/dom/sync/SyncRegistry.js
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncRegistry.js
-@@ -0,0 +1,164 @@
+@@ -0,0 +1,166 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -267,13 +267,16 @@ new file mode 100644
 +  },
 +
 +  remove(aId, aListener) {
-+    debug("remove");
++    debug("remove " + aId);
 +    aListener.notifyRemoveSuccess();
-+  },
-+
-+  get(aId, aListener) {
-+    debug("get");
-+    aListener.notifyGetSuccess();
++    this.newTxn(RW, SYNC_REGISTRY_STORE_NAME, (aTxn, aStore) => {
++      aStore.delete(aId);
++    }, () => {
++      debug("registration removed " + aId);
++    }, error => {
++      error = isNaN(error) ? Cr.NS_ERROR_FAILURE : error;
++      aListener.notifyError(error);
++    });
 +  },
 +
 +  getAll(aListener) {
@@ -310,7 +313,6 @@ new file mode 100644
 +      aStore.get(aId).onsuccess = event => {
 +        let registration = event.target.result;
 +        debug("registration " + JSON.stringify(registration));
-+        // XXX state machine.
 +        registration.state = aState;
 +        aStore.put(registration).onsuccess = event => {
 +          let result = Cc["@mozilla.org/dom/sync/registration;1"]
@@ -385,7 +387,7 @@ diff --git a/dom/sync/nsISyncRegistry.idl b/dom/sync/nsISyncRegistry.idl
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/nsISyncRegistry.idl
-@@ -0,0 +1,53 @@
+@@ -0,0 +1,50 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -426,9 +428,6 @@ new file mode 100644
 +
 +  void add(in nsISyncRegistration registration,
 +           in nsISyncRegistryListener listener);
-+
-+  void remove(in DOMString id,
-+              in nsISyncRegistryListener listener);
 +
 +  void get(in DOMString id,
 +           in nsISyncRegistryListener listener);
