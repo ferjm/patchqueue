@@ -1,13 +1,112 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  9e3bf62b0b64cb5c1945797eb8c5a5c33d68c62d
+# Parent  88d17353e8d93d9e56ad2cfe159143e4f1d10634
 Bug 1217544 - Implement one-off BackgroundSync API. Part 5: Sync DB. r=baku
 
+diff --git a/dom/sync/SyncRegistration.cpp b/dom/sync/SyncRegistration.cpp
+new file mode 100644
+--- /dev/null
++++ b/dom/sync/SyncRegistration.cpp
+@@ -0,0 +1,67 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
++ * You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#include "SyncRegistration.h"
++
++NS_IMPL_ISUPPORTS(nsSyncRegistration, nsISyncRegistration)
++
++/* attribute DOMString originSuffix; */
++NS_IMETHODIMP nsSyncRegistration::GetOriginSuffix(nsAString & aOriginSuffix)
++{
++    return NS_ERROR_NOT_IMPLEMENTED;
++}
++NS_IMETHODIMP nsSyncRegistration::SetOriginSuffix(const nsAString & aOriginSuffix)
++{
++    return NS_ERROR_NOT_IMPLEMENTED;
++}
++
++/* attribute DOMString id; */
++NS_IMETHODIMP nsSyncRegistration::GetId(nsAString & aId)
++{
++    return NS_ERROR_NOT_IMPLEMENTED;
++}
++NS_IMETHODIMP nsSyncRegistration::SetId(const nsAString & aId)
++{
++    return NS_ERROR_NOT_IMPLEMENTED;
++}
++
++/* attribute DOMString scope; */
++NS_IMETHODIMP nsSyncRegistration::GetScope(nsAString & aScope)
++{
++    return NS_ERROR_NOT_IMPLEMENTED;
++}
++NS_IMETHODIMP nsSyncRegistration::SetScope(const nsAString & aScope)
++{
++    return NS_ERROR_NOT_IMPLEMENTED;
++}
++
++/* attribute DOMString tag; */
++NS_IMETHODIMP nsSyncRegistration::GetTag(nsAString & aTag)
++{
++    return NS_ERROR_NOT_IMPLEMENTED;
++}
++NS_IMETHODIMP nsSyncRegistration::SetTag(const nsAString & aTag)
++{
++    return NS_ERROR_NOT_IMPLEMENTED;
++}
++
++/* attribute unsigned short state; */
++NS_IMETHODIMP nsSyncRegistration::GetState(uint16_t *aState)
++{
++    return NS_ERROR_NOT_IMPLEMENTED;
++}
++NS_IMETHODIMP nsSyncRegistration::SetState(uint16_t aState)
++{
++    return NS_ERROR_NOT_IMPLEMENTED;
++}
++
++/* attribute boolean lastChance; */
++NS_IMETHODIMP nsSyncRegistration::GetLastChance(bool *aLastChance)
++{
++    return NS_ERROR_NOT_IMPLEMENTED;
++}
++NS_IMETHODIMP nsSyncRegistration::SetLastChance(bool aLastChance)
++{
++    return NS_ERROR_NOT_IMPLEMENTED;
++}
+diff --git a/dom/sync/SyncRegistration.h b/dom/sync/SyncRegistration.h
+new file mode 100644
+--- /dev/null
++++ b/dom/sync/SyncRegistration.h
+@@ -0,0 +1,22 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
++ * You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#ifndef mozilla_dom_SyncRegistration_h
++#define mozilla_dom_SyncRegistration_h
++
++#include "nsISyncRegistration.h"
++
++class nsSyncRegistration : public nsISyncRegistration
++{
++public:
++  NS_DECL_ISUPPORTS
++  NS_DECL_NSISYNCREGISTRATION
++
++  nsSyncRegistration() {}
++
++private:
++  ~nsSyncRegistration() {}
++};
++
++#endif // mozilla_dom_SyncRegistration_h
 diff --git a/dom/sync/SyncRegistry.js b/dom/sync/SyncRegistry.js
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncRegistry.js
-@@ -0,0 +1,154 @@
+@@ -0,0 +1,141 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -148,34 +247,32 @@ new file mode 100644
 +                                         Ci.nsISupports])
 +};
 +
-+function SyncRegistration() {
-+  this.state = Ci.nsISyncRegistry.STATE_PENDING;
-+  this.lastChance = false;
-+}
-+
-+SyncRegistration.prototype = {
-+  classID: Components.ID("{0c47c0e6-66b9-4b91-b39e-65a7d11d322d}"),
-+  contractID: "@mozilla.org/dom/sync/registration;1",
-+  QueryInterface: XPCOMUtils.generateQI([Ci.nsISyncRegistration,
-+                                         Ci.nsISupports])
-+};
-+
-+this.NSGetFactory = XPCOMUtils.generateNSGetFactory([SyncRegistry,
-+                                                     SyncRegistration]);
++this.NSGetFactory = XPCOMUtils.generateNSGetFactory([SyncRegistry]);
 diff --git a/dom/sync/SyncRegistry.manifest b/dom/sync/SyncRegistry.manifest
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncRegistry.manifest
-@@ -0,0 +1,5 @@
+@@ -0,0 +1,2 @@
 +component {c1200834-3ebb-45e2-81cf-986edeb107f6} SyncRegistry.js
 +contract @mozilla.org/dom/sync/registry;1 {c1200834-3ebb-45e2-81cf-986edeb107f6}
-+
-+component {0c47c0e6-66b9-4b91-b39e-65a7d11d322d} SyncRegistry.js
-+contract @mozilla.org/dom/sync/registration;1 {0c47c0e6-66b9-4b91-b39e-65a7d11d322d}
 diff --git a/dom/sync/moz.build b/dom/sync/moz.build
 --- a/dom/sync/moz.build
 +++ b/dom/sync/moz.build
-@@ -17,11 +17,22 @@ IPDL_SOURCES += [
+@@ -5,23 +5,35 @@
+ 
+ EXPORTS.mozilla.dom += [
+     'SyncManager.h'
+ ]
+ 
+ UNIFIED_SOURCES += [
+     'SyncManager.cpp',
+     'SyncManagerChild.cpp',
+-    'SyncManagerParent.cpp'
++    'SyncManagerParent.cpp',
++    'SyncRegistration.cpp'
+ ]
+ 
+ IPDL_SOURCES += [
      'PSyncManager.ipdl',
      'SyncIPCTypes.ipdlh'
  ]
