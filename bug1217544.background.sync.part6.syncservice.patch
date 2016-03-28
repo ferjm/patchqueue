@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  545af2acd32a65a3097a67e89d66e98ba744c80c
+# Parent  62a4970bf8b3b9707c6188186c3d7951599ec59e
 Bug 1217544 - Implement one-off BackgroundSync API. Part 5: SyncService. r=baku
 
 diff --git a/dom/sync/SyncIPCTypes.ipdlh b/dom/sync/SyncIPCTypes.ipdlh
@@ -901,7 +901,7 @@ new file mode 100644
 +
 +  nsString originSuffix;
 +  aRegistration->GetOriginSuffix(originSuffix);
-+  MOZ_ASSERT(!originSuffix.IsEmpty());
++  //XXX ? MOZ_ASSERT(!originSuffix.IsEmpty());
 +
 +  nsString scope;
 +  aRegistration->GetScope(scope);
