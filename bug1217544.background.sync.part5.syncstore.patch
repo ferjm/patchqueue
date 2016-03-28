@@ -429,8 +429,8 @@ new file mode 100644
 +  void add(in nsISyncRegistration registration,
 +           in nsISyncRegistryListener listener);
 +
-+  void get(in DOMString id,
-+           in nsISyncRegistryListener listener);
++  void remove(in DOMString id,
++              in nsISyncRegistryListener listener);
 +
 +  void getAll(in nsISyncRegistryListener listener);
 +
