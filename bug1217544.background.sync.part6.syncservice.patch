@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  9c6272adaec94450f4569872680203e53cd6c133
+# Parent  23efe5ffa6d5a10702883983f1041d56904f9fc5
 Bug 1217544 - Implement one-off BackgroundSync API. Part 5: SyncService. r=baku
 
 diff --git a/dom/sync/SyncIPCTypes.ipdlh b/dom/sync/SyncIPCTypes.ipdlh
@@ -358,7 +358,7 @@ diff --git a/dom/sync/SyncService.cpp b/dom/sync/SyncService.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncService.cpp
-@@ -0,0 +1,599 @@
+@@ -0,0 +1,631 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -493,7 +493,9 @@ new file mode 100644
 +        }
 +        registrations.AppendElement(registration);
 +      }
-+      return NotifyInternalGetAllSuccess(registrations);
++
++      return Callback(new SyncRegistryInternalResponse(
++        SyncRegistryInternalResponse::TGetAllResponse, registrations));
 +    }
 +
 +    // DOM request.
@@ -517,7 +519,11 @@ new file mode 100644
 +  {
 +    AssertIsOnMainThread();
 +
-+    return NS_OK;
++    nsTArray<UniquePtr<nsISyncRegistration>> registrations;
++    registrations.AppendElement(UniquePtr<nsISyncRegistration>(aRegistration));
++
++    return Callback(new SyncRegistryInternalResponse(
++      SyncRegistryInternalResponse::TChangeStateResponse, registrations));
 +  }
 +
 +  NS_IMETHODIMP
@@ -583,8 +589,8 @@ new file mode 100644
 +          registry->GetAll(this);
 +          break;
 +        case SyncInternalOpArgs::TSyncChangeStateArgs:
-+          registry->changeState(op.mArgs().get_SyncChangeStateArgs().mId,
-+                                op.mArgs().get_SyncChangeStateArgs().mState,
++          registry->ChangeState(op.mArgs().get_SyncChangeStateArgs().mId(),
++                                op.mArgs().get_SyncChangeStateArgs().mState(),
 +                                this);
 +          break;
 +        default:
@@ -620,16 +626,12 @@ new file mode 100644
 +  }
 +
 +  nsresult
-+  NotifyInternalGetAllSuccess(
-+      nsTArray<UniquePtr<nsISyncRegistration>> &aRegistrations)
++  Callback(SyncRegistryInternalResponse* aResponse)
 +  {
 +    AssertIsOnMainThread();
 +
-+    RefPtr<SyncRegistryInternalResponse> response =
-+      new SyncRegistryInternalResponse(aRegistrations);
-+
 +    RefPtr<SyncRegistryResponseRunnable> callback =
-+      new SyncRegistryResponseRunnable(response);
++      new SyncRegistryResponseRunnable(aResponse);
 +    MOZ_ASSERT(callback);
 +
 +    mBackgroundThread->Dispatch(callback, NS_DISPATCH_NORMAL);
@@ -857,7 +859,26 @@ new file mode 100644
 +
 +  nsTArray<UniquePtr<nsISyncRegistration>> registrations;
 +  aResponse->GetRegistrations(registrations);
-+  ContinueTriggerSyncEvents(registrations);
++
++  switch (aResponse->type()) {
++    case SyncRegistryInternalResponse::TGetAllResponse:
++      ContinueTriggerSyncEvents(registrations);
++      break;
++    case SyncRegistryInternalResponse::TChangeStateResponse:
++      MOZ_ASSERT((registrations.Length() == 1));
++
++      uint16_t state;
++      registrations[0]->GetState(&state);
++
++      if (state == nsISyncRegistry::STATE_FIRING) {
++        // After setting the state of the registration to STATE_FIRING
++        // we try to actually trigger the sync event.
++        TriggerSyncEvent(Move(registrations[0]));
++      }
++      break;
++    default:
++      MOZ_CRASH("Unknown BackgroundSync internal response");
++  }
 +}
 +
 +void
@@ -908,8 +929,15 @@ new file mode 100644
 +    }
 +
 +    // Otherwise, we set the registration state to STATE_FIRING.
-+    // XXX
-+    TriggerSyncEvent(Move(registration));
++    nsString id;
++    registration->GetId(id);
++    MOZ_ASSERT(!id.IsEmpty());
++    const SyncInternalOp op(
++        (SyncChangeStateArgs(id, nsISyncRegistry::STATE_FIRING)));
++    RefPtr<SyncRegistryRequestRunnable> runnable =
++      new SyncRegistryRequestRunnable(
++          new SyncRegistryRequest(0 /* internal request */, nsID(), op));
++    NS_DispatchToMainThread(runnable);
 +  }
 +}
 +
@@ -918,6 +946,10 @@ new file mode 100644
 +{
 +  AssertIsOnBackgroundThread();
 +  MOZ_ASSERT(aRegistration);
++
++  uint16_t state;
++  aRegistration->GetState(&state);
++  MOZ_ASSERT(state == nsISyncRegistry::STATE_FIRING);
 +
 +  nsString originSuffix;
 +  aRegistration->GetOriginSuffix(originSuffix);
@@ -1049,7 +1081,7 @@ diff --git a/dom/sync/SyncTypes.h b/dom/sync/SyncTypes.h
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncTypes.h
-@@ -0,0 +1,108 @@
+@@ -0,0 +1,110 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -1126,7 +1158,9 @@ new file mode 100644
 +  };
 +
 +  SyncRegistryInternalResponse(
++      Type aType,
 +      nsTArray<UniquePtr<nsISyncRegistration>> &aRegistrations)
++    : mType(aType)
 +  {
 +    for (uint32_t i = 0; i < aRegistrations.Length(); i++) {
 +      mRegistrations.AppendElement(Move(aRegistrations[i]));
