@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  60c9e46d131a7faf566a466d5c76d96c2a804c0f
+# Parent  545af2acd32a65a3097a67e89d66e98ba744c80c
 Bug 1217544 - Implement one-off BackgroundSync API. Part 5: SyncService. r=baku
 
 diff --git a/dom/sync/SyncIPCTypes.ipdlh b/dom/sync/SyncIPCTypes.ipdlh
@@ -1130,8 +1130,7 @@ new file mode 100644
 diff --git a/dom/sync/moz.build b/dom/sync/moz.build
 --- a/dom/sync/moz.build
 +++ b/dom/sync/moz.build
-@@ -5,26 +5,28 @@
- 
+@@ -6,26 +6,28 @@
  EXPORTS.mozilla.dom += [
      'SyncManager.h'
  ]
@@ -1139,8 +1138,9 @@ diff --git a/dom/sync/moz.build b/dom/sync/moz.build
  UNIFIED_SOURCES += [
      'SyncManager.cpp',
      'SyncManagerChild.cpp',
--    'SyncManagerParent.cpp'
-+    'SyncManagerParent.cpp',
+     'SyncManagerParent.cpp',
+-    'SyncRegistration.cpp'
++    'SyncRegistration.cpp',
 +    'SyncService.cpp'
  ]
  
