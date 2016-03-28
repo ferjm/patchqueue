@@ -1026,6 +1026,107 @@ new file mode 100644
 +} // namespace mozilla
 +
 +#endif // mozilla_dom_SyncService_h
+diff --git a/dom/sync/SyncTypes.h b/dom/sync/SyncTypes.h
+new file mode 100644
+--- /dev/null
++++ b/dom/sync/SyncTypes.h
+@@ -0,0 +1,96 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#ifndef mozilla_dom_sync_Types_h
++#define mozilla_dom_sync_Types_h
++
++#include "nsCOMPtr.h"
++#include "nsTArray.h"
++
++namespace mozilla {
++namespace dom {
++
++class SyncRegistryAction
++{
++public:
++  uint64_t mActorId;
++  nsID mRequestId;
++
++protected:
++  SyncRegistryAction(const uint64_t aActorId,
++                     const nsID& aRequestId)
++    : mActorId(aActorId)
++    , mRequestId(aRequestId)
++  {}
++
++  ~SyncRegistryAction() {}
++};
++
++class SyncRegistryRequest final : public SyncRegistryAction
++{
++public:
++  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(SyncRegistryRequest)
++
++  SyncOpOrInternalOp mOpOrIOp;
++
++  SyncRegistryRequest(const uint64_t aActorId,
++                      const nsID& aRequestId,
++                      const SyncOpOrInternalOp& aOpOrIOp)
++    : SyncRegistryAction(aActorId, aRequestId)
++    , mOpOrIOp(aOpOrIOp)
++  {}
++
++private:
++  ~SyncRegistryRequest() {}
++};
++
++class SyncRegistryResponse final : public SyncRegistryAction
++{
++public:
++  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(SyncRegistryResponse)
++
++  SyncOpResponse mResponse;
++
++  SyncRegistryResponse(const uint64_t aActorId,
++                       const nsID& aRequestId,
++                       const SyncOpResponse& aResponse)
++    : SyncRegistryAction(aActorId, aRequestId)
++    , mResponse(aResponse)
++  {}
++
++private:
++  ~SyncRegistryResponse() {}
++};
++
++class SyncRegistryInternalResponse final
++{
++public:
++  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(SyncRegistryInternalResponse)
++
++  SyncRegistryInternalResponse(
++      nsTArray<UniquePtr<nsISyncRegistration>> &aRegistrations)
++  {
++    for (uint32_t i = 0; i < aRegistrations.Length(); i++) {
++      mRegistrations.AppendElement(Move(aRegistrations[i]));
++    }
++  }
++
++  void
++  GetRegistrations(nsTArray<UniquePtr<nsISyncRegistration>>& aRegistrations)
++  {
++    for (uint32_t i = 0; i < mRegistrations.Length(); i++) {
++      aRegistrations.AppendElement(Move(mRegistrations[i]));
++    }
++  }
++
++private:
++  ~SyncRegistryInternalResponse() {}
++
++  nsTArray<UniquePtr<nsISyncRegistration>> mRegistrations;
++};
++
++} // namespace dom
++} // namespace mozilla
++
++#endif // mozilla_dom_sync_Types_h
 diff --git a/dom/sync/moz.build b/dom/sync/moz.build
 --- a/dom/sync/moz.build
 +++ b/dom/sync/moz.build
