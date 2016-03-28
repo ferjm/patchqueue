@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  0a667d0c9222249d723014afee934f0fe37acbe5
+# Parent  60c9e46d131a7faf566a466d5c76d96c2a804c0f
 Bug 1217544 - Implement one-off BackgroundSync API. Part 5: SyncService. r=baku
 
 diff --git a/dom/sync/SyncIPCTypes.ipdlh b/dom/sync/SyncIPCTypes.ipdlh
@@ -64,13 +64,19 @@ diff --git a/dom/sync/SyncIPCTypes.ipdlh b/dom/sync/SyncIPCTypes.ipdlh
 diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
 --- a/dom/sync/SyncManager.cpp
 +++ b/dom/sync/SyncManager.cpp
-@@ -245,19 +245,21 @@ SyncManager::IsSyncManagerThread() {
+@@ -243,21 +243,27 @@ SyncManager::IsSyncManagerThread() {
+   return mThread == nsCOMPtr<nsIThread>(do_GetCurrentThread());
+ };
  
  void
  SyncManager::Shutdown()
  {
    MOZ_ASSERT(IsSyncManagerThread());
  
++  if (mShuttingDown) {
++    return;
++  }
++
    mShuttingDown = true;
  
 -  nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
@@ -89,7 +95,49 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
      workerPrivate->AssertIsOnWorkerThread();
      workerPrivate->RemoveFeature(mWorkerFeature);
      mWorkerFeature = nullptr;
-@@ -403,17 +405,17 @@ SyncManager::Register(const nsAString& a
+@@ -315,16 +321,20 @@ SyncManager::ActorFailed()
+ 
+ void
+ SyncManager::ActorCreated(PBackgroundChild* aActor)
+ {
+   MOZ_ASSERT(IsSyncManagerThread());
+   MOZ_ASSERT(aActor);
+   MOZ_ASSERT(!mActor);
+ 
++  if (mShuttingDown) {
++    return;
++  }
++
+   PSyncManagerChild* actor = aActor->SendPSyncManagerConstructor();
+   mActor = static_cast<SyncManagerChild*>(actor);
+   MOZ_ASSERT(mActor);
+ 
+   // Flush pending requests.
+   for (uint32_t i = 0, len = mPendingOperations.Length(); i < len; ++i) {
+     RefPtr<SyncOpRunnable> runnable = mPendingOperations[i];
+     MOZ_ASSERT(runnable);
+@@ -365,16 +375,20 @@ SyncManager::Observe(nsISupports* aSubje
+   return NS_OK;
+ }
+ 
+ already_AddRefed<Promise>
+ SyncManager::ExecuteOp(const SyncOpArgs& aArgs, ErrorResult& aRv)
+ {
+   MOZ_ASSERT(IsSyncManagerThread());
+ 
++  if (mShuttingDown) {
++    return nullptr;
++  }
++
+   RefPtr<Promise> p = Promise::Create(mGlobal, aRv);
+   if (NS_WARN_IF(aRv.Failed())) {
+     return nullptr;
+   }
+ 
+   nsAutoPtr<SyncOp> op(new SyncOp(*mPrincipalInfo, aArgs));
+   RefPtr<SyncOpRunnable> runnable = new SyncOpRunnable(p, op);
+ 
+@@ -403,17 +417,17 @@ SyncManager::Register(const nsAString& a
    return ExecuteOp(SyncOpArgs(args), aRv);
  }
  
@@ -111,7 +159,7 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
 diff --git a/dom/sync/SyncManagerParent.cpp b/dom/sync/SyncManagerParent.cpp
 --- a/dom/sync/SyncManagerParent.cpp
 +++ b/dom/sync/SyncManagerParent.cpp
-@@ -1,73 +1,85 @@
+@@ -1,73 +1,96 @@
  /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
  /* vim: set ts=8 sts=2 et sw=2 tw=80: */
  /* This Source Code Form is subject to the terms of the Mozilla Public
@@ -140,6 +188,7 @@ diff --git a/dom/sync/SyncManagerParent.cpp b/dom/sync/SyncManagerParent.cpp
 +  , mActorDestroyed(false)
  {
    AssertIsOnBackgroundThread();
++
 +  mService->RegisterActor(this);
  }
  
@@ -148,19 +197,15 @@ diff --git a/dom/sync/SyncManagerParent.cpp b/dom/sync/SyncManagerParent.cpp
    AssertIsOnBackgroundThread();
  }
  
- void SyncManagerParent::ActorDestroy(ActorDestroyReason aWhy)
- {
-   AssertIsOnBackgroundThread();
-+
-+  mActorDestroyed = true;
-+
-+  if (mService) {
-+    mService->UnregisterActor(this);
-+  }
- }
- 
- bool SyncManagerParent::RecvRequest(const nsID& aRequestId,
-                                     const SyncOp& aOp)
+-void SyncManagerParent::ActorDestroy(ActorDestroyReason aWhy)
+-{
+-  AssertIsOnBackgroundThread();
+-}
+-
+-bool SyncManagerParent::RecvRequest(const nsID& aRequestId,
+-                                    const SyncOp& aOp)
++void
++SyncManagerParent::ActorDestroy(ActorDestroyReason aWhy)
  {
    AssertIsOnBackgroundThread();
  
@@ -185,19 +230,36 @@ diff --git a/dom/sync/SyncManagerParent.cpp b/dom/sync/SyncManagerParent.cpp
 -    {
 -      MOZ_CRASH("Unknown BackgroundSync request");
 -    }
-+  if (NS_WARN_IF(!mService)) {
-+    return false;
++  mActorDestroyed = true;
++
++  if (mService) {
++    mService->UnregisterActor(this);
    }
-+
-+  mService->Request(mId, aRequestId, aOp);
-+
-   return true;
+-  return true;
  }
  
- bool SyncManagerParent::RecvShutdown()
+-bool SyncManagerParent::RecvShutdown()
++bool
++SyncManagerParent::RecvRequest(const nsID& aRequestId,
++                               const SyncOp& aOp)
  {
    AssertIsOnBackgroundThread();
  
+-  Unused << Send__delete__(this);
++  if (NS_WARN_IF(!mService)) {
++    return false;
++  }
++
++  mService->Request(mId, aRequestId, aOp);
+ 
+   return true;
+ }
+ 
++bool
++SyncManagerParent::RecvShutdown()
++{
++  AssertIsOnBackgroundThread();
++
 +  if (NS_WARN_IF(!mService)) {
 +    return false;
 +  }
@@ -205,15 +267,22 @@ diff --git a/dom/sync/SyncManagerParent.cpp b/dom/sync/SyncManagerParent.cpp
 +  mService->UnregisterActor(this);
 +  mService = nullptr;
 +
-   Unused << Send__delete__(this);
- 
-   return true;
- }
- 
-+void SyncManagerParent::NotifyResponse(const nsID& aRequestId,
-+                                       const SyncOpResponse& aResponse)
++  if (!mActorDestroyed) {
++    Unused << Send__delete__(this);
++  }
++
++  return true;
++}
++
++void
++SyncManagerParent::NotifyResponse(const nsID& aRequestId,
++                                  const SyncOpResponse& aResponse)
 +{
-+  Unused << SendResponse(aRequestId, aResponse);
++  AssertIsOnBackgroundThread();
++
++  if (!mActorDestroyed) {
++    Unused << SendResponse(aRequestId, aResponse);
++  }
 +}
 +
  } // namespace dom
