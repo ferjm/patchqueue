@@ -7,12 +7,19 @@ diff --git a/dom/sync/SyncRegistration.cpp b/dom/sync/SyncRegistration.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncRegistration.cpp
-@@ -0,0 +1,67 @@
+@@ -0,0 +1,100 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this file,
 + * You can obtain one at http://mozilla.org/MPL/2.0/. */
 +
++#include "mozilla/ModuleUtils.h"
 +#include "SyncRegistration.h"
++
++#define NS_SYNCREGISTRATION_CID \
++  { 0x566a1540, 0x45d8, 0x4828, {0xbf, 0x8a, 0xf9, 0x6e, 0x58, 0x5d, 0x94, 0xe8} }
++
++namespace mozilla {
++namespace dom {
 +
 +NS_IMPL_ISUPPORTS(nsSyncRegistration, nsISyncRegistration)
 +
@@ -75,11 +82,37 @@ new file mode 100644
 +{
 +    return NS_ERROR_NOT_IMPLEMENTED;
 +}
++
++NS_GENERIC_FACTORY_CONSTRUCTOR(nsSyncRegistration);
++
++NS_DEFINE_NAMED_CID(NS_SYNCREGISTRATION_CID);
++
++static const mozilla::Module::CIDEntry kSyncRegistrationCIDs[] = {
++  { &kNS_SYNCREGISTRATION_CID, false, nullptr, nsSyncRegistrationConstructor },
++  { nullptr }
++};
++
++static const mozilla::Module::ContractIDEntry kSyncRegistrationContracts[] = {
++  { "@mozilla.org/dom/sync/registration;1", &kNS_SYNCREGISTRATION_CID },
++  { nullptr }
++};
++
++static const mozilla::Module kSyncRegistrationModule = {
++  mozilla::Module::kVersion,
++  kSyncRegistrationCIDs,
++  kSyncRegistrationContracts,
++  nullptr
++};
++
++} // namespace dom
++} // namespace mozilla
++
++NSMODULE_DEFN(SyncRegistrationModule) = &mozilla::dom::kSyncRegistrationModule;
 diff --git a/dom/sync/SyncRegistration.h b/dom/sync/SyncRegistration.h
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncRegistration.h
-@@ -0,0 +1,22 @@
+@@ -0,0 +1,35 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this file,
 + * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -88,6 +121,9 @@ new file mode 100644
 +#define mozilla_dom_SyncRegistration_h
 +
 +#include "nsISyncRegistry.h"
++
++namespace mozilla {
++namespace dom {
 +
 +class nsSyncRegistration : public nsISyncRegistration
 +{
@@ -98,8 +134,18 @@ new file mode 100644
 +  nsSyncRegistration() {}
 +
 +private:
-+  ~nsSyncRegistration() {}
++  virtual ~nsSyncRegistration() {}
++
++  nsString mOriginSuffix;
++  nsString mId;
++  nsString mScope;
++  nsString mTag;
++  uint16_t mState;
++  bool mLastChance;
 +};
++
++} // namespace dom
++} // namespace mozilla
 +
 +#endif // mozilla_dom_SyncRegistration_h
 diff --git a/dom/sync/SyncRegistry.js b/dom/sync/SyncRegistry.js
