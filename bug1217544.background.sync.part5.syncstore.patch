@@ -78,7 +78,7 @@ new file mode 100644
 +/* attribute unsigned short state; */
 +NS_IMETHODIMP nsSyncRegistration::GetState(uint16_t *aState)
 +{
-+  aState = mState;
++  *aState = mState;
 +  return NS_OK;
 +}
 +
@@ -91,7 +91,7 @@ new file mode 100644
 +/* attribute boolean lastChance; */
 +NS_IMETHODIMP nsSyncRegistration::GetLastChance(bool *aLastChance)
 +{
-+  aLastChance = mLastChance;
++  *aLastChance = mLastChance;
 +  return NS_OK;
 +}
 +NS_IMETHODIMP nsSyncRegistration::SetLastChance(bool aLastChance)
