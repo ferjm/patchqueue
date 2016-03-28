@@ -416,7 +416,7 @@ new file mode 100644
 +
 +  void notifyAddSuccess();
 +  void notifyGetAllSuccess(in nsIArray registrations);
-+  void notifyChangeStateSuccess(in nsISyncRegistry registration);
++  void notifyChangeStateSuccess(in nsISyncRegistration registration);
 +  void notifyError(in uint32_t error);
 +};
 +
