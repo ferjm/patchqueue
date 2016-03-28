@@ -87,7 +87,7 @@ new file mode 100644
 +#ifndef mozilla_dom_SyncRegistration_h
 +#define mozilla_dom_SyncRegistration_h
 +
-+#include "nsISyncRegistration.h"
++#include "nsISyncRegistry.h"
 +
 +class nsSyncRegistration : public nsISyncRegistration
 +{
