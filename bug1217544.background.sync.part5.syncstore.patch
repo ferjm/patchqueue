@@ -169,7 +169,7 @@ diff --git a/dom/sync/SyncRegistry.js b/dom/sync/SyncRegistry.js
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncRegistry.js
-@@ -0,0 +1,141 @@
+@@ -0,0 +1,163 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -304,6 +304,28 @@ new file mode 100644
 +    });
 +  },
 +
++  changeState(aId, aState, aListener) {
++    debug("changeState " + aId + " " + aState);
++    this.newTxn(RW, SYNC_REGISTRY_STORE_NAME, (aTxn, aStore) => {
++      aStore.get(aId).onsuccess = event => {
++        let result = event.target.result;
++        if (result.length != 1) {
++          return aListener.notifyError(Cr.NS_ERROR_UNEXPECTED);
++        }
++        let registration = result[0];
++        debug("registration " + JSON.stringify(registration));
++        // XXX state machine.
++        registration.state = aState;
++        aStore.put(registration).onsuccess = event => {
++          aListener.notifyChangeStateSuccess(registration);
++        };
++      };
++    }, null, error => {
++      error = isNaN(error) ? Cr.NS_ERROR_FAILURE : error;
++      aListener.notifyError(error);
++    });
++  },
++
 +  classID: Components.ID("{c1200834-3ebb-45e2-81cf-986edeb107f6}"),
 +  contractID: "@mozilla.org/dom/sync/registry;1",
 +  QueryInterface: XPCOMUtils.generateQI([Ci.nsISyncRegistry,
@@ -362,7 +384,7 @@ diff --git a/dom/sync/nsISyncRegistry.idl b/dom/sync/nsISyncRegistry.idl
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/nsISyncRegistry.idl
-@@ -0,0 +1,48 @@
+@@ -0,0 +1,53 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -389,6 +411,7 @@ new file mode 100644
 +
 +  void notifyAddSuccess();
 +  void notifyGetAllSuccess(in nsIArray registrations);
++  void notifyChangeStateSuccess(in nsISyncRegistry registration);
 +  void notifyError(in uint32_t error);
 +};
 +
@@ -410,4 +433,8 @@ new file mode 100644
 +           in nsISyncRegistryListener listener);
 +
 +  void getAll(in nsISyncRegistryListener listener);
++
++  void changeState(in DOMString id,
++                   in unsigned short state,
++                   in nsISyncRegistryListener listener);
 +};
