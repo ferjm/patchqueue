@@ -7,7 +7,7 @@ diff --git a/dom/sync/SyncRegistration.cpp b/dom/sync/SyncRegistration.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncRegistration.cpp
-@@ -0,0 +1,146 @@
+@@ -0,0 +1,147 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this file,
 + * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -37,6 +37,7 @@ new file mode 100644
 +  mTag = aTag;
 +  mState = aState;
 +  mLastChance = aLastChance;
++  return NS_OK;
 +}
 +
 +/* attribute DOMString originSuffix; */
