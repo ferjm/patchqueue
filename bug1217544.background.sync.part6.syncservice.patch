@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  750c5f393945b7d3c6328080e34e83ee2cb78106
+# Parent  b55c768c77b707a0eee531ea27bbb559905ac499
 Bug 1217544 - Implement one-off BackgroundSync API. Part 5: SyncService. r=baku
 
 diff --git a/dom/sync/SyncIPCTypes.ipdlh b/dom/sync/SyncIPCTypes.ipdlh
@@ -506,14 +506,14 @@ new file mode 100644
 +
 +    if (mRequest->mActorId == 0) {
 +      // Internal request.
-+      nsTArray<UniquePtr<nsISyncRegistration>> registrations;
++      nsTArray<nsCOMPtr<nsISyncRegistration>> registrations;
 +      for (uint32_t i = 0; i < length; i++) {
 +        nsCOMPtr<nsISyncRegistration> registration =
 +          do_QueryElementAt(aRegistrations, i);
 +        if (NS_WARN_IF(!registration)) {
 +          continue;
 +        }
-+        registrations.AppendElement(UniquePtr<nsISyncRegistration>(registration));
++        registrations.AppendElement(registration);
 +      }
 +
 +      return Callback(new SyncRegistryInternalResponse(
@@ -541,8 +541,8 @@ new file mode 100644
 +  {
 +    AssertIsOnMainThread();
 +
-+    nsTArray<UniquePtr<nsISyncRegistration>> registrations;
-+    registrations.AppendElement(UniquePtr<nsISyncRegistration>(aRegistration));
++    nsTArray<nsCOMPtr<nsISyncRegistration>> registrations;
++    registrations.AppendElement(aRegistration);
 +
 +    return Callback(new SyncRegistryInternalResponse(
 +      SyncRegistryInternalResponse::TChangeStateResponse, registrations));
@@ -882,7 +882,7 @@ new file mode 100644
 +  AssertIsOnBackgroundThread();
 +  MOZ_ASSERT(aResponse);
 +
-+  nsTArray<UniquePtr<nsISyncRegistration>> registrations;
++  nsTArray<nsCOMPtr<nsISyncRegistration>> registrations;
 +  aResponse->GetRegistrations(registrations);
 +
 +  switch (aResponse->type()) {
@@ -942,7 +942,7 @@ new file mode 100644
 +
 +void
 +SyncService::ContinueTriggerSyncEvents(
-+    nsTArray<UniquePtr<nsISyncRegistration>>& aRegistrations)
++    nsTArray<nsCOMPtr<nsISyncRegistration>>& aRegistrations)
 +{
 +  AssertIsOnBackgroundThread();
 +
@@ -956,7 +956,7 @@ new file mode 100644
 +  // Before actually triggering the sync event, we need to set each
 +  // registration entry state to STATE_FIRING.
 +  for (uint32_t i = 0; i < aRegistrations.Length(); i++) {
-+    UniquePtr<nsISyncRegistration> registration(Move(aRegistrations[i]));
++    nsCOMPtr<nsISyncRegistration> registration = aRegistrations[i];
 +    if (NS_WARN_IF(!registration)) {
 +      continue;
 +    }
@@ -982,7 +982,7 @@ new file mode 100644
 +}
 +
 +void
-+SyncService::TriggerSyncEvent(UniquePtr<nsISyncRegistration> aRegistration)
++SyncService::TriggerSyncEvent(nsISyncRegistration* aRegistration)
 +{
 +  AssertIsOnBackgroundThread();
 +  MOZ_ASSERT(aRegistration);
@@ -1108,8 +1108,8 @@ new file mode 100644
 +
 +  void StartTriggerSyncEvents();
 +  void ContinueTriggerSyncEvents(
-+      nsTArray<UniquePtr<nsISyncRegistration>>& aRegistrations);
-+  void TriggerSyncEvent(UniquePtr<nsISyncRegistration> aRegistration);
++      nsTArray<nsCOMPtr<nsISyncRegistration>>& aRegistrations);
++  void TriggerSyncEvent(nsISyncRegistration* aRegistration);
 +
 +  void RemoveSyncRegistration(const nsString& aId);
 +
@@ -1208,11 +1208,11 @@ new file mode 100644
 +
 +  SyncRegistryInternalResponse(
 +      Type aType,
-+      nsTArray<UniquePtr<nsISyncRegistration>> &aRegistrations)
++      nsTArray<nsCOMPtr<nsISyncRegistration>> &aRegistrations)
 +    : mType(aType)
 +  {
 +    for (uint32_t i = 0; i < aRegistrations.Length(); i++) {
-+      mRegistrations.AppendElement(Move(aRegistrations[i]));
++      mRegistrations.AppendElement(aRegistrations[i]);
 +    }
 +  }
 +
@@ -1222,10 +1222,10 @@ new file mode 100644
 +  }
 +
 +  void
-+  GetRegistrations(nsTArray<UniquePtr<nsISyncRegistration>>& aRegistrations)
++  GetRegistrations(nsTArray<nsCOMPtr<nsISyncRegistration>>& aRegistrations)
 +  {
 +    for (uint32_t i = 0; i < mRegistrations.Length(); i++) {
-+      aRegistrations.AppendElement(Move(mRegistrations[i]));
++      aRegistrations.AppendElement(mRegistrations[i]);
 +    }
 +  }
 +
@@ -1234,7 +1234,7 @@ new file mode 100644
 +
 +  Type mType;
 +
-+  nsTArray<UniquePtr<nsISyncRegistration>> mRegistrations;
++  nsTArray<nsCOMPtr<nsISyncRegistration>> mRegistrations;
 +};
 +
 +} // namespace dom
