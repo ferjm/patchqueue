@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  94e17a78dbdedc568c788f38187383c1ae354df3
+# Parent  750c5f393945b7d3c6328080e34e83ee2cb78106
 Bug 1217544 - Implement one-off BackgroundSync API. Part 5: SyncService. r=baku
 
 diff --git a/dom/sync/SyncIPCTypes.ipdlh b/dom/sync/SyncIPCTypes.ipdlh
@@ -1565,3 +1565,40 @@ diff --git a/dom/workers/moz.build b/dom/workers/moz.build
  
  FINAL_LIBRARY = 'xul'
  
+diff --git a/ipc/glue/BackgroundParentImpl.cpp b/ipc/glue/BackgroundParentImpl.cpp
+--- a/ipc/glue/BackgroundParentImpl.cpp
++++ b/ipc/glue/BackgroundParentImpl.cpp
+@@ -744,27 +744,31 @@ BackgroundParentImpl::DeallocPQuotaParen
+ }
+ 
+ mozilla::dom::PSyncManagerParent*
+ BackgroundParentImpl::AllocPSyncManagerParent()
+ {
+   AssertIsInMainProcess();
+   AssertIsOnBackgroundThread();
+ 
+-  return new SyncManagerParent();
++  RefPtr<SyncManagerParent> agent = new SyncManagerParent();
++  return agent.forget().take();
+ }
+ 
+ bool
+ BackgroundParentImpl::DeallocPSyncManagerParent(PSyncManagerParent* aActor)
+ {
+   AssertIsInMainProcess();
+   AssertIsOnBackgroundThread();
+   MOZ_ASSERT(aActor);
+ 
+-  delete static_cast<SyncManagerParent*>(aActor);
++  RefPtr<SyncManagerParent> parent =
++    dont_AddRef(static_cast<SyncManagerParent*>(aActor));
++  MOZ_ASSERT(parent);
++
+   return true;
+ }
+ 
+ } // namespace ipc
+ } // namespace mozilla
+ 
+ void
+ TestParent::ActorDestroy(ActorDestroyReason aWhy)
