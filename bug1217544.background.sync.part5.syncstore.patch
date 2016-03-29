@@ -7,7 +7,7 @@ diff --git a/dom/sync/SyncRegistration.cpp b/dom/sync/SyncRegistration.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncRegistration.cpp
-@@ -0,0 +1,117 @@
+@@ -0,0 +1,146 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this file,
 + * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -23,78 +23,107 @@ new file mode 100644
 +
 +NS_IMPL_ISUPPORTS(nsSyncRegistration, nsISyncRegistration)
 +
++NS_IMETHODIMP
++nsSyncRegistration::Init(const nsAString& aId,
++                         const nsAString& aOriginSuffix,
++                         const nsAString& aScope,
++                         const nsAString& aTag,
++                         uint16_t aState,
++                         bool aLastChance)
++{
++  mId = aId;
++  mOriginSuffix = aOriginSuffix;
++  mScope = aScope;
++  mTag = aTag;
++  mState = aState;
++  mLastChance = aLastChance;
++}
++
 +/* attribute DOMString originSuffix; */
-+NS_IMETHODIMP nsSyncRegistration::GetOriginSuffix(nsAString & aOriginSuffix)
++NS_IMETHODIMP
++nsSyncRegistration::GetOriginSuffix(nsAString & aOriginSuffix)
 +{
 +  aOriginSuffix = mOriginSuffix;
 +  return NS_OK;
 +}
 +
-+NS_IMETHODIMP nsSyncRegistration::SetOriginSuffix(const nsAString & aOriginSuffix)
++NS_IMETHODIMP
++nsSyncRegistration::SetOriginSuffix(const nsAString & aOriginSuffix)
 +{
 +  mOriginSuffix = aOriginSuffix;
 +  return NS_OK;
 +}
 +
 +/* attribute DOMString id; */
-+NS_IMETHODIMP nsSyncRegistration::GetId(nsAString & aId)
++NS_IMETHODIMP
++nsSyncRegistration::GetId(nsAString & aId)
 +{
 +  aId = mId;
 +  return NS_OK;
 +}
 +
-+NS_IMETHODIMP nsSyncRegistration::SetId(const nsAString & aId)
++NS_IMETHODIMP
++nsSyncRegistration::SetId(const nsAString & aId)
 +{
 +  mId = aId;
 +  return NS_OK;
 +}
 +
 +/* attribute DOMString scope; */
-+NS_IMETHODIMP nsSyncRegistration::GetScope(nsAString & aScope)
++NS_IMETHODIMP
++nsSyncRegistration::GetScope(nsAString & aScope)
 +{
 +  aScope = mScope;
 +  return NS_OK;
 +}
 +
-+NS_IMETHODIMP nsSyncRegistration::SetScope(const nsAString & aScope)
++NS_IMETHODIMP
++nsSyncRegistration::SetScope(const nsAString & aScope)
 +{
 +  mScope = aScope;
 +  return NS_OK;
 +}
 +
 +/* attribute DOMString tag; */
-+NS_IMETHODIMP nsSyncRegistration::GetTag(nsAString & aTag)
++NS_IMETHODIMP
++nsSyncRegistration::GetTag(nsAString & aTag)
 +{
 +  aTag = mTag;
 +  return NS_OK;
 +}
 +
-+NS_IMETHODIMP nsSyncRegistration::SetTag(const nsAString & aTag)
++NS_IMETHODIMP
++nsSyncRegistration::SetTag(const nsAString & aTag)
 +{
 +  mTag = aTag;
 +  return NS_OK;
 +}
 +
 +/* attribute unsigned short state; */
-+NS_IMETHODIMP nsSyncRegistration::GetState(uint16_t *aState)
++NS_IMETHODIMP
++nsSyncRegistration::GetState(uint16_t *aState)
 +{
 +  *aState = mState;
 +  return NS_OK;
 +}
 +
-+NS_IMETHODIMP nsSyncRegistration::SetState(uint16_t aState)
++NS_IMETHODIMP
++nsSyncRegistration::SetState(uint16_t aState)
 +{
 +  mState = aState;
 +  return NS_OK;
 +}
 +
 +/* attribute boolean lastChance; */
-+NS_IMETHODIMP nsSyncRegistration::GetLastChance(bool *aLastChance)
++NS_IMETHODIMP
++nsSyncRegistration::GetLastChance(bool *aLastChance)
 +{
 +  *aLastChance = mLastChance;
 +  return NS_OK;
 +}
-+NS_IMETHODIMP nsSyncRegistration::SetLastChance(bool aLastChance)
++
++NS_IMETHODIMP
++nsSyncRegistration::SetLastChance(bool aLastChance)
 +{
 +  mLastChance = aLastChance;
 +  return NS_OK;
@@ -169,7 +198,7 @@ diff --git a/dom/sync/SyncRegistry.js b/dom/sync/SyncRegistry.js
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncRegistry.js
-@@ -0,0 +1,165 @@
+@@ -0,0 +1,169 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -288,9 +317,13 @@ new file mode 100644
 +        for (let i = 0; i < results.length; i++) {
 +          let registration = Cc["@mozilla.org/dom/sync/registration;1"]
 +                               .createInstance(Ci.nsISyncRegistration);
-+          ["id", "scope", "tag", "state", "lastChance"].forEach(property => {
-+            registration[property] = results[i][property];
-+          });
++          let result = results[i];
++          registration.init(result.id,
++                            result.originSuffix,
++                            result.scope,
++                            result.tag,
++                            result.state,
++                            result.lastChance);
 +          debug("registration " + JSON.stringify(registration));
 +          try {
 +            registrations.appendElement(registration, false /* weak */);
@@ -386,7 +419,7 @@ diff --git a/dom/sync/nsISyncRegistry.idl b/dom/sync/nsISyncRegistry.idl
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/nsISyncRegistry.idl
-@@ -0,0 +1,50 @@
+@@ -0,0 +1,57 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -397,12 +430,19 @@ new file mode 100644
 +[scriptable, uuid(671ea934-232d-47c6-87ba-b72715088914)]
 +interface nsISyncRegistration : nsISupports
 +{
-+  attribute DOMString originSuffix;
 +  attribute DOMString id;
++  attribute DOMString originSuffix;
 +  attribute DOMString scope;
 +  attribute DOMString tag;
 +  attribute unsigned short state; // "pending" by default
 +  attribute boolean lastChance;
++
++  void init(in DOMString id,
++            in DOMString originSuffix,
++            in DOMString scope,
++            in DOMString tag,
++            in unsigned short state,
++            in boolean lastChance);
 +};
 +
 +[scriptable, uuid(3084a211-3ef4-4fa3-8a20-dab42f062571)]
