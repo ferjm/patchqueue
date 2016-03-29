@@ -77,7 +77,23 @@ diff --git a/dom/sync/SyncIPCTypes.ipdlh b/dom/sync/SyncIPCTypes.ipdlh
 diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
 --- a/dom/sync/SyncManager.cpp
 +++ b/dom/sync/SyncManager.cpp
-@@ -243,21 +243,27 @@ SyncManager::IsSyncManagerThread() {
+@@ -227,37 +227,42 @@ SyncManager::SyncManager(nsIGlobalObject
+     ActorCreated(actor);
+   } else {
+     MOZ_ALWAYS_TRUE(BackgroundChild::GetOrCreateForCurrentThread(this));
+   }
+ }
+ 
+ SyncManager::~SyncManager()
+ {
+-  MOZ_ASSERT(IsSyncManagerThread());
+   Shutdown();
+   MOZ_ASSERT(!mWorkerFeature);
+   MOZ_ASSERT(!mActor);
+ }
+ 
+ bool
+ SyncManager::IsSyncManagerThread() {
    return mThread == nsCOMPtr<nsIThread>(do_GetCurrentThread());
  };
  
@@ -108,7 +124,7 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
      workerPrivate->AssertIsOnWorkerThread();
      workerPrivate->RemoveFeature(mWorkerFeature);
      mWorkerFeature = nullptr;
-@@ -315,16 +321,20 @@ SyncManager::ActorFailed()
+@@ -315,16 +320,20 @@ SyncManager::ActorFailed()
  
  void
  SyncManager::ActorCreated(PBackgroundChild* aActor)
@@ -129,7 +145,7 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
    for (uint32_t i = 0, len = mPendingOperations.Length(); i < len; ++i) {
      RefPtr<SyncOpRunnable> runnable = mPendingOperations[i];
      MOZ_ASSERT(runnable);
-@@ -365,16 +375,20 @@ SyncManager::Observe(nsISupports* aSubje
+@@ -365,16 +374,20 @@ SyncManager::Observe(nsISupports* aSubje
    return NS_OK;
  }
  
@@ -150,7 +166,7 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
    nsAutoPtr<SyncOp> op(new SyncOp(*mPrincipalInfo, aArgs));
    RefPtr<SyncOpRunnable> runnable = new SyncOpRunnable(p, op);
  
-@@ -403,17 +417,17 @@ SyncManager::Register(const nsAString& a
+@@ -403,17 +416,17 @@ SyncManager::Register(const nsAString& a
    return ExecuteOp(SyncOpArgs(args), aRv);
  }
  
