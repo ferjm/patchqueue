@@ -3,6 +3,27 @@
 # Parent  6104aa4f8233045a645e172808df78f856fb1dae
 Bug 1217544 - Implement one-off BackgroundSync API. Part 5: SyncService. r=baku
 
+diff --git a/dom/interfaces/base/nsIServiceWorkerManager.idl b/dom/interfaces/base/nsIServiceWorkerManager.idl
+--- a/dom/interfaces/base/nsIServiceWorkerManager.idl
++++ b/dom/interfaces/base/nsIServiceWorkerManager.idl
+@@ -186,16 +186,17 @@ interface nsIServiceWorkerManager : nsIS
+                                   in AString aData,
+                                   in AString aBehavior);
+   [optional_argc] void sendPushEvent(in ACString aOriginAttributes,
+                                      in ACString aScope,
+                                      [optional] in uint32_t aDataLength,
+                                      [optional, array, size_is(aDataLength)] in uint8_t aDataBytes);
+   void sendPushSubscriptionChangeEvent(in ACString aOriginAttributes,
+                                        in ACString scope);
++
+   void addListener(in nsIServiceWorkerManagerListener aListener);
+ 
+   void removeListener(in nsIServiceWorkerManagerListener aListener);
+ 
+   bool shouldReportToWindow(in mozIDOMWindowProxy aWindow, in ACString aScope);
+ 
+   void sendSyncEvent(in ACString aOriginAttributes,
+                      in ACString scope,
 diff --git a/dom/sync/SyncIPCTypes.ipdlh b/dom/sync/SyncIPCTypes.ipdlh
 --- a/dom/sync/SyncIPCTypes.ipdlh
 +++ b/dom/sync/SyncIPCTypes.ipdlh
@@ -77,8 +98,7 @@ diff --git a/dom/sync/SyncIPCTypes.ipdlh b/dom/sync/SyncIPCTypes.ipdlh
 diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
 --- a/dom/sync/SyncManager.cpp
 +++ b/dom/sync/SyncManager.cpp
-@@ -227,37 +227,40 @@ SyncManager::SyncManager(nsIGlobalObject
-     ActorCreated(actor);
+@@ -228,36 +228,43 @@ SyncManager::SyncManager(nsIGlobalObject
    } else {
      MOZ_ALWAYS_TRUE(BackgroundChild::GetOrCreateForCurrentThread(this));
    }
@@ -86,7 +106,8 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
  
  SyncManager::~SyncManager()
  {
--  MOZ_ASSERT(IsSyncManagerThread());
+   MOZ_ASSERT(IsSyncManagerThread());
++
    Shutdown();
    MOZ_ASSERT(!mWorkerFeature);
    MOZ_ASSERT(!mActor);
@@ -100,11 +121,12 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
  void
  SyncManager::Shutdown()
  {
--  MOZ_ASSERT(IsSyncManagerThread());
+   MOZ_ASSERT(IsSyncManagerThread());
+ 
 +  if (mShuttingDown) {
 +    return;
 +  }
- 
++
    mShuttingDown = true;
  
 -  nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
@@ -123,7 +145,7 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
      workerPrivate->AssertIsOnWorkerThread();
      workerPrivate->RemoveFeature(mWorkerFeature);
      mWorkerFeature = nullptr;
-@@ -315,16 +318,20 @@ SyncManager::ActorFailed()
+@@ -315,16 +322,20 @@ SyncManager::ActorFailed()
  
  void
  SyncManager::ActorCreated(PBackgroundChild* aActor)
@@ -144,7 +166,7 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
    for (uint32_t i = 0, len = mPendingOperations.Length(); i < len; ++i) {
      RefPtr<SyncOpRunnable> runnable = mPendingOperations[i];
      MOZ_ASSERT(runnable);
-@@ -365,16 +372,20 @@ SyncManager::Observe(nsISupports* aSubje
+@@ -365,16 +376,20 @@ SyncManager::Observe(nsISupports* aSubje
    return NS_OK;
  }
  
@@ -165,7 +187,7 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
    nsAutoPtr<SyncOp> op(new SyncOp(*mPrincipalInfo, aArgs));
    RefPtr<SyncOpRunnable> runnable = new SyncOpRunnable(p, op);
  
-@@ -403,17 +414,17 @@ SyncManager::Register(const nsAString& a
+@@ -403,17 +418,17 @@ SyncManager::Register(const nsAString& a
    return ExecuteOp(SyncOpArgs(args), aRv);
  }
  
@@ -184,6 +206,60 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
  NS_IMPL_CYCLE_COLLECTING_RELEASE(SyncManager)
  NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(SyncManager)
    NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
+diff --git a/dom/sync/SyncManagerChild.cpp b/dom/sync/SyncManagerChild.cpp
+--- a/dom/sync/SyncManagerChild.cpp
++++ b/dom/sync/SyncManagerChild.cpp
+@@ -33,25 +33,25 @@ SyncManagerChild::~SyncManagerChild()
+ {
+ }
+ 
+ void
+ SyncManagerChild::ActorDestroy(ActorDestroyReason aWhy)
+ {
+   mActorDestroyed = true;
+ 
+-  // XXX Reject pending requests.
+-/*  for (auto iter = mPendingRequests.Iter(); !iter.Done(); iter.Next()) {
+-    PendingRequest* request = iter.Get();
++  for (auto iter = mPendingRequests.Iter(); !iter.Done(); iter.Next()) {
++    PendingRequest* request;
++    mPendingRequests.Get(iter.Key(), &request);
+     if (NS_WARN_IF(!request)) {
+       continue;
+     }
+-    request->mPromise->MaybeReject();
++    request->mPromise->MaybeReject(NS_ERROR_NOT_AVAILABLE);
+   }
+-*/
++
+   mPendingRequests.Clear();
+ }
+ 
+ nsresult
+ SyncManagerChild::StorePendingRequest(Promise* aPromise, nsID& aID)
+ {
+   nsresult rv;
+   nsCOMPtr<nsIUUIDGenerator> uuidGenerator =
+@@ -100,17 +100,18 @@ SyncManagerChild::ExecuteOp(Promise* aPr
+   return NS_OK;
+ }
+ 
+ bool
+ SyncManagerChild::RecvResponse(const nsID& aRequestId,
+                                const SyncOpResponse& aResponse)
+ {
+   Promise* p = GetPendingRequest(aRequestId);
+-  if (!p) {
++  if (NS_WARN_IF(!p)) {
++    // This should never happen.
+     return false;
+   }
+ 
+   switch(aResponse.type()) {
+     case SyncOpResponse::TSyncRegisterResponse:
+       p->MaybeResolve(true);
+       return true;
+     case SyncOpResponse::TSyncGetTagsResponse:
 diff --git a/dom/sync/SyncManagerParent.cpp b/dom/sync/SyncManagerParent.cpp
 --- a/dom/sync/SyncManagerParent.cpp
 +++ b/dom/sync/SyncManagerParent.cpp
@@ -318,7 +394,7 @@ diff --git a/dom/sync/SyncManagerParent.cpp b/dom/sync/SyncManagerParent.cpp
 diff --git a/dom/sync/SyncManagerParent.h b/dom/sync/SyncManagerParent.h
 --- a/dom/sync/SyncManagerParent.h
 +++ b/dom/sync/SyncManagerParent.h
-@@ -15,30 +15,56 @@
+@@ -15,30 +15,57 @@
  namespace mozilla {
  
  namespace ipc {
@@ -360,6 +436,7 @@ diff --git a/dom/sync/SyncManagerParent.h b/dom/sync/SyncManagerParent.h
  
    virtual void ActorDestroy(ActorDestroyReason aWhy) override;
 +
++  // SyncManagerParent objects keep SyncService alive.
 +  RefPtr<SyncService> mService;
 +
 +  // The identifier will be used by the SyncService to know which request
@@ -1299,7 +1376,22 @@ diff --git a/dom/workers/PServiceWorkerManager.ipdl b/dom/workers/PServiceWorker
 diff --git a/dom/workers/ServiceWorkerEvents.cpp b/dom/workers/ServiceWorkerEvents.cpp
 --- a/dom/workers/ServiceWorkerEvents.cpp
 +++ b/dom/workers/ServiceWorkerEvents.cpp
-@@ -1168,27 +1168,17 @@ SyncEvent::Constructor(mozilla::dom::Eve
+@@ -1154,41 +1154,31 @@ PushEvent::WrapObjectInternal(JSContext*
+ // Background Sync
+ 
+ SyncEvent::SyncEvent(EventTarget* aOwner)
+   : ExtendableEvent(aOwner)
+ {
+ }
+ 
+ already_AddRefed<SyncEvent>
+-SyncEvent::Constructor(mozilla::dom::EventTarget* aOwner,
++SyncEvent::Constructor(EventTarget* aOwner,
+                        const nsAString& aType,
+                        const SyncEventInit& aOptions,
+                        ErrorResult& aRv)
+ {
+   RefPtr<SyncEvent> e = new SyncEvent(aOwner);
    bool trusted = e->Init(aOwner);
    e->InitEvent(aType, aOptions.mBubbles, aOptions.mCancelable);
    e->SetTrusted(trusted);
@@ -1331,11 +1423,17 @@ diff --git a/dom/workers/ServiceWorkerEvents.cpp b/dom/workers/ServiceWorkerEven
 diff --git a/dom/workers/ServiceWorkerEvents.h b/dom/workers/ServiceWorkerEvents.h
 --- a/dom/workers/ServiceWorkerEvents.h
 +++ b/dom/workers/ServiceWorkerEvents.h
-@@ -324,17 +324,16 @@ class SyncEvent final : public Extendabl
+@@ -319,32 +319,31 @@ public:
+ };
+ 
+ class SyncEvent final : public ExtendableEvent
+ {
+   nsString mTag;
    bool mLastChance;
  
  protected:
-   explicit SyncEvent(mozilla::dom::EventTarget* aOwner);
+-  explicit SyncEvent(mozilla::dom::EventTarget* aOwner);
++  explicit SyncEvent(EventTarget* aOwner);
    ~SyncEvent() {}
  
  public:
@@ -1349,6 +1447,17 @@ diff --git a/dom/workers/ServiceWorkerEvents.h b/dom/workers/ServiceWorkerEvents
      return mozilla::dom::SyncEventBinding_workers::Wrap(aCx, this, aGivenProto);
    }
  
+   static already_AddRefed<SyncEvent>
+-  Constructor(mozilla::dom::EventTarget* aOwner,
++  Constructor(EventTarget* aOwner,
+               const nsAString& aType,
+               const SyncEventInit& aOptions,
+               ErrorResult& aRv);
+ 
+   static already_AddRefed<SyncEvent>
+   Constructor(const GlobalObject& aGlobal,
+               const nsAString& aType,
+               const SyncEventInit& aOptions,
 diff --git a/dom/workers/ServiceWorkerManagerChild.cpp b/dom/workers/ServiceWorkerManagerChild.cpp
 --- a/dom/workers/ServiceWorkerManagerChild.cpp
 +++ b/dom/workers/ServiceWorkerManagerChild.cpp
