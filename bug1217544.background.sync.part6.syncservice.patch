@@ -1574,7 +1574,7 @@ diff --git a/dom/workers/ServiceWorkerManagerParent.cpp b/dom/workers/ServiceWor
  }
  
  already_AddRefed<ContentParent>
-@@ -248,89 +251,89 @@ ServiceWorkerManagerParent::RecvUnregist
+@@ -248,89 +251,98 @@ ServiceWorkerManagerParent::RecvUnregist
  }
  
  bool
@@ -1653,6 +1653,11 @@ diff --git a/dom/workers/ServiceWorkerManagerParent.cpp b/dom/workers/ServiceWor
 -  mService = nullptr;
 +  mServiceWorkerService->UnregisterActor(this);
 +  mServiceWorkerService = nullptr;
++
++  if (mSyncService) {
++    mSyncService->UnregisterActor(this);
++    mSyncService = nullptr;
++  }
  
    Unused << Send__delete__(this);
    return true;
@@ -1672,6 +1677,10 @@ diff --git a/dom/workers/ServiceWorkerManagerParent.cpp b/dom/workers/ServiceWor
      // released too.
 -    mService->UnregisterActor(this);
 +    mServiceWorkerService->UnregisterActor(this);
++  }
++
++  if (mSyncService) {
++    mSyncService->UnregisterActor(this);
    }
  }
  
