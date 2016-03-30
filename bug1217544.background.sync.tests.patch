@@ -1,32 +1,32 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  a038b048edf4b39f7731af39b893927995a7bfdf
+# Parent  1a996b4c40e8c08802e337a4b5ccfa1a375377b4
 Bug 1217544 - Implement one-off BackgroundSync API. Tests. r=baku
 
 diff --git a/dom/sync/moz.build b/dom/sync/moz.build
 --- a/dom/sync/moz.build
 +++ b/dom/sync/moz.build
-@@ -18,16 +18,20 @@ IPDL_SOURCES += [
-     'PSyncManager.ipdl',
-     'SyncIPCTypes.ipdlh'
+@@ -24,16 +24,20 @@ LOCAL_INCLUDES += [
+     '/dom/workers',
+     '/netwerk/base'
  ]
  
- LOCAL_INCLUDES += [
-     '/dom/workers'
+ XPIDL_SOURCES += [
+     'nsISyncRegistry.idl'
  ]
  
 +MOCHITEST_MANIFESTS += [
 +    'tests/mochitest.ini'
 +]
 +
- XPIDL_SOURCES += [
-     'nsISyncRegistry.idl'
- ]
- 
  XPIDL_MODULE = 'dom_sync'
  
  EXTRA_COMPONENTS += [
      'SyncRegistry.js',
+     'SyncRegistry.manifest'
+ ]
+ 
+ include('/ipc/chromium/chromium-config.mozbuild')
 diff --git a/dom/sync/tests/mochitest.ini b/dom/sync/tests/mochitest.ini
 new file mode 100644
 --- /dev/null
