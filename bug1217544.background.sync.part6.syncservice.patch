@@ -209,7 +209,25 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
 diff --git a/dom/sync/SyncManagerChild.cpp b/dom/sync/SyncManagerChild.cpp
 --- a/dom/sync/SyncManagerChild.cpp
 +++ b/dom/sync/SyncManagerChild.cpp
-@@ -22,42 +22,48 @@ struct SyncManagerChild::PendingRequest 
+@@ -2,16 +2,17 @@
+ /* vim: set ts=8 sts=2 et sw=2 tw=80: */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+  * You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "SyncManagerChild.h"
+ 
+ #include "mozilla/unused.h"
++#include "mozilla/ipc/BackgroundParent.h"
+ #include "mozilla/ipc/PBackgroundChild.h"
+ 
+ namespace mozilla {
+ 
+ using namespace ipc;
+ 
+ namespace dom {
+ 
+@@ -22,42 +23,48 @@ struct SyncManagerChild::PendingRequest 
    {}
  
    RefPtr<Promise> mPromise;
@@ -263,7 +281,7 @@ diff --git a/dom/sync/SyncManagerChild.cpp b/dom/sync/SyncManagerChild.cpp
    nsID id;
    rv = uuidGenerator->GenerateUUIDInPlace(&id);
    NS_ENSURE_SUCCESS(rv, rv);
-@@ -68,30 +74,34 @@ SyncManagerChild::StorePendingRequest(Pr
+@@ -68,30 +75,34 @@ SyncManagerChild::StorePendingRequest(Pr
    aID = id;
  
    return NS_OK;
@@ -298,7 +316,7 @@ diff --git a/dom/sync/SyncManagerChild.cpp b/dom/sync/SyncManagerChild.cpp
    nsresult rv = StorePendingRequest(aPromise, requestId);
    NS_ENSURE_SUCCESS(rv, rv);
  
-@@ -99,18 +109,21 @@ SyncManagerChild::ExecuteOp(Promise* aPr
+@@ -99,18 +110,21 @@ SyncManagerChild::ExecuteOp(Promise* aPr
  
    return NS_OK;
  }
