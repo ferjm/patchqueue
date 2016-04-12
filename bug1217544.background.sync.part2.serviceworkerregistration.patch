@@ -34,6 +34,25 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
    : mGlobal(aGlobal)
    , mPrincipalInfo(new PrincipalInfo(aPrincipalInfo))
  {}
+@@ -82,17 +83,17 @@ bool
+ SyncManager::PrefEnabled(JSContext* aCx, JSObject* aObj)
+ {
+   using mozilla::dom::workers::WorkerPrivate;
+   using mozilla::dom::workers::GetWorkerPrivateFromContext;
+ 
+   // If we are on the main thread, then check the pref directly.
+   if (NS_IsMainThread()) {
+     bool enabled = false;
+-    Preferences::GetBool("dom.background.sync.enabled", &enabled);
++    Preferences::GetBool("dom.backgroundSync.enabled", &enabled);
+     return enabled;
+   }
+ 
+   // Otherwise check the pref via the worker private helper.
+   WorkerPrivate* workerPrivate = GetWorkerPrivateFromContext(aCx);
+   if (!workerPrivate) {
+     return false;
+   }
 diff --git a/dom/sync/SyncManager.h b/dom/sync/SyncManager.h
 --- a/dom/sync/SyncManager.h
 +++ b/dom/sync/SyncManager.h
