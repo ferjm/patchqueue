@@ -1,12 +1,12 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  4c5b20e39b982e4be7e3cfc729689041432905f9
+# Parent  a6d58308ca79a55eacaca9fab9f0d559a2aaa497
 Bug 1217544 - Implement one-off BackgroundSync API. Part 4: Sync event. r=baku
 
 diff --git a/dom/bindings/Bindings.conf b/dom/bindings/Bindings.conf
 --- a/dom/bindings/Bindings.conf
 +++ b/dom/bindings/Bindings.conf
-@@ -1260,16 +1260,22 @@ DOMInterfaces = {
+@@ -1256,16 +1256,22 @@ DOMInterfaces = {
  'SVGUnitTypes' : {
      'concrete': False,
  },
@@ -275,7 +275,7 @@ new file mode 100644
 diff --git a/dom/webidl/moz.build b/dom/webidl/moz.build
 --- a/dom/webidl/moz.build
 +++ b/dom/webidl/moz.build
-@@ -534,16 +534,17 @@ WEBIDL_FILES = [
+@@ -531,16 +531,17 @@ WEBIDL_FILES = [
      'SVGTransformList.webidl',
      'SVGTSpanElement.webidl',
      'SVGUnitTypes.webidl',
@@ -324,7 +324,7 @@ diff --git a/dom/workers/PServiceWorkerManager.ipdl b/dom/workers/PServiceWorker
 diff --git a/dom/workers/ServiceWorkerEvents.cpp b/dom/workers/ServiceWorkerEvents.cpp
 --- a/dom/workers/ServiceWorkerEvents.cpp
 +++ b/dom/workers/ServiceWorkerEvents.cpp
-@@ -1004,17 +1004,17 @@ ExtractBytesFromData(const OwningArrayBu
+@@ -1002,17 +1002,17 @@ ExtractBytesFromData(const OwningArrayBu
      const ArrayBuffer& buffer = aDataInit.GetAsArrayBuffer();
      return ExtractBytesFromArrayBuffer(buffer, aBytes);
    } else if (aDataInit.IsUSVString()) {
@@ -343,7 +343,7 @@ diff --git a/dom/workers/ServiceWorkerEvents.cpp b/dom/workers/ServiceWorkerEven
  PushMessageData::~PushMessageData()
  {
  }
-@@ -1147,16 +1147,50 @@ NS_IMPL_CYCLE_COLLECTION_INHERITED(PushE
+@@ -1145,16 +1145,50 @@ NS_IMPL_CYCLE_COLLECTION_INHERITED(PushE
  JSObject*
  PushEvent::WrapObjectInternal(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
  {
@@ -480,18 +480,15 @@ diff --git a/dom/workers/ServiceWorkerEvents.h b/dom/workers/ServiceWorkerEvents
 diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
 --- a/dom/workers/ServiceWorkerManager.cpp
 +++ b/dom/workers/ServiceWorkerManager.cpp
-@@ -5265,16 +5265,42 @@ ServiceWorkerInfo::~ServiceWorkerInfo()
- static uint64_t gServiceWorkerInfoCurrentID = 0;
- 
- uint64_t
- ServiceWorkerInfo::GetNextID() const
- {
-   return ++gServiceWorkerInfoCurrentID;
+@@ -1082,16 +1082,40 @@ ServiceWorkerManager::SendNotificationCl
+   ServiceWorkerPrivate* workerPrivate = info->WorkerPrivate();
+   return workerPrivate->SendNotificationClickEvent(aID, aTitle, aDir,
+                                                    aLang, aBody, aTag,
+                                                    aIcon, aData, aBehavior,
+                                                    NS_ConvertUTF8toUTF16(aScope));
  }
  
-+// Background Sync
-+
-+NS_IMETHODIMP
+ NS_IMETHODIMP
 +ServiceWorkerManager::SendSyncEvent(const nsACString& aOriginAttributes,
 +                                    const nsACString& aScope,
 +                                    const nsAString& aTag,
@@ -515,14 +512,15 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
 +                                                       registration);
 +}
 +
- already_AddRefed<ServiceWorker>
- ServiceWorkerInfo::GetOrCreateInstance(nsPIDOMWindowInner* aWindow)
++NS_IMETHODIMP
+ ServiceWorkerManager::GetReadyPromise(mozIDOMWindow* aWindow,
+                                       nsISupports** aPromise)
  {
    AssertIsOnMainThread();
-   MOZ_ASSERT(aWindow);
  
-   RefPtr<ServiceWorker> ref;
- 
+   if (NS_WARN_IF(!aWindow)) {
+     return NS_ERROR_DOM_INVALID_STATE_ERR;
+   }
 diff --git a/dom/workers/ServiceWorkerManagerChild.cpp b/dom/workers/ServiceWorkerManagerChild.cpp
 --- a/dom/workers/ServiceWorkerManagerChild.cpp
 +++ b/dom/workers/ServiceWorkerManagerChild.cpp
@@ -596,7 +594,7 @@ diff --git a/dom/workers/ServiceWorkerManagerChild.h b/dom/workers/ServiceWorker
 diff --git a/dom/workers/ServiceWorkerPrivate.cpp b/dom/workers/ServiceWorkerPrivate.cpp
 --- a/dom/workers/ServiceWorkerPrivate.cpp
 +++ b/dom/workers/ServiceWorkerPrivate.cpp
-@@ -76,17 +76,17 @@ private:
+@@ -79,17 +79,17 @@ private:
  
    RefPtr<ServiceWorkerPrivate> mPrivate;
  };
@@ -615,7 +613,7 @@ diff --git a/dom/workers/ServiceWorkerPrivate.cpp b/dom/workers/ServiceWorkerPri
  
    mIdleWorkerTimer = do_CreateInstance(NS_TIMER_CONTRACTID);
    MOZ_ASSERT(mIdleWorkerTimer);
-@@ -1406,16 +1406,101 @@ ServiceWorkerPrivate::SendFetchEvent(nsI
+@@ -1497,16 +1497,101 @@ ServiceWorkerPrivate::SendFetchEvent(nsI
  
    if (NS_WARN_IF(!r->Dispatch())) {
      return NS_ERROR_FAILURE;
@@ -717,7 +715,7 @@ diff --git a/dom/workers/ServiceWorkerPrivate.cpp b/dom/workers/ServiceWorkerPri
    AssertIsOnMainThread();
  
    // XXXcatalinb: We need to have a separate load group that's linked to
-@@ -1500,17 +1585,17 @@ ServiceWorkerPrivate::SpawnWorkerIfNeede
+@@ -1591,17 +1676,17 @@ ServiceWorkerPrivate::SpawnWorkerIfNeede
    mWorkerPrivate = WorkerPrivate::Constructor(jsapi.cx(),
                                                scriptSpec,
                                                false, WorkerTypeService,
@@ -736,7 +734,7 @@ diff --git a/dom/workers/ServiceWorkerPrivate.cpp b/dom/workers/ServiceWorkerPri
  void
  ServiceWorkerPrivate::StoreISupports(nsISupports* aSupports)
  {
-@@ -1565,17 +1650,17 @@ ServiceWorkerPrivate::NoteDeadServiceWor
+@@ -1656,17 +1741,17 @@ ServiceWorkerPrivate::NoteDeadServiceWor
    mInfo = nullptr;
    TerminateWorker();
  }
@@ -755,7 +753,7 @@ diff --git a/dom/workers/ServiceWorkerPrivate.cpp b/dom/workers/ServiceWorkerPri
  
  void
  ServiceWorkerPrivate::Activated()
-@@ -1703,18 +1788,19 @@ ServiceWorkerPrivate::TerminateWorkerCal
+@@ -1794,18 +1879,19 @@ ServiceWorkerPrivate::TerminateWorkerCal
  }
  
  void
@@ -780,7 +778,7 @@ diff --git a/dom/workers/ServiceWorkerPrivate.cpp b/dom/workers/ServiceWorkerPri
 diff --git a/dom/workers/ServiceWorkerPrivate.h b/dom/workers/ServiceWorkerPrivate.h
 --- a/dom/workers/ServiceWorkerPrivate.h
 +++ b/dom/workers/ServiceWorkerPrivate.h
-@@ -104,16 +104,21 @@ public:
+@@ -105,16 +105,21 @@ public:
                               const nsAString& aScope);
  
    nsresult
@@ -802,7 +800,7 @@ diff --git a/dom/workers/ServiceWorkerPrivate.h b/dom/workers/ServiceWorkerPriva
  
    // This will terminate the current running worker thread and drop the
    // workerPrivate reference.
-@@ -144,17 +149,18 @@ public:
+@@ -145,17 +150,18 @@ public:
  private:
    enum WakeUpReason {
      FetchEvent = 0,
@@ -822,7 +820,7 @@ diff --git a/dom/workers/ServiceWorkerPrivate.h b/dom/workers/ServiceWorkerPriva
  
    static void
    TerminateWorkerCallback(nsITimer* aTimer, void *aPrivate);
-@@ -187,20 +193,20 @@ private:
+@@ -188,20 +194,20 @@ private:
  
    // The WorkerPrivate object can only be closed by this class or by the
    // RuntimeService class if gecko is shutting down. Closing the worker
@@ -850,7 +848,7 @@ diff --git a/dom/workers/ServiceWorkerPrivate.h b/dom/workers/ServiceWorkerPriva
 diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWorkerRegistration.cpp
 --- a/dom/workers/ServiceWorkerRegistration.cpp
 +++ b/dom/workers/ServiceWorkerRegistration.cpp
-@@ -821,17 +821,17 @@ ServiceWorkerRegistrationMainThread::Get
+@@ -807,17 +807,17 @@ ServiceWorkerRegistrationMainThread::Get
  
      nsCOMPtr<nsIPrincipal> principal = document->NodePrincipal();
      if (!principal) {
@@ -869,8 +867,8 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
  ////////////////////////////////////////////////////
  // Worker Thread implementation
  class WorkerListener final : public ServiceWorkerRegistrationListener
-@@ -1272,16 +1272,17 @@ ServiceWorkerRegistrationWorkerThread::G
-   #endif /* ! MOZ_SIMPLEPUSH */
+@@ -1258,16 +1258,17 @@ ServiceWorkerRegistrationWorkerThread::G
+ #endif /* ! MOZ_SIMPLEPUSH */
  }
  
  SyncManager*
