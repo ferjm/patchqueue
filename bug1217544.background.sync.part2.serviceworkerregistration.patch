@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  43a6584da74700b755f492f9fad00ef02232adfd
+# Parent  4cfb44debe970a63f0baa9c9d1618e64c5ed0105
 Bug 1217544 - Implement one-off BackgroundSync API. Part 2: ServiceWorkerRegistration. r=baku
 
 diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
@@ -82,7 +82,7 @@ diff --git a/dom/webidl/ServiceWorkerRegistration.webidl b/dom/webidl/ServiceWor
 diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWorkerRegistration.cpp
 --- a/dom/workers/ServiceWorkerRegistration.cpp
 +++ b/dom/workers/ServiceWorkerRegistration.cpp
-@@ -27,16 +27,19 @@
+@@ -28,16 +28,19 @@
  #include "Workers.h"
  #include "WorkerScope.h"
  
@@ -102,7 +102,7 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
  bool
  ServiceWorkerRegistrationVisible(JSContext* aCx, JSObject* aObj)
  {
-@@ -86,20 +89,21 @@ ServiceWorkerRegistrationBase::ServiceWo
+@@ -87,20 +90,21 @@ ServiceWorkerRegistrationBase::ServiceWo
  NS_IMPL_ADDREF_INHERITED(ServiceWorkerRegistrationMainThread, ServiceWorkerRegistrationBase)
  NS_IMPL_RELEASE_INHERITED(ServiceWorkerRegistrationMainThread, ServiceWorkerRegistrationBase)
  
@@ -125,13 +125,13 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
    : ServiceWorkerRegistrationBase(aWindow, aScope)
    , mListeningForEvents(false)
  {
-@@ -807,16 +811,48 @@ ServiceWorkerRegistrationMainThread::Get
+@@ -777,16 +781,48 @@ ServiceWorkerRegistrationMainThread::Get
    }
  
    RefPtr<PushManager> ret = mPushManager;
    return ret.forget();
  
-   #endif /* ! MOZ_SIMPLEPUSH */
+ #endif /* ! MOZ_SIMPLEPUSH */
  }
  
 +SyncManager*
@@ -174,7 +174,7 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
    WorkerPrivate* mWorkerPrivate;
    nsString mScope;
    bool mListeningForEvents;
-@@ -931,23 +967,25 @@ NS_INTERFACE_MAP_END_INHERITING(ServiceW
+@@ -901,23 +937,25 @@ NS_INTERFACE_MAP_END_INHERITING(ServiceW
  // Expanded macros since we need special behaviour to release the proxy.
  NS_IMPL_CYCLE_COLLECTION_CLASS(ServiceWorkerRegistrationWorkerThread)
  
@@ -200,13 +200,13 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
    : ServiceWorkerRegistrationBase(nullptr, aScope)
    , mWorkerPrivate(aWorkerPrivate)
  {
-@@ -1248,10 +1286,21 @@ ServiceWorkerRegistrationWorkerThread::G
+@@ -1215,10 +1253,21 @@ ServiceWorkerRegistrationWorkerThread::G
    }
  
-   RefPtr<WorkerPushManager> ret = mPushManager;
+   RefPtr<PushManager> ret = mPushManager;
    return ret.forget();
  
-   #endif /* ! MOZ_SIMPLEPUSH */
+ #endif /* ! MOZ_SIMPLEPUSH */
  }
  
 +SyncManager*
@@ -225,7 +225,7 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
 diff --git a/dom/workers/ServiceWorkerRegistration.h b/dom/workers/ServiceWorkerRegistration.h
 --- a/dom/workers/ServiceWorkerRegistration.h
 +++ b/dom/workers/ServiceWorkerRegistration.h
-@@ -17,18 +17,19 @@
+@@ -17,16 +17,17 @@
  
  class nsPIDOMWindowInner;
  
@@ -235,9 +235,7 @@ diff --git a/dom/workers/ServiceWorkerRegistration.h b/dom/workers/ServiceWorker
  class Promise;
  class PushManager;
 +class SyncManager;
-+class WorkerListener;
- class WorkerPushManager;
--class WorkerListener;
+ class WorkerListener;
  
  namespace workers {
  class ServiceWorker;
@@ -245,15 +243,14 @@ diff --git a/dom/workers/ServiceWorkerRegistration.h b/dom/workers/ServiceWorker
  } // namespace workers
  
  bool
- ServiceWorkerRegistrationVisible(JSContext* aCx, JSObject* aObj);
-@@ -136,16 +137,19 @@ public:
+@@ -120,16 +121,19 @@ public:
    GetWaiting() override;
  
    already_AddRefed<workers::ServiceWorker>
    GetActive() override;
  
    already_AddRefed<PushManager>
-   GetPushManager(ErrorResult& aRv);
+   GetPushManager(JSContext* aCx, ErrorResult& aRv);
  
 +  SyncManager*
 +  GetSync(ErrorResult& aRv);
@@ -266,7 +263,7 @@ diff --git a/dom/workers/ServiceWorkerRegistration.h b/dom/workers/ServiceWorker
    }
  
    // ServiceWorkerRegistrationListener
-@@ -186,16 +190,18 @@ private:
+@@ -170,16 +174,18 @@ private:
    // These three may change to a new worker at any time.
    RefPtr<workers::ServiceWorker> mInstallingWorker;
    RefPtr<workers::ServiceWorker> mWaitingWorker;
@@ -285,13 +282,13 @@ diff --git a/dom/workers/ServiceWorkerRegistration.h b/dom/workers/ServiceWorker
  public:
    NS_DECL_ISUPPORTS_INHERITED
    NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(ServiceWorkerRegistrationWorkerThread,
-@@ -239,16 +245,19 @@ public:
+@@ -223,16 +229,19 @@ public:
    }
  
    bool
-   Notify(JSContext* aCx, workers::Status aStatus) override;
+   Notify(workers::Status aStatus) override;
  
-   already_AddRefed<WorkerPushManager>
+   already_AddRefed<PushManager>
    GetPushManager(ErrorResult& aRv);
  
 +  SyncManager*
@@ -305,14 +302,14 @@ diff --git a/dom/workers/ServiceWorkerRegistration.h b/dom/workers/ServiceWorker
    };
  
    ~ServiceWorkerRegistrationWorkerThread();
-@@ -260,14 +269,16 @@ private:
+@@ -244,14 +253,16 @@ private:
    ReleaseListener(Reason aReason);
  
    workers::WorkerPrivate* mWorkerPrivate;
    RefPtr<WorkerListener> mListener;
  
  #ifndef MOZ_SIMPLEPUSH
-   RefPtr<WorkerPushManager> mPushManager;
+   RefPtr<PushManager> mPushManager;
  #endif
 +
 +  RefPtr<SyncManager> mSyncManager;
