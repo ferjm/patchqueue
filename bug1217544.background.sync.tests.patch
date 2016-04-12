@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  1a996b4c40e8c08802e337a4b5ccfa1a375377b4
+# Parent  f6e16b621a97f7bc8ba101f6cfa545da6d6fc6e7
 Bug 1217544 - Implement one-off BackgroundSync API. Tests. r=baku
 
 diff --git a/dom/sync/moz.build b/dom/sync/moz.build
@@ -42,7 +42,7 @@ diff --git a/dom/sync/tests/test_backgroundsync_basic.html b/dom/sync/tests/test
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/tests/test_backgroundsync_basic.html
-@@ -0,0 +1,57 @@
+@@ -0,0 +1,103 @@
 +<!DOCTYPE HTML>
 +<html>
 +<!--
@@ -74,6 +74,51 @@ new file mode 100644
 +    console.log(str + "\n");
 +  }
 +
++  SimpleTest.waitForExplicitFinish()
++
++  // Load chrome script to change offline status in the
++  // parent process.
++  var chromeScript = SpecialPowers.loadChromeScript(_ => {
++    var { classes: Cc, interfaces: Ci } = Components;
++    var ioService = Cc["@mozilla.org/network/io-service;1"]
++                      .getService(Ci.nsIIOService);
++    addMessageListener("change-status", function(offline) {
++      ioService.offline = offline;
++    });
++  });
++
++  function offlineObserver(res) {
++    this._res = res;
++  }
++  offlineObserver.prototype = {
++    _res: null,
++
++    observe: function(subject, topic, data) {
++      debug("observe: " + subject + " " + topic + " " + data);
++      if (topic === "network:offline-status-changed") {
++        var obsService = SpecialPowers.Cc["@mozilla.org/observer-service;1"]
++                           .getService(SpecialPowers.Ci.nsIObserverService);
++        obsService.removeObserver(this, topic);
++        this._res(null);
++      }
++    }
++  }
++
++  function changeOfflineState(offline) {
++    return new Promise(function(res, rej) {
++      var obsService = SpecialPowers.Cc["@mozilla.org/observer-service;1"]
++                         .getService(SpecialPowers.Ci.nsIObserverService);
++      obsService.addObserver(SpecialPowers.wrapCallbackObject(new offlineObserver(res)),
++                             "network:offline-status-changed",
++                             false);
++      chromeScript.sendAsyncMessage("change-status", offline);
++    });
++  }
++
++  add_task(function* goOffline() {
++    yield changeOfflineState(true);
++  });
++
 +  var registration;
 +  add_task(function* start() {
 +    yield setupPrefs();
@@ -97,6 +142,7 @@ new file mode 100644
 +       "Should have a tag named 'workerTag' registered");
 +    yield unregisterWorker(".");
 +  });
++
 +</script>
 +</body>
 +</html>
