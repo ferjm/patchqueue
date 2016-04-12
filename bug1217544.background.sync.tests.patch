@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  dfcb080f1e23b7f4aa45460fc3ccfe43ebcbe650
+# Parent  d2cd8afd56f0ef1365ad53b515d72b04035f1578
 Bug 1217544 - Implement one-off BackgroundSync API. Tests. r=baku
 
 diff --git a/dom/sync/moz.build b/dom/sync/moz.build
@@ -221,7 +221,7 @@ new file mode 100644
 +function setupPrefs(backgroundSyncEnabled) {
 +  return new Promise(resolve => {
 +    SpecialPowers.pushPrefEnv({"set": [
-+      ["dom.backgroundsync.enabled", backgroundSyncEnabled],
++      ["dom.backgroundSync.enabled", backgroundSyncEnabled],
 +      ["dom.serviceWorkers.exemptFromPerDomainMax", true],
 +      ["dom.serviceWorkers.enabled", true],
 +      ["dom.serviceWorkers.testing.enabled", true]
