@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  9a89fabdc6277003cc34d50a1dff9ad424761faf
+# Parent  d0ba24438b74386f5fbd4b4d704a03f94098eb66
 Bug 1217544 - Implement one-off BackgroundSync API. Part 3: IPC. r=baku
 
 diff --git a/dom/sync/PSyncManager.ipdl b/dom/sync/PSyncManager.ipdl
@@ -1018,8 +1018,8 @@ diff --git a/ipc/glue/BackgroundChildImpl.cpp b/ipc/glue/BackgroundChildImpl.cpp
  #include "mozilla/media/MediaChild.h"
  #include "mozilla/Assertions.h"
  #include "mozilla/dom/PBlobChild.h"
- #include "mozilla/dom/asmjscache/AsmJSCache.h"
-@@ -62,16 +63,17 @@ namespace ipc {
+ #include "mozilla/dom/PFileSystemRequestChild.h"
+@@ -64,16 +65,17 @@ namespace ipc {
  using mozilla::dom::UDPSocketChild;
  using mozilla::net::PUDPSocketChild;
  
@@ -1037,12 +1037,12 @@ diff --git a/ipc/glue/BackgroundChildImpl.cpp b/ipc/glue/BackgroundChildImpl.cpp
  BackgroundChildImpl::
  ThreadLocal::ThreadLocal()
    : mCurrentFileHandle(nullptr)
-@@ -444,16 +446,36 @@ bool
- BackgroundChildImpl::DeallocPQuotaChild(PQuotaChild* aActor)
+@@ -463,16 +465,36 @@ BackgroundChildImpl::DeallocPFileSystemR
  {
-   MOZ_ASSERT(aActor);
- 
-   delete aActor;
+   // The reference is increased in FileSystemTaskBase::Start of
+   // FileSystemTaskBase.cpp. We should decrease it after IPC.
+   RefPtr<dom::FileSystemTaskChildBase> child =
+     dont_AddRef(static_cast<dom::FileSystemTaskChildBase*>(aActor));
    return true;
  }
  
@@ -1077,16 +1077,15 @@ diff --git a/ipc/glue/BackgroundChildImpl.cpp b/ipc/glue/BackgroundChildImpl.cpp
 diff --git a/ipc/glue/BackgroundChildImpl.h b/ipc/glue/BackgroundChildImpl.h
 --- a/ipc/glue/BackgroundChildImpl.h
 +++ b/ipc/glue/BackgroundChildImpl.h
-@@ -153,16 +153,22 @@ protected:
-   virtual bool
-   DeallocPAsmJSCacheEntryChild(PAsmJSCacheEntryChild* aActor) override;
- 
-   virtual PQuotaChild*
-   AllocPQuotaChild() override;
- 
-   virtual bool
+@@ -160,16 +160,21 @@ protected:
    DeallocPQuotaChild(PQuotaChild* aActor) override;
-+
+ 
+   virtual PFileSystemRequestChild*
+   AllocPFileSystemRequestChild(const FileSystemParams&) override;
+ 
+   virtual bool
+   DeallocPFileSystemRequestChild(PFileSystemRequestChild*) override;
+ 
 +  virtual PSyncManagerChild*
 +  AllocPSyncManagerChild() override;
 +
@@ -1103,10 +1102,10 @@ diff --git a/ipc/glue/BackgroundChildImpl.h b/ipc/glue/BackgroundChildImpl.h
 diff --git a/ipc/glue/BackgroundParentImpl.cpp b/ipc/glue/BackgroundParentImpl.cpp
 --- a/ipc/glue/BackgroundParentImpl.cpp
 +++ b/ipc/glue/BackgroundParentImpl.cpp
-@@ -32,32 +32,34 @@
- #include "nsIAppsService.h"
+@@ -36,16 +36,17 @@
  #include "nsNetUtil.h"
  #include "nsIScriptSecurityManager.h"
+ #include "nsProxyRelease.h"
  #include "mozilla/RefPtr.h"
  #include "nsThreadUtils.h"
  #include "nsTraceRefcnt.h"
@@ -1121,14 +1120,15 @@ diff --git a/ipc/glue/BackgroundParentImpl.cpp b/ipc/glue/BackgroundParentImpl.c
  #endif
  
  using mozilla::ipc::AssertIsOnBackgroundThread;
- using mozilla::dom::asmjscache::PAsmJSCacheEntryParent;
- using mozilla::dom::cache::PCacheParent;
+@@ -54,16 +55,17 @@ using mozilla::dom::cache::PCacheParent;
  using mozilla::dom::cache::PCacheStorageParent;
  using mozilla::dom::cache::PCacheStreamControlParent;
+ using mozilla::dom::FileSystemBase;
+ using mozilla::dom::FileSystemRequestParent;
  using mozilla::dom::MessagePortParent;
+ using mozilla::dom::NuwaParent;
  using mozilla::dom::PMessagePortParent;
  using mozilla::dom::PNuwaParent;
- using mozilla::dom::NuwaParent;
 +using mozilla::dom::SyncManagerParent;
  using mozilla::dom::UDPSocketParent;
  
@@ -1138,7 +1138,7 @@ diff --git a/ipc/glue/BackgroundParentImpl.cpp b/ipc/glue/BackgroundParentImpl.c
  AssertIsOnMainThread()
  {
    MOZ_ASSERT(NS_IsMainThread());
-@@ -86,16 +88,17 @@ public:
+@@ -92,16 +94,17 @@ public:
  } // namespace
  
  namespace mozilla {
@@ -1156,13 +1156,13 @@ diff --git a/ipc/glue/BackgroundParentImpl.cpp b/ipc/glue/BackgroundParentImpl.c
    AssertIsOnMainThread();
  
    MOZ_COUNT_CTOR(mozilla::ipc::BackgroundParentImpl);
-@@ -735,16 +738,36 @@ BackgroundParentImpl::DeallocPQuotaParen
- {
+@@ -885,16 +888,36 @@ BackgroundParentImpl::DeallocPFileSystem
    AssertIsInMainProcess();
    AssertIsOnBackgroundThread();
-   MOZ_ASSERT(aActor);
  
-   return mozilla::dom::quota::DeallocPQuotaParent(aActor);
+   RefPtr<FileSystemRequestParent> parent =
+     dont_AddRef(static_cast<FileSystemRequestParent*>(aDoomed));
+   return true;
  }
  
 +mozilla::dom::PSyncManagerParent*
@@ -1196,16 +1196,15 @@ diff --git a/ipc/glue/BackgroundParentImpl.cpp b/ipc/glue/BackgroundParentImpl.c
 diff --git a/ipc/glue/BackgroundParentImpl.h b/ipc/glue/BackgroundParentImpl.h
 --- a/ipc/glue/BackgroundParentImpl.h
 +++ b/ipc/glue/BackgroundParentImpl.h
-@@ -181,14 +181,20 @@ protected:
-   virtual bool
-   DeallocPAsmJSCacheEntryParent(PAsmJSCacheEntryParent* aActor) override;
- 
-   virtual PQuotaParent*
-   AllocPQuotaParent() override;
+@@ -192,14 +192,19 @@ protected:
  
    virtual bool
-   DeallocPQuotaParent(PQuotaParent* aActor) override;
-+
+   RecvPFileSystemRequestConstructor(PFileSystemRequestParent* aActor,
+                                     const FileSystemParams& aParams) override;
+ 
+   virtual bool
+   DeallocPFileSystemRequestParent(PFileSystemRequestParent*) override;
+ 
 +  virtual PSyncManagerParent*
 +  AllocPSyncManagerParent() override;
 +
@@ -1220,10 +1219,10 @@ diff --git a/ipc/glue/BackgroundParentImpl.h b/ipc/glue/BackgroundParentImpl.h
 diff --git a/ipc/glue/PBackground.ipdl b/ipc/glue/PBackground.ipdl
 --- a/ipc/glue/PBackground.ipdl
 +++ b/ipc/glue/PBackground.ipdl
-@@ -12,16 +12,17 @@ include protocol PCache;
- include protocol PCacheStorage;
+@@ -13,16 +13,17 @@ include protocol PCacheStorage;
  include protocol PCacheStreamControl;
  include protocol PFileDescriptorSet;
+ include protocol PFileSystemRequest;
  include protocol PMessagePort;
  include protocol PCameras;
  include protocol PNuwa;
@@ -1236,12 +1235,12 @@ diff --git a/ipc/glue/PBackground.ipdl b/ipc/glue/PBackground.ipdl
  include DOMTypes;
  include PBackgroundSharedTypes;
  include PBackgroundIDBSharedTypes;
+ include PFileSystemParams;
  
- include "mozilla/dom/cache/IPCUtils.h";
-@@ -50,16 +51,17 @@ sync protocol PBackground
-   manages PCacheStorage;
+@@ -53,16 +54,17 @@ sync protocol PBackground
    manages PCacheStreamControl;
    manages PFileDescriptorSet;
+   manages PFileSystemRequest;
    manages PMessagePort;
    manages PCameras;
    manages PNuwa;
@@ -1256,14 +1255,14 @@ diff --git a/ipc/glue/PBackground.ipdl b/ipc/glue/PBackground.ipdl
    async PBackgroundTest(nsCString testArg);
  
    async PBackgroundIDBFactory(LoggingInfo loggingInfo);
-@@ -90,16 +92,18 @@ parent:
-   async MessagePortForceClose(nsID uuid, nsID destinationUuid, uint32_t sequenceId);
- 
+@@ -95,16 +97,18 @@ parent:
    async PAsmJSCacheEntry(OpenMode openMode,
                           WriteParams write,
                           PrincipalInfo principalInfo);
  
    async PQuota();
+ 
+   async PFileSystemRequest(FileSystemParams params);
  
 +  async PSyncManager();
 +
