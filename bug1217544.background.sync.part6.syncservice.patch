@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  6104aa4f8233045a645e172808df78f856fb1dae
+# Parent  14befc22630ab7a1bc4dbc51cce1e5e7c933c358
 Bug 1217544 - Implement one-off BackgroundSync API. Part 5: SyncService. r=baku
 
 diff --git a/dom/interfaces/base/nsIServiceWorkerManager.idl b/dom/interfaces/base/nsIServiceWorkerManager.idl
@@ -904,7 +904,6 @@ new file mode 100644
 +    bool offline = true;
 +    nsCOMPtr<nsIIOService> ioService = services::GetIOService();
 +    NS_ENSURE_STATE(ioService);
-+    ioService->GetOffline(&offline);
 +    NS_WARN_IF(NS_FAILED(ioService->GetOffline(&offline)));
 +
 +    OnlineState state = UNKNOWN;
@@ -1177,12 +1176,13 @@ new file mode 100644
 +    MOZ_ASSERT(parent);
 +    Unused << parent->SendNotifySyncEvent(originSuffix, scope, tag,
 +                                          lastChance);
-+    // XXX Bug 1260141. For now we simply remove the sync registration, but
-+    // we need to implement the sync event handling logic.
-+    nsString id;
-+    aRegistration->GetId(id);
-+    RemoveSyncRegistration(id);
 +  }
++
++  // XXX Bug 1260141. For now we simply remove the sync registration, but
++  // we need to implement the sync event handling logic.
++  nsString id;
++  aRegistration->GetId(id);
++  RemoveSyncRegistration(id);
 +}
 +
 +void
@@ -1466,7 +1466,7 @@ diff --git a/dom/workers/PServiceWorkerManager.ipdl b/dom/workers/PServiceWorker
 diff --git a/dom/workers/ServiceWorkerEvents.cpp b/dom/workers/ServiceWorkerEvents.cpp
 --- a/dom/workers/ServiceWorkerEvents.cpp
 +++ b/dom/workers/ServiceWorkerEvents.cpp
-@@ -1154,41 +1154,31 @@ PushEvent::WrapObjectInternal(JSContext*
+@@ -1153,41 +1153,31 @@ PushEvent::WrapObjectInternal(JSContext*
  // Background Sync
  
  SyncEvent::SyncEvent(EventTarget* aOwner)
@@ -1664,7 +1664,7 @@ diff --git a/dom/workers/ServiceWorkerManagerParent.cpp b/dom/workers/ServiceWor
  }
  
  already_AddRefed<ContentParent>
-@@ -248,89 +251,98 @@ ServiceWorkerManagerParent::RecvUnregist
+@@ -246,89 +249,98 @@ ServiceWorkerManagerParent::RecvUnregist
  }
  
  bool
@@ -1823,7 +1823,7 @@ diff --git a/dom/workers/ServiceWorkerManagerParent.h b/dom/workers/ServiceWorke
 diff --git a/dom/workers/moz.build b/dom/workers/moz.build
 --- a/dom/workers/moz.build
 +++ b/dom/workers/moz.build
-@@ -93,16 +93,17 @@ IPDL_SOURCES += [
+@@ -102,16 +102,17 @@ IPDL_SOURCES += [
      'PServiceWorkerManager.ipdl',
      'ServiceWorkerRegistrarTypes.ipdlh',
  ]
@@ -1844,7 +1844,7 @@ diff --git a/dom/workers/moz.build b/dom/workers/moz.build
 diff --git a/ipc/glue/BackgroundParentImpl.cpp b/ipc/glue/BackgroundParentImpl.cpp
 --- a/ipc/glue/BackgroundParentImpl.cpp
 +++ b/ipc/glue/BackgroundParentImpl.cpp
-@@ -744,27 +744,31 @@ BackgroundParentImpl::DeallocPQuotaParen
+@@ -894,27 +894,31 @@ BackgroundParentImpl::DeallocPFileSystem
  }
  
  mozilla::dom::PSyncManagerParent*
