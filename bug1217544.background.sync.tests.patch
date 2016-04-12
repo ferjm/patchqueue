@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  f6e16b621a97f7bc8ba101f6cfa545da6d6fc6e7
+# Parent  dfcb080f1e23b7f4aa45460fc3ccfe43ebcbe650
 Bug 1217544 - Implement one-off BackgroundSync API. Tests. r=baku
 
 diff --git a/dom/sync/moz.build b/dom/sync/moz.build
@@ -42,7 +42,7 @@ diff --git a/dom/sync/tests/test_backgroundsync_basic.html b/dom/sync/tests/test
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/tests/test_backgroundsync_basic.html
-@@ -0,0 +1,118 @@
+@@ -0,0 +1,117 @@
 +<!DOCTYPE HTML>
 +<html>
 +<!--
@@ -152,7 +152,6 @@ new file mode 100644
 +  });
 +
 +  add_task(function* testNoRegistrations() {
-+    yield registration.sync.register("tag");
 +    var tags = yield registration.sync.getTags();
 +    is(tags.length, 0, "Should have 0 registered tag");
 +    yield unregisterWorker(".");
