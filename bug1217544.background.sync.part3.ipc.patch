@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  d0ba24438b74386f5fbd4b4d704a03f94098eb66
+# Parent  a0c3d1d493e794611b16e1b22b9a4d7e57230ce5
 Bug 1217544 - Implement one-off BackgroundSync API. Part 3: IPC. r=baku
 
 diff --git a/dom/sync/PSyncManager.ipdl b/dom/sync/PSyncManager.ipdl
@@ -226,7 +226,7 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
 +    MOZ_COUNT_CTOR(SyncManagerFeature);
 +  }
 +
-+  virtual bool Notify(JSContext* aCtx, workers::Status aStatus) override
++  virtual bool Notify(workers::Status aStatus) override
 +  {
 +    if (aStatus >= Closing) {
 +      mManager->Shutdown();
