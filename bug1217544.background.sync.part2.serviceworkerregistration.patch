@@ -76,7 +76,7 @@ diff --git a/dom/webidl/ServiceWorkerRegistration.webidl b/dom/webidl/ServiceWor
    [Throws, Exposed=(Window,Worker), Func="nsContentUtils::PushEnabled"]
    readonly attribute PushManager pushManager;
  #endif
-+  [Throws, Exposed=(Window,Worker)]
++  [Throws, Exposed=(Window,Worker), Pref="dom.backgroundsync.enabled"]
 +  readonly attribute SyncManager sync;
  };
 diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWorkerRegistration.cpp
