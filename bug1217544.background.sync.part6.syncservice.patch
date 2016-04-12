@@ -98,7 +98,31 @@ diff --git a/dom/sync/SyncIPCTypes.ipdlh b/dom/sync/SyncIPCTypes.ipdlh
 diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
 --- a/dom/sync/SyncManager.cpp
 +++ b/dom/sync/SyncManager.cpp
-@@ -228,36 +228,43 @@ SyncManager::SyncManager(nsIGlobalObject
+@@ -165,16 +165,22 @@ SyncManager::CreateOnMainThread(nsIGloba
+   // Register as observer for inner-window-destroyed.
+   nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
+   if (obs) {
+     aRv = obs->AddObserver(ref, "inner-window-destroyed",
+                            false /* ownsWeak */);
+     if (NS_WARN_IF(aRv.Failed())) {
+       return nullptr;
+     }
++
++    aRv = obs->AddObserver(ref, "xpcom-shutdown",
++                           false /* ownsWeak */);
++    if (NS_WARN_IF(aRv.Failed())) {
++      return nullptr;
++    }
+   } else {
+     aRv.Throw(NS_ERROR_UNEXPECTED);
+     return nullptr;
+   }
+ 
+   nsCOMPtr<nsPIDOMWindowInner> window = do_QueryInterface(aGlobal);
+   MOZ_ASSERT(window);
+   MOZ_ASSERT(window->IsInnerWindow());
+@@ -227,37 +233,43 @@ SyncManager::SyncManager(nsIGlobalObject
+     ActorCreated(actor);
    } else {
      MOZ_ALWAYS_TRUE(BackgroundChild::GetOrCreateForCurrentThread(this));
    }
@@ -106,8 +130,7 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
  
  SyncManager::~SyncManager()
  {
-   MOZ_ASSERT(IsSyncManagerThread());
-+
+-  MOZ_ASSERT(IsSyncManagerThread());
    Shutdown();
    MOZ_ASSERT(!mWorkerFeature);
    MOZ_ASSERT(!mActor);
@@ -121,12 +144,12 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
  void
  SyncManager::Shutdown()
  {
-   MOZ_ASSERT(IsSyncManagerThread());
- 
 +  if (mShuttingDown) {
 +    return;
 +  }
 +
+   MOZ_ASSERT(IsSyncManagerThread());
+ 
    mShuttingDown = true;
  
 -  nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
@@ -136,6 +159,7 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
 +    nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
 +    if (obs) {
 +      obs->RemoveObserver(this, "inner-window-destroyed");
++      obs->RemoveObserver(this, "xpcom-shutdown");
 +    }
    }
  
@@ -145,7 +169,7 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
      workerPrivate->AssertIsOnWorkerThread();
      workerPrivate->RemoveFeature(mWorkerFeature);
      mWorkerFeature = nullptr;
-@@ -315,16 +322,20 @@ SyncManager::ActorFailed()
+@@ -315,16 +327,20 @@ SyncManager::ActorFailed()
  
  void
  SyncManager::ActorCreated(PBackgroundChild* aActor)
@@ -166,7 +190,41 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
    for (uint32_t i = 0, len = mPendingOperations.Length(); i < len; ++i) {
      RefPtr<SyncOpRunnable> runnable = mPendingOperations[i];
      MOZ_ASSERT(runnable);
-@@ -365,16 +376,20 @@ SyncManager::Observe(nsISupports* aSubje
+@@ -342,39 +358,46 @@ SyncManager::ActorCreated(PBackgroundChi
+ 
+ NS_IMETHODIMP
+ SyncManager::Observe(nsISupports* aSubject,
+                      const char* aTopic,
+                      const char16_t* aData)
+ {
+   MOZ_ASSERT(IsSyncManagerThread());
+   MOZ_ASSERT(NS_IsMainThread());
+-  MOZ_ASSERT(!strcmp(aTopic, "inner-window-destroyed"));
++  MOZ_ASSERT(!strcmp(aTopic, "inner-window-destroyed") ||
++             !strcmp(aTopic, "xpcom-shutdown"));
+ 
+-  nsCOMPtr<nsISupportsPRUint64> wrapper = do_QueryInterface(aSubject);
+-  NS_ENSURE_TRUE(wrapper, NS_ERROR_FAILURE);
++  if (!strcmp(aTopic, "inner-window-destroyed")) {
++    nsCOMPtr<nsISupportsPRUint64> wrapper = do_QueryInterface(aSubject);
++    NS_ENSURE_TRUE(wrapper, NS_ERROR_FAILURE);
+ 
+-  uint64_t innerID;
+-  nsresult rv = wrapper->GetData(&innerID);
+-  NS_ENSURE_SUCCESS(rv, rv);
++    uint64_t innerID;
++    nsresult rv = wrapper->GetData(&innerID);
++    NS_ENSURE_SUCCESS(rv, rv);
+ 
+-  if (innerID != mInnerID) {
+-    return NS_OK;
++    if (innerID != mInnerID) {
++      return NS_OK;
++    }
+   }
+ 
+   Shutdown();
+ 
    return NS_OK;
  }
  
@@ -187,7 +245,7 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
    nsAutoPtr<SyncOp> op(new SyncOp(*mPrincipalInfo, aArgs));
    RefPtr<SyncOpRunnable> runnable = new SyncOpRunnable(p, op);
  
-@@ -403,17 +418,17 @@ SyncManager::Register(const nsAString& a
+@@ -403,17 +426,17 @@ SyncManager::Register(const nsAString& a
    return ExecuteOp(SyncOpArgs(args), aRv);
  }
  
