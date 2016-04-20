@@ -1183,7 +1183,7 @@ new file mode 100644
 +  // to get the registration state back to pending and bail out.
 +  if (mOnlineState != ONLINE) {
 +    nsString id;
-+    registration->GetId(id);
++    aRegistration->GetId(id);
 +    MOZ_ASSERT(!id.IsEmpty());
 +    const SyncInternalOp op(
 +        (SyncChangeStateArgs(id, nsISyncRegistry::STATE_PENDING)));
