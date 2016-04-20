@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  a0c3d1d493e794611b16e1b22b9a4d7e57230ce5
+# Parent  be85666950313b8af84b8cbf4ac44bb376dcd0a9
 Bug 1217544 - Implement one-off BackgroundSync API. Part 3: IPC. r=baku
 
 diff --git a/dom/sync/PSyncManager.ipdl b/dom/sync/PSyncManager.ipdl
@@ -98,7 +98,7 @@ new file mode 100644
 diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
 --- a/dom/sync/SyncManager.cpp
 +++ b/dom/sync/SyncManager.cpp
-@@ -1,85 +1,283 @@
+@@ -1,85 +1,285 @@
  /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
  /* vim: set ts=8 sts=2 et sw=2 tw=80: */
  /* This Source Code Form is subject to the terms of the Mozilla Public
@@ -131,7 +131,8 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
  
 +// Helpers
 +
-+class SyncOpRunnable final : public nsICancelableRunnable
++class SyncOpRunnable final : public nsIRunnable,
++                             public nsICancelableRunnable
 +{
 +public:
 +  NS_DECL_ISUPPORTS
@@ -179,7 +180,8 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
 +
 +NS_IMPL_ISUPPORTS(SyncOpRunnable, nsICancelableRunnable, nsIRunnable)
 +
-+class TeardownRunnable final : public nsICancelableRunnable
++class TeardownRunnable final : public nsIRunnable,
++                               public nsICancelableRunnable
 +{
 +public:
 +  NS_DECL_ISUPPORTS
@@ -389,7 +391,7 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
  SyncManager::PrefEnabled(JSContext* aCx, JSObject* aObj)
  {
    using mozilla::dom::workers::WorkerPrivate;
-@@ -96,42 +294,126 @@ SyncManager::PrefEnabled(JSContext* aCx,
+@@ -96,42 +296,126 @@ SyncManager::PrefEnabled(JSContext* aCx,
    WorkerPrivate* workerPrivate = GetWorkerPrivateFromContext(aCx);
    if (!workerPrivate) {
      return false;
