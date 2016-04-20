@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  14befc22630ab7a1bc4dbc51cce1e5e7c933c358
+# Parent  0232f0169babeecc25af6ab8895445acdcab1024
 Bug 1217544 - Implement one-off BackgroundSync API. Part 5: SyncService. r=baku
 
 diff --git a/dom/interfaces/base/nsIServiceWorkerManager.idl b/dom/interfaces/base/nsIServiceWorkerManager.idl
@@ -98,7 +98,7 @@ diff --git a/dom/sync/SyncIPCTypes.ipdlh b/dom/sync/SyncIPCTypes.ipdlh
 diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
 --- a/dom/sync/SyncManager.cpp
 +++ b/dom/sync/SyncManager.cpp
-@@ -165,16 +165,22 @@ SyncManager::CreateOnMainThread(nsIGloba
+@@ -167,16 +167,22 @@ SyncManager::CreateOnMainThread(nsIGloba
    // Register as observer for inner-window-destroyed.
    nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
    if (obs) {
@@ -121,7 +121,7 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
    nsCOMPtr<nsPIDOMWindowInner> window = do_QueryInterface(aGlobal);
    MOZ_ASSERT(window);
    MOZ_ASSERT(window->IsInnerWindow());
-@@ -227,37 +233,43 @@ SyncManager::SyncManager(nsIGlobalObject
+@@ -229,37 +235,43 @@ SyncManager::SyncManager(nsIGlobalObject
      ActorCreated(actor);
    } else {
      MOZ_ALWAYS_TRUE(BackgroundChild::GetOrCreateForCurrentThread(this));
@@ -169,7 +169,7 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
      workerPrivate->AssertIsOnWorkerThread();
      workerPrivate->RemoveFeature(mWorkerFeature);
      mWorkerFeature = nullptr;
-@@ -315,16 +327,20 @@ SyncManager::ActorFailed()
+@@ -317,16 +329,20 @@ SyncManager::ActorFailed()
  
  void
  SyncManager::ActorCreated(PBackgroundChild* aActor)
@@ -190,7 +190,7 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
    for (uint32_t i = 0, len = mPendingOperations.Length(); i < len; ++i) {
      RefPtr<SyncOpRunnable> runnable = mPendingOperations[i];
      MOZ_ASSERT(runnable);
-@@ -342,39 +358,46 @@ SyncManager::ActorCreated(PBackgroundChi
+@@ -344,39 +360,46 @@ SyncManager::ActorCreated(PBackgroundChi
  
  NS_IMETHODIMP
  SyncManager::Observe(nsISupports* aSubject,
@@ -245,7 +245,7 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
    nsAutoPtr<SyncOp> op(new SyncOp(*mPrincipalInfo, aArgs));
    RefPtr<SyncOpRunnable> runnable = new SyncOpRunnable(p, op);
  
-@@ -403,17 +426,17 @@ SyncManager::Register(const nsAString& a
+@@ -405,17 +428,17 @@ SyncManager::Register(const nsAString& a
    return ExecuteOp(SyncOpArgs(args), aRv);
  }
  
@@ -542,11 +542,32 @@ diff --git a/dom/sync/SyncRegistration.h b/dom/sync/SyncRegistration.h
    uint16_t mState;
    bool mLastChance;
  };
+diff --git a/dom/sync/SyncRegistry.js b/dom/sync/SyncRegistry.js
+--- a/dom/sync/SyncRegistry.js
++++ b/dom/sync/SyncRegistry.js
+@@ -95,16 +95,17 @@ SyncRegistry.prototype = {
+   },
+ 
+   remove(aId, aListener) {
+     debug("remove " + aId);
+     this.newTxn(RW, SYNC_REGISTRY_STORE_NAME, (aTxn, aStore) => {
+       aStore.delete(aId);
+     }, () => {
+       debug("registration removed " + aId);
++      aListener.notifyRemoveSuccess();
+     }, error => {
+       error = isNaN(error) ? Cr.NS_ERROR_FAILURE : error;
+       aListener.notifyError(error);
+     });
+   },
+ 
+   getAll(aListener) {
+     debug("getAll");
 diff --git a/dom/sync/SyncService.cpp b/dom/sync/SyncService.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/SyncService.cpp
-@@ -0,0 +1,654 @@
+@@ -0,0 +1,660 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -712,6 +733,12 @@ new file mode 100644
 +
 +    return Callback(new SyncRegistryInternalResponse(
 +      SyncRegistryInternalResponse::TChangeStateResponse, registrations));
++  }
++
++  NS_IMETHODIMP
++  NotifyRemoveSuccess()
++  {
++    return NS_OK;
 +  }
 +
 +  NS_IMETHODIMP
@@ -1441,6 +1468,27 @@ diff --git a/dom/sync/moz.build b/dom/sync/moz.build
  
  XPIDL_MODULE = 'dom_sync'
  
+diff --git a/dom/sync/nsISyncRegistry.idl b/dom/sync/nsISyncRegistry.idl
+--- a/dom/sync/nsISyncRegistry.idl
++++ b/dom/sync/nsISyncRegistry.idl
+@@ -27,16 +27,17 @@ interface nsISyncRegistration : nsISuppo
+ interface nsISyncRegistryListener : nsISupports
+ {
+   attribute nsID requestId;
+   attribute unsigned long long actorId;
+ 
+   void notifyAddSuccess();
+   void notifyGetAllSuccess(in nsIArray registrations);
+   void notifyChangeStateSuccess(in nsISyncRegistration registration);
++  void notifyRemoveSuccess();
+   void notifyError(in uint32_t error);
+ };
+ 
+ [scriptable, uuid(dfcc3fb2-f40d-44f9-85ea-1127be79fbe9)]
+ interface nsISyncRegistry : nsISupports
+ {
+   const unsigned short STATE_PENDING                    = 1;
+   const unsigned short STATE_WAITING                    = 2;
 diff --git a/dom/workers/PServiceWorkerManager.ipdl b/dom/workers/PServiceWorkerManager.ipdl
 --- a/dom/workers/PServiceWorkerManager.ipdl
 +++ b/dom/workers/PServiceWorkerManager.ipdl
