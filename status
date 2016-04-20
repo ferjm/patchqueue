@@ -4,3 +4,4 @@ be85666950313b8af84b8cbf4ac44bb376dcd0a9:bug1217544.background.sync.part2.servic
 7c112ddea209471ada1d96efe294733684993d16:bug1217544.background.sync.part4.syncevent.patch
 0232f0169babeecc25af6ab8895445acdcab1024:bug1217544.background.sync.part5.syncstore.patch
 e674d345fd4a9696c5480dd6241efa46ab6609dc:bug1217544.background.sync.part6.syncservice.patch
+f00b80f632158ed5ef3d9ac2dfa2bc875ba214a8:bug1217544.background.sync.tests.patch

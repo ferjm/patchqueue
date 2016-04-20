@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  b5f346c43e92939591f35e6a004ac361342f7692
+# Parent  e674d345fd4a9696c5480dd6241efa46ab6609dc
 Bug 1217544 - Implement one-off BackgroundSync API. Tests. r=baku
 
 diff --git a/dom/sync/moz.build b/dom/sync/moz.build
@@ -208,7 +208,7 @@ diff --git a/dom/sync/tests/test_sync_registry.js b/dom/sync/tests/test_sync_reg
 new file mode 100644
 --- /dev/null
 +++ b/dom/sync/tests/test_sync_registry.js
-@@ -0,0 +1,171 @@
+@@ -0,0 +1,224 @@
 +/* Any copyright is dedicated to the Public Domain.
 + * http://creativecommons.org/publicdomain/zero/1.0/ */
 +
@@ -250,6 +250,9 @@ new file mode 100644
 +    notifyChangeStateSuccess() {
 +      ok(false, "Unexpected notifyChangeStateSuccess");
 +    },
++    notifyRemoveSuccess() {
++      ok(false, "Unexpected notifyRemoveSuccess");
++    },
 +    notifyError() {
 +      ok(false, "Unexpected notifyError");
 +    }
@@ -278,6 +281,9 @@ new file mode 100644
 +    notifyChangeStateSuccess() {
 +      ok(false, "Unexpected notifyChangeStateSuccess");
 +    },
++    notifyRemoveSuccess() {
++      ok(false, "Unexpected notifyRemoveSuccess");
++    },
 +    notifyError() {
 +      ok(false, "Unexpected notifyError");
 +    }
@@ -301,6 +307,9 @@ new file mode 100644
 +    },
 +    notifyChangeStateSuccess() {
 +      ok(false, "Unexpected notifyChangeStateSuccess");
++    },
++    notifyRemoveSuccess() {
++      ok(false, "Unexpected notifyRemoveSuccess");
 +    },
 +    notifyError() {
 +      ok(true, "Expected notifyError");
@@ -328,6 +337,9 @@ new file mode 100644
 +    notifyChangeStateSuccess() {
 +      ok(false, "Unexpected notifyChangeStateSuccess");
 +    },
++    notifyRemoveSuccess() {
++      ok(false, "Unexpected notifyRemoveSuccess");
++    },
 +    notifyError() {
 +      ok(true, "Expected notifyError");
 +      do_test_finished();
@@ -345,6 +357,7 @@ new file mode 100644
 +
 +  let expectedGetAllSuccess = true;
 +  let expectedChangeStateSuccess = false;
++  let expectedRemoveSuccess = false;
 +
 +  const listener = {
 +    QueryInterface: XPCOMUtils.generateQI([Ci.nsISyncRegistryListener]),
@@ -370,8 +383,48 @@ new file mode 100644
 +    },
 +    notifyChangeStateSuccess(aRegistration) {
 +      ok(expectedChangeStateSuccess, "Got notifyChangeStateSuccess");
++
++      expectedRemoveSuccess = true;
++      expectedChangeStateSuccess = false;
++
++      do_print("= Should be able to remove registration =");
++
++      registry.remove(aRegistration.id, this);
++    },
++    notifyRemoveSuccess() {
++      ok(expectedRemoveSuccess, "Got notifyRemoveSuccess");
 +      do_test_finished();
 +      run_next_test();
++    },
++    notifyError() {
++      ok(false, "Unexpected notifyError");
++    }
++  };
++
++  registry.getAll(listener);
++});
++
++add_test(function() {
++  do_print("= Should have no registrations =");
++
++  do_test_pending();
++
++  const listener = {
++    QueryInterface: XPCOMUtils.generateQI([Ci.nsISyncRegistryListener]),
++    notifyAddSuccess() {
++      ok(false, "Unexpected notifyAddSuccess");
++    },
++    notifyGetAllSuccess(aRegistrations) {
++      ok(true, "Expected notifyGetAllSuccess");
++      equal(aRegistrations.length, 0, "No registrations");
++      do_test_finished();
++      run_next_test();
++    },
++    notifyChangeStateSuccess() {
++      ok(false, "Unexpected notifyChangeStateSuccess");
++    },
++    notifyRemoveSuccess() {
++      ok(false, "Unexpected notifyRemoveSuccess");
 +    },
 +    notifyError() {
 +      ok(false, "Unexpected notifyError");
