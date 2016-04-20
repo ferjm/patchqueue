@@ -361,7 +361,7 @@ new file mode 100644
 +      equal(registration.lastChance, true);
 +      notEqual(registration.id, undefined);
 +
-+      do_print("= Should have one registration =");
++      do_print("= Should be able to change the state of a registration =");
 +
 +      expectedChangeStateSuccess = true;
 +      expectedGetAllSuccess = false;
