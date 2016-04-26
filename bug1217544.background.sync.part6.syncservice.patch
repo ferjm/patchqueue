@@ -1,7 +1,7 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  0232f0169babeecc25af6ab8895445acdcab1024
-Bug 1217544 - Implement one-off BackgroundSync API. Part 5: SyncService. r=baku
+# Parent  3a3beaa151110f1e5d4e7732ac9142fce99acad1
+Bug 1217544 - Implement one-off BackgroundSync API. Part 6: SyncService. r=baku
 
 diff --git a/dom/interfaces/base/nsIServiceWorkerManager.idl b/dom/interfaces/base/nsIServiceWorkerManager.idl
 --- a/dom/interfaces/base/nsIServiceWorkerManager.idl
