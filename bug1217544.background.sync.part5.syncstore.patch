@@ -1,7 +1,7 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  88d17353e8d93d9e56ad2cfe159143e4f1d10634
-Bug 1217544 - Implement one-off BackgroundSync API. Part 6: Sync DB. r=baku
+# Parent  de70f576cc5331a27a764462987ed4b1e73fafba
+Bug 1217544 - Implement one-off BackgroundSync API. Part 5: Sync DB. r=baku
 
 diff --git a/dom/sync/SyncRegistration.cpp b/dom/sync/SyncRegistration.cpp
 new file mode 100644
