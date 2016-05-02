@@ -66,13 +66,13 @@ new file mode 100644
 +
 +  const PrincipalInfo& principalInfo = aWorkerPrivate->GetPrincipalInfo();
 +
-+  RefPtr<BackgroundSync> ref = new BackgroundSync(aWorkerPrivate->GlobalScope(),
++  RefPtr<BackgroundSync> ref = new BackgroundSync(nullptr,
 +                                                  principalInfo);
 +  return ref.forget();
 +}
 +
 +BackgroundSync::BackgroundSync(nsIGlobalObject* aGlobal,
-+                         const PrincipalInfo& aPrincipalInfo)
++                               const PrincipalInfo& aPrincipalInfo)
 +  : mGlobal(aGlobal)
 +  , mPrincipalInfo(new PrincipalInfo(aPrincipalInfo))
 +{}
@@ -220,7 +220,7 @@ new file mode 100644
 +
 +private:
 +  BackgroundSync(nsIGlobalObject* aGlobal,
-+              const mozilla::ipc::PrincipalInfo& aPrincipalInfo);
++                 const mozilla::ipc::PrincipalInfo& aPrincipalInfo);
 +
 +  ~BackgroundSync();
 +
