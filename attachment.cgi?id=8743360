@@ -6,7 +6,7 @@ Bug 1217544 - Implement one-off BackgroundSync API. Part 3: IPC. r=baku
 diff --git a/dom/sync/BackgroundSync.cpp b/dom/sync/BackgroundSync.cpp
 --- a/dom/sync/BackgroundSync.cpp
 +++ b/dom/sync/BackgroundSync.cpp
-@@ -1,85 +1,287 @@
+@@ -1,85 +1,286 @@
  /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
  /* vim: set ts=8 sts=2 et sw=2 tw=80: */
  /* This Source Code Form is subject to the terms of the Mozilla Public
@@ -23,9 +23,9 @@ diff --git a/dom/sync/BackgroundSync.cpp b/dom/sync/BackgroundSync.cpp
  #include "mozilla/ipc/BackgroundChild.h"
  #include "mozilla/ipc/BackgroundUtils.h"
  #include "mozilla/ipc/PBackgroundChild.h"
-+#include "mozila/unused.h"
++#include "mozilla/unused.h"
  #include "mozilla/Preferences.h"
-+#include "nsISupportsPrimitives"
++#include "nsISupportsPrimitives.h"
  #include "nsIGlobalObject.h"
  #include "WorkerPrivate.h"
  
@@ -169,9 +169,9 @@ diff --git a/dom/sync/BackgroundSync.cpp b/dom/sync/BackgroundSync.cpp
    PrincipalInfo principalInfo;
 -  nsresult rv = PrincipalToPrincipalInfo(aPrincipal, &principalInfo);
 -  if (NS_WARN_IF(NS_FAILED(rv))) {
+-    aRv.Throw(rv);
 +  aRv = PrincipalToPrincipalInfo(aPrincipal, &principalInfo);
 +  if (NS_WARN_IF(aRv.Failed())) {
-     aRv.Throw(rv);
      return nullptr;
    }
  
@@ -303,7 +303,7 @@ diff --git a/dom/sync/BackgroundSync.cpp b/dom/sync/BackgroundSync.cpp
  BackgroundSync::PrefEnabled(JSContext* aCx, JSObject* aObj)
  {
    using mozilla::dom::workers::WorkerPrivate;
-@@ -96,42 +298,126 @@ BackgroundSync::PrefEnabled(JSContext* a
+@@ -96,42 +297,126 @@ BackgroundSync::PrefEnabled(JSContext* a
    WorkerPrivate* workerPrivate = GetWorkerPrivateFromContext(aCx);
    if (!workerPrivate) {
      return false;
@@ -912,7 +912,7 @@ new file mode 100644
 +#define mozilla_dom_BackgroundSyncParent_h
 +
 +#include "mozilla/dom/PBackgroundSyncParent.h"
-+#include "mozilla/dom/SyncIPCTypes.h"
++#include "mozilla/dom/BackgroundSyncIPCTypes.h"
 +
 +#include "nsID.h"
 +
