@@ -1,12 +1,12 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  a6d58308ca79a55eacaca9fab9f0d559a2aaa497
+# Parent  d4557f48a3f67f278d8d5964d77a43488e55214a
 Bug 1217544 - Implement one-off BackgroundSync API. Part 4: Sync event. r=baku
 
 diff --git a/dom/bindings/Bindings.conf b/dom/bindings/Bindings.conf
 --- a/dom/bindings/Bindings.conf
 +++ b/dom/bindings/Bindings.conf
-@@ -1256,16 +1256,22 @@ DOMInterfaces = {
+@@ -1262,16 +1262,22 @@ DOMInterfaces = {
  'SVGUnitTypes' : {
      'concrete': False,
  },
@@ -57,9 +57,180 @@ diff --git a/dom/interfaces/base/nsIServiceWorkerManager.idl b/dom/interfaces/ba
  %{ C++
  #define SERVICEWORKERMANAGER_CONTRACTID "@mozilla.org/serviceworkers/manager;1"
  %}
-diff --git a/dom/sync/SyncIPCTypes.ipdlh b/dom/sync/SyncIPCTypes.ipdlh
---- a/dom/sync/SyncIPCTypes.ipdlh
-+++ b/dom/sync/SyncIPCTypes.ipdlh
+diff --git a/dom/sync/BackgroundSync.cpp b/dom/sync/BackgroundSync.cpp
+--- a/dom/sync/BackgroundSync.cpp
++++ b/dom/sync/BackgroundSync.cpp
+@@ -144,29 +144,32 @@ private:
+ 
+ 
+ // BackgroundSync
+ 
+ // static
+ already_AddRefed<BackgroundSync>
+ BackgroundSync::CreateOnMainThread(nsIGlobalObject* aGlobal,
+                                    nsIPrincipal* aPrincipal,
++                                   const nsAString& aScope,
+                                    ErrorResult& aRv)
+ {
+   MOZ_ASSERT(aGlobal);
+   MOZ_ASSERT(aPrincipal);
++  MOZ_ASSERT(!aScope.IsEmpty());
+   MOZ_ASSERT(NS_IsMainThread());
+ 
+   PrincipalInfo principalInfo;
+   aRv = PrincipalToPrincipalInfo(aPrincipal, &principalInfo);
+   if (NS_WARN_IF(aRv.Failed())) {
+     return nullptr;
+   }
+ 
+-  RefPtr<BackgroundSync> ref = new BackgroundSync(aGlobal, principalInfo);
++  RefPtr<BackgroundSync> ref = new BackgroundSync(aGlobal, principalInfo,
++                                                  aScope);
+ 
+   // Register as observer for inner-window-destroyed.
+   nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
+   if (obs) {
+     aRv = obs->AddObserver(ref, "inner-window-destroyed",
+                            false /* ownsWeak */);
+     if (NS_WARN_IF(aRv.Failed())) {
+       return nullptr;
+@@ -182,40 +185,45 @@ BackgroundSync::CreateOnMainThread(nsIGl
+   ref->mInnerID = window->WindowID();
+ 
+   return ref.forget();
+ }
+ 
+ // static
+ already_AddRefed<BackgroundSync>
+ BackgroundSync::CreateOnWorker(nsIGlobalObject* aGlobal,
+-                               WorkerPrivate* aWorkerPrivate)
++                               WorkerPrivate* aWorkerPrivate,
++                               const nsAString& aScope)
+ {
+   MOZ_ASSERT(aWorkerPrivate);
++  MOZ_ASSERT(!aScope.IsEmpty());
+   aWorkerPrivate->AssertIsOnWorkerThread();
+ 
+   const PrincipalInfo& principalInfo = aWorkerPrivate->GetPrincipalInfo();
+ 
+-  RefPtr<BackgroundSync> ref = new BackgroundSync(aGlobal, principalInfo);
++  RefPtr<BackgroundSync> ref = new BackgroundSync(aGlobal, principalInfo,
++                                                  aScope);
+ 
+   ref->mWorkerFeature = new BackgroundSyncFeature(ref);
+   if (NS_WARN_IF(!aWorkerPrivate->AddFeature(ref->mWorkerFeature))) {
+     ref->mWorkerFeature = nullptr;
+     return nullptr;
+   }
+ 
+   return ref.forget();
+ }
+ 
+ BackgroundSync::BackgroundSync(nsIGlobalObject* aGlobal,
+-                               const PrincipalInfo& aPrincipalInfo)
++                               const PrincipalInfo& aPrincipalInfo,
++                               const nsAString& aScope)
+   : mInnerID(0)
+   , mGlobal(aGlobal)
+   , mShuttingDown(false)
+   , mPrincipalInfo(MakeUnique<PrincipalInfo>(aPrincipalInfo))
++  , mScope(aScope)
+ {
+ #ifdef DEBUG
+   mThread = do_GetCurrentThread();
+ #endif
+ 
+   MOZ_ASSERT(aGlobal);
+ 
+   // Register this component to PBackground.
+@@ -391,17 +399,17 @@ BackgroundSync::ExecuteOp(const SyncOpAr
+ 
+ // WebIDL interface methods.
+ 
+ already_AddRefed<Promise>
+ BackgroundSync::Register(const nsAString& aTag, ErrorResult& aRv)
+ {
+   MOZ_ASSERT(IsBackgroundSyncThread());
+ 
+-  const SyncRegisterArgs args((nsString(aTag)));
++  const SyncRegisterArgs args(mScope, (nsString(aTag)));
+   return ExecuteOp(SyncOpArgs(args), aRv);
+ }
+ 
+ already_AddRefed<Promise>
+ BackgroundSync::GetTags(ErrorResult& aRv)
+ {
+   MOZ_ASSERT(IsBackgroundSyncThread());
+ 
+diff --git a/dom/sync/BackgroundSync.h b/dom/sync/BackgroundSync.h
+--- a/dom/sync/BackgroundSync.h
++++ b/dom/sync/BackgroundSync.h
+@@ -50,21 +50,23 @@ class BackgroundSync final : public nsII
+ public:
+   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_AMBIGUOUS(
+       BackgroundSync, nsIIPCBackgroundChildCreateCallback)
+  
+   static already_AddRefed<BackgroundSync>
+   CreateOnMainThread(nsIGlobalObject* aGlobal,
+                      nsIPrincipal* aPrincipal,
++                     const nsAString& aScope,
+                      ErrorResult& aRv);
+ 
+   static already_AddRefed<BackgroundSync>
+   CreateOnWorker(nsIGlobalObject* aGlobal,
+-                 workers::WorkerPrivate* aWorkerPrivate);
++                 workers::WorkerPrivate* aWorkerPrivate,
++                 const nsAString& aScope);
+ 
+   // Binding methods.
+ 
+   nsIGlobalObject*
+   GetParentObject() const
+   {
+     // Can be nullptr on workers.
+     return mGlobal;
+@@ -81,17 +83,18 @@ public:
+   Register(const nsAString& aTag, ErrorResult& aRv);
+ 
+   already_AddRefed<Promise>
+   GetTags(ErrorResult& aRv);
+ 
+   void Shutdown();
+ private:
+   BackgroundSync(nsIGlobalObject* aGlobal,
+-              const mozilla::ipc::PrincipalInfo& aPrincipalInfo);
++                 const mozilla::ipc::PrincipalInfo& aPrincipalInfo,
++                 const nsAString& aScope);
+ 
+   ~BackgroundSync();
+ 
+   bool IsBackgroundSyncThread();
+ 
+   already_AddRefed<Promise>
+   ExecuteOp(const SyncOpArgs& aArgs, ErrorResult& aRv);
+ 
+@@ -104,15 +107,17 @@ private:
+   RefPtr<BackgroundSyncChild> mActor;
+ 
+   bool mShuttingDown;
+ 
+   UniquePtr<mozilla::ipc::PrincipalInfo> mPrincipalInfo;
+ 
+   nsCOMPtr<nsIThread> mThread;
+ 
++  nsString mScope;
++
+   nsTArray<RefPtr<SyncOpRunnable>> mPendingOperations;
+ };
+ 
+ } // namespace dom
+ } // namespace mozilla
+ 
+ #endif // mozilla_dom_BackgroundSync_h
+diff --git a/dom/sync/BackgroundSyncIPCTypes.ipdlh b/dom/sync/BackgroundSyncIPCTypes.ipdlh
+--- a/dom/sync/BackgroundSyncIPCTypes.ipdlh
++++ b/dom/sync/BackgroundSyncIPCTypes.ipdlh
 @@ -4,16 +4,17 @@
  
  include PBackgroundSharedTypes;
@@ -78,179 +249,10 @@ diff --git a/dom/sync/SyncIPCTypes.ipdlh b/dom/sync/SyncIPCTypes.ipdlh
  };
  
  union SyncOpArgs
-diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
---- a/dom/sync/SyncManager.cpp
-+++ b/dom/sync/SyncManager.cpp
-@@ -141,29 +141,31 @@ private:
- };
- 
- // SyncManager
- 
- // static
- already_AddRefed<SyncManager>
- SyncManager::CreateOnMainThread(nsIGlobalObject* aGlobal,
-                                 nsIPrincipal* aPrincipal,
-+                                const nsAString& aScope,
-                                 ErrorResult& aRv)
- {
-   MOZ_ASSERT(aGlobal);
-   MOZ_ASSERT(aPrincipal);
-+  MOZ_ASSERT(!aScope.IsEmpty());
-   MOZ_ASSERT(NS_IsMainThread());
- 
-   PrincipalInfo principalInfo;
-   aRv = PrincipalToPrincipalInfo(aPrincipal, &principalInfo);
-   if (NS_WARN_IF(aRv.Failed())) {
-     return nullptr;
-   }
- 
--  RefPtr<SyncManager> ref = new SyncManager(aGlobal, principalInfo);
-+  RefPtr<SyncManager> ref = new SyncManager(aGlobal, principalInfo, aScope);
- 
-   // Register as observer for inner-window-destroyed.
-   nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
-   if (obs) {
-     aRv = obs->AddObserver(ref, "inner-window-destroyed",
-                            false /* ownsWeak */);
-     if (NS_WARN_IF(aRv.Failed())) {
-       return nullptr;
-@@ -179,40 +181,44 @@ SyncManager::CreateOnMainThread(nsIGloba
-   ref->mInnerID = window->WindowID();
- 
-   return ref.forget();
- }
- 
- // static
- already_AddRefed<SyncManager>
- SyncManager::CreateOnWorker(nsIGlobalObject* aGlobal,
--                            WorkerPrivate* aWorkerPrivate)
-+                            WorkerPrivate* aWorkerPrivate,
-+                            const nsAString& aScope)
- {
-   MOZ_ASSERT(aWorkerPrivate);
-+  MOZ_ASSERT(!aScope.IsEmpty());
-   aWorkerPrivate->AssertIsOnWorkerThread();
- 
-   const PrincipalInfo& principalInfo = aWorkerPrivate->GetPrincipalInfo();
- 
--  RefPtr<SyncManager> ref = new SyncManager(aGlobal, principalInfo);
-+  RefPtr<SyncManager> ref = new SyncManager(aGlobal, principalInfo, aScope);
- 
-   ref->mWorkerFeature = new SyncManagerFeature(ref);
-   if (NS_WARN_IF(!aWorkerPrivate->AddFeature(ref->mWorkerFeature))) {
-     ref->mWorkerFeature = nullptr;
-     return nullptr;
-   }
- 
-   return ref.forget();
- }
- 
- SyncManager::SyncManager(nsIGlobalObject* aGlobal,
--                         const PrincipalInfo& aPrincipalInfo)
-+                         const PrincipalInfo& aPrincipalInfo,
-+                         const nsAString& aScope)
-   : mInnerID(0)
-   , mGlobal(aGlobal)
-   , mShuttingDown(false)
-   , mPrincipalInfo(MakeUnique<PrincipalInfo>(aPrincipalInfo))
-+  , mScope(aScope)
- {
- #ifdef DEBUG
-   mThread = do_GetCurrentThread();
- #endif
- 
-   MOZ_ASSERT(aGlobal);
- 
-   // Register this component to PBackground.
-@@ -388,17 +394,17 @@ SyncManager::ExecuteOp(const SyncOpArgs&
- 
- // WebIDL interface methods.
- 
- already_AddRefed<Promise>
- SyncManager::Register(const nsAString& aTag, ErrorResult& aRv)
- {
-   MOZ_ASSERT(IsSyncManagerThread());
- 
--  const SyncRegisterArgs args((nsString(aTag)));
-+  const SyncRegisterArgs args(mScope, (nsString(aTag)));
-   return ExecuteOp(SyncOpArgs(args), aRv);
- }
- 
- already_AddRefed<Promise>
- SyncManager::GetTags(ErrorResult& aRv)
- {
-   MOZ_ASSERT(IsSyncManagerThread());
- 
-diff --git a/dom/sync/SyncManager.h b/dom/sync/SyncManager.h
---- a/dom/sync/SyncManager.h
-+++ b/dom/sync/SyncManager.h
-@@ -50,21 +50,23 @@ class SyncManager final : public nsIIPCB
- public:
-   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
-   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_AMBIGUOUS(
-       SyncManager, nsIIPCBackgroundChildCreateCallback)
- 
-   static already_AddRefed<SyncManager>
-   CreateOnMainThread(nsIGlobalObject* aGlobal,
-                      nsIPrincipal* aPrincipal,
-+                     const nsAString& aScope,
-                      ErrorResult& aRv);
- 
-   static already_AddRefed<SyncManager>
-   CreateOnWorker(nsIGlobalObject* aGlobal,
--                 workers::WorkerPrivate* aWorkerPrivate);
-+                 workers::WorkerPrivate* aWorkerPrivate,
-+                 const nsAString& aScope);
- 
-   // Binding methods.
- 
-   nsIGlobalObject*
-   GetParentObject() const
-   {
-     return mGlobal;
-   }
-@@ -80,17 +82,18 @@ public:
-   Register(const nsAString& aTag, ErrorResult& aRv);
- 
-   already_AddRefed<Promise>
-   GetTags(ErrorResult& aRv);
- 
-   void Shutdown();
- private:
-   SyncManager(nsIGlobalObject* aGlobal,
--              const mozilla::ipc::PrincipalInfo& aPrincipalInfo);
-+              const mozilla::ipc::PrincipalInfo& aPrincipalInfo,
-+              const nsAString& aScope);
- 
-   ~SyncManager();
- 
-   bool IsSyncManagerThread();
- 
-   already_AddRefed<Promise>
-   ExecuteOp(const SyncOpArgs& aArgs, ErrorResult& aRv);
- 
-@@ -103,15 +106,17 @@ private:
-   RefPtr<SyncManagerChild> mActor;
- 
-   bool mShuttingDown;
- 
-   UniquePtr<mozilla::ipc::PrincipalInfo> mPrincipalInfo;
- 
-   nsCOMPtr<nsIThread> mThread;
- 
-+  nsString mScope;
-+
-   nsTArray<RefPtr<SyncOpRunnable>> mPendingOperations;
- };
- 
- } // namespace dom
- } // namespace mozilla
- 
- #endif // mozilla_dom_SyncManager_h
-diff --git a/dom/webidl/SyncEvent.webidl b/dom/webidl/SyncEvent.webidl
+diff --git a/dom/webidl/BackgroundSyncEvent.webidl b/dom/webidl/BackgroundSyncEvent.webidl
 new file mode 100644
 --- /dev/null
-+++ b/dom/webidl/SyncEvent.webidl
++++ b/dom/webidl/BackgroundSyncEvent.webidl
 @@ -0,0 +1,20 @@
 +/* -*- Mode: IDL; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -261,38 +263,38 @@ new file mode 100644
 + * https://wicg.github.io/BackgroundSync/spec/
 + */
 +
-+[Constructor(DOMString type, optional SyncEventInit eventInitDict),
++[Constructor(DOMString type, optional BackgroundSyncEventInit eventInitDict),
 + Exposed=ServiceWorker]
-+interface SyncEvent : ExtendableEvent {
++interface BackgroundSyncEvent : ExtendableEvent {
 +  readonly attribute DOMString tag;
 +  readonly attribute boolean lastChance;
 +};
 +
-+dictionary SyncEventInit : ExtendableEventInit {
++dictionary BackgroundSyncEventInit : ExtendableEventInit {
 +  required DOMString tag;
 +  boolean lastChance = false;
 +};
 diff --git a/dom/webidl/moz.build b/dom/webidl/moz.build
 --- a/dom/webidl/moz.build
 +++ b/dom/webidl/moz.build
-@@ -531,16 +531,17 @@ WEBIDL_FILES = [
-     'SVGTransformList.webidl',
-     'SVGTSpanElement.webidl',
-     'SVGUnitTypes.webidl',
-     'SVGURIReference.webidl',
-     'SVGUseElement.webidl',
-     'SVGViewElement.webidl',
-     'SVGZoomAndPan.webidl',
-     'SVGZoomEvent.webidl',
-+    'SyncEvent.webidl',
-     'SyncManager.webidl',
-     'SystemUpdate.webidl',
-     'TCPServerSocket.webidl',
-     'TCPServerSocketEvent.webidl',
-     'TCPSocket.webidl',
-     'TCPSocketErrorEvent.webidl',
-     'TCPSocketEvent.webidl',
-     'Telephony.webidl',
+@@ -46,16 +46,17 @@ WEBIDL_FILES = [
+     'AudioParam.webidl',
+     'AudioProcessingEvent.webidl',
+     'AudioStreamTrack.webidl',
+     'AudioTrack.webidl',
+     'AudioTrackList.webidl',
+     'AutocompleteInfo.webidl',
+     'AVInputPort.webidl',
+     'BackgroundSync.webidl',
++    'BackgroundSyncEvent.webidl',
+     'BarProp.webidl',
+     'BaseKeyframeTypes.webidl',
+     'BatteryManager.webidl',
+     'BeforeAfterKeyboardEvent.webidl',
+     'BeforeUnloadEvent.webidl',
+     'BiquadFilterNode.webidl',
+     'Blob.webidl',
+     'BoxObject.webidl',
 diff --git a/dom/workers/PServiceWorkerManager.ipdl b/dom/workers/PServiceWorkerManager.ipdl
 --- a/dom/workers/PServiceWorkerManager.ipdl
 +++ b/dom/workers/PServiceWorkerManager.ipdl
@@ -856,12 +858,12 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
        return nullptr;
      }
  
-     mSyncManager = SyncManager::CreateOnMainThread(globalObject, principal,
+     mBackgroundSync = BackgroundSync::CreateOnMainThread(globalObject, principal,
 -                                                   aRv);
-+                                                   mScope, aRv);
++                                                         mScope, aRv);
    }
  
-   return mSyncManager;
+   return mBackgroundSync;
  }
  
  ////////////////////////////////////////////////////
@@ -871,17 +873,17 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
  #endif /* ! MOZ_SIMPLEPUSH */
  }
  
- SyncManager*
+ BackgroundSync*
  ServiceWorkerRegistrationWorkerThread::GetSync(ErrorResult& aRv)
  {
-   if (!mSyncManager) {
-     mSyncManager = SyncManager::CreateOnWorker(mWorkerPrivate->GlobalScope(),
+   if (!mBackgroundSync) {
+     mBackgroundSync = BackgroundSync::CreateOnWorker(mWorkerPrivate->GlobalScope(),
 -                                               mWorkerPrivate);
-+                                               mWorkerPrivate,
-+                                               mScope);
++                                                     mWorkerPrivate,
++                                                     mScope);
    }
  
-   return mSyncManager;
+   return mBackgroundSync;
  }
  
  } // dom namespace
