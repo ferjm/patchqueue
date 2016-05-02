@@ -3,9 +3,9 @@
 # Parent  1d8eed5d10143fc7ab38e08e160cb2e7e8e88def
 Bug 1217544 - Implement one-off BackgroundSync API. Part 2: ServiceWorkerRegistration. r=baku
 
-diff --git a/dom/sync/BackgroundSync.cpp b/dom/sync/BackgroundSync.cpp
---- a/dom/sync/BackgroundSync.cpp
-+++ b/dom/sync/BackgroundSync.cpp
+diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
+--- a/dom/backgroundsync/BackgroundSync.cpp
++++ b/dom/backgroundsync/BackgroundSync.cpp
 @@ -44,24 +44,25 @@ BackgroundSync::CreateOnMainThread(nsIGl
    }
  
@@ -53,9 +53,9 @@ diff --git a/dom/sync/BackgroundSync.cpp b/dom/sync/BackgroundSync.cpp
    if (!workerPrivate) {
      return false;
    }
-diff --git a/dom/sync/BackgroundSync.h b/dom/sync/BackgroundSync.h
---- a/dom/sync/BackgroundSync.h
-+++ b/dom/sync/BackgroundSync.h
+diff --git a/dom/backgroundsync/BackgroundSync.h b/dom/backgroundsync/BackgroundSync.h
+--- a/dom/backgroundsync/BackgroundSync.h
++++ b/dom/backgroundsync/BackgroundSync.h
 @@ -41,17 +41,18 @@ public:
    NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(BackgroundSync)
  

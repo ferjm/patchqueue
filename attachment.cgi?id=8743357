@@ -1,33 +1,12 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  9be8dd3400b42418e3649def0ea627397ed04f61
+# Parent  e6fa15a5e1d7699fc95f6e66256de4e04c3e9ff5
 Bug 1217544 - Implement one-off BackgroundSync API. Part 1: BackgroundSync interface. r=baku
 
-diff --git a/dom/moz.build b/dom/moz.build
---- a/dom/moz.build
-+++ b/dom/moz.build
-@@ -96,16 +96,17 @@ DIRS += [
-     'ipc',
-     'workers',
-     'camera',
-     'audiochannel',
-     'broadcastchannel',
-     'messagechannel',
-     'promise',
-     'smil',
-+    'sync',
-     'telephony',
-     'tv',
-     'voicemail',
-     'inputmethod',
-     'webidl',
-     'xbl',
-     'xml',
-     'xslt',
-diff --git a/dom/sync/BackgroundSync.cpp b/dom/sync/BackgroundSync.cpp
+diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
 new file mode 100644
 --- /dev/null
-+++ b/dom/sync/BackgroundSync.cpp
++++ b/dom/backgroundsync/BackgroundSync.cpp
 @@ -0,0 +1,136 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
@@ -165,10 +144,10 @@ new file mode 100644
 +
 +} // namespace dom
 +} // namespace mozilla
-diff --git a/dom/sync/BackgroundSync.h b/dom/sync/BackgroundSync.h
+diff --git a/dom/backgroundsync/BackgroundSync.h b/dom/backgroundsync/BackgroundSync.h
 new file mode 100644
 --- /dev/null
-+++ b/dom/sync/BackgroundSync.h
++++ b/dom/backgroundsync/BackgroundSync.h
 @@ -0,0 +1,87 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
@@ -257,10 +236,10 @@ new file mode 100644
 +} // namespace mozilla
 +
 +#endif // mozilla_dom_BackgroundSync_h
-diff --git a/dom/sync/moz.build b/dom/sync/moz.build
+diff --git a/dom/backgroundsync/moz.build b/dom/backgroundsync/moz.build
 new file mode 100644
 --- /dev/null
-+++ b/dom/sync/moz.build
++++ b/dom/backgroundsync/moz.build
 @@ -0,0 +1,20 @@
 +# vim: set filetype=python:
 +# This Source Code Form is subject to the terms of the Mozilla Public
@@ -282,6 +261,27 @@ new file mode 100644
 +include('/ipc/chromium/chromium-config.mozbuild')
 +
 +FINAL_LIBRARY = 'xul'
+diff --git a/dom/moz.build b/dom/moz.build
+--- a/dom/moz.build
++++ b/dom/moz.build
+@@ -37,16 +37,17 @@ interfaces = [
+ if not CONFIG['MOZ_SIMPLEPUSH']:
+     interfaces += ['push']
+ 
+ DIRS += ['interfaces/' + i for i in interfaces]
+ 
+ DIRS += [
+     'animation',
+     'apps',
++    'backgroundsync',
+     'base',
+     'bluetooth',
+     'activities',
+     'archivereader',
+     'requestsync',
+     'bindings',
+     'battery',
+     'browser-element',
 diff --git a/dom/tests/mochitest/general/test_interfaces.html b/dom/tests/mochitest/general/test_interfaces.html
 --- a/dom/tests/mochitest/general/test_interfaces.html
 +++ b/dom/tests/mochitest/general/test_interfaces.html
