@@ -1,40 +1,13 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  1d8eed5d10143fc7ab38e08e160cb2e7e8e88def
+# Parent  3b7fef312cd48ff7f49cd171356733104b250efe
 Bug 1217544 - Implement one-off BackgroundSync API. Part 2: ServiceWorkerRegistration. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
 --- a/dom/backgroundsync/BackgroundSync.cpp
 +++ b/dom/backgroundsync/BackgroundSync.cpp
-@@ -44,24 +44,25 @@ BackgroundSync::CreateOnMainThread(nsIGl
-   }
- 
-   RefPtr<BackgroundSync> ref = new BackgroundSync(aGlobal, principalInfo);
-   return ref.forget();
- }
- 
- // static
- already_AddRefed<BackgroundSync>
--BackgroundSync::CreateOnWorker(WorkerPrivate* aWorkerPrivate)
-+BackgroundSync::CreateOnWorker(nsIGlobalObject* aGlobal,
-+                               WorkerPrivate* aWorkerPrivate)
- {
-   MOZ_ASSERT(aWorkerPrivate);
-   aWorkerPrivate->AssertIsOnWorkerThread();
- 
-   const PrincipalInfo& principalInfo = aWorkerPrivate->GetPrincipalInfo();
- 
--  RefPtr<BackgroundSync> ref = new BackgroundSync(nullptr, principalInfo);
-+  RefPtr<BackgroundSync> ref = new BackgroundSync(aGlobal, principalInfo);
-   return ref.forget();
- }
- 
- BackgroundSync::BackgroundSync(nsIGlobalObject* aGlobal,
-                          const PrincipalInfo& aPrincipalInfo)
-   : mGlobal(aGlobal)
-   , mPrincipalInfo(new PrincipalInfo(aPrincipalInfo))
- {}
-@@ -82,17 +83,17 @@ bool
+@@ -82,17 +82,17 @@ BackgroundSync::WrapObject(JSContext* aC
+ bool
  BackgroundSync::PrefEnabled(JSContext* aCx, JSObject* aObj)
  {
    using mozilla::dom::workers::WorkerPrivate;
@@ -42,10 +15,9 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
  
    // If we are on the main thread, then check the pref directly.
    if (NS_IsMainThread()) {
-     bool enabled = false;
--    Preferences::GetBool("dom.background.sync.enabled", &enabled);
-+    Preferences::GetBool("dom.backgroundSync.enabled", &enabled);
-     return enabled;
+-    Preferences::GetBool("dom.background.sync.enabled", false);
++    Preferences::GetBool("dom.backgroundSync.enabled", false);
+     return false;
    }
  
    // Otherwise check the pref via the worker private helper.
@@ -56,7 +28,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
 diff --git a/dom/backgroundsync/BackgroundSync.h b/dom/backgroundsync/BackgroundSync.h
 --- a/dom/backgroundsync/BackgroundSync.h
 +++ b/dom/backgroundsync/BackgroundSync.h
-@@ -41,17 +41,18 @@ public:
+@@ -39,17 +39,18 @@ public:
    NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(BackgroundSync)
  
    static already_AddRefed<BackgroundSync>
@@ -74,8 +46,8 @@ diff --git a/dom/backgroundsync/BackgroundSync.h b/dom/backgroundsync/Background
    nsIGlobalObject*
    GetParentObject() const
    {
-     // Can be nullptr on workers.
      return mGlobal;
+   }
 diff --git a/dom/webidl/ServiceWorkerRegistration.webidl b/dom/webidl/ServiceWorkerRegistration.webidl
 --- a/dom/webidl/ServiceWorkerRegistration.webidl
 +++ b/dom/webidl/ServiceWorkerRegistration.webidl
