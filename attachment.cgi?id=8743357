@@ -39,8 +39,8 @@ new file mode 100644
 +// static
 +already_AddRefed<BackgroundSync>
 +BackgroundSync::CreateOnMainThread(nsIGlobalObject* aGlobal,
-+                                nsIPrincipal* aPrincipal,
-+                                ErrorResult& aRv)
++                                   nsIPrincipal* aPrincipal,
++                                   ErrorResult& aRv)
 +{
 +  MOZ_ASSERT(aGlobal);
 +  MOZ_ASSERT(aPrincipal);
@@ -66,7 +66,8 @@ new file mode 100644
 +
 +  const PrincipalInfo& principalInfo = aWorkerPrivate->GetPrincipalInfo();
 +
-+  RefPtr<BackgroundSync> ref = new BackgroundSync(nullptr, principalInfo);
++  RefPtr<BackgroundSync> ref = new BackgroundSync(aWorkerPrivate->GlobalScope(),
++                                                  principalInfo);
 +  return ref.forget();
 +}
 +
@@ -96,9 +97,8 @@ new file mode 100644
 +
 +  // If we are on the main thread, then check the pref directly.
 +  if (NS_IsMainThread()) {
-+    bool enabled = false;
-+    Preferences::GetBool("dom.background.sync.enabled", &enabled);
-+    return enabled;
++    Preferences::GetBool("dom.background.sync.enabled", false);
++    return false;
 +  }
 +
 +  // Otherwise check the pref via the worker private helper.
@@ -148,7 +148,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.h b/dom/backgroundsync/Background
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSync.h
-@@ -0,0 +1,87 @@
+@@ -0,0 +1,84 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -158,17 +158,15 @@ new file mode 100644
 +#ifndef mozilla_dom_BackgroundSync_h
 +#define mozilla_dom_BackgroundSync_h
 +
-+#include "nsIPrincipal.h"
-+#include "nsWrapperCache.h"
-+
++#include "jsapi.h"
 +#include "mozilla/AlreadyAddRefed.h"
 +#include "mozilla/ErrorResult.h"
 +#include "mozilla/dom/BindingDeclarations.h"
-+
 +#include "nsCOMPtr.h"
-+#include "jsapi.h"
++#include "nsWrapperCache.h"
 +
 +class nsIGlobalObject;
++class nsIPrincipal;
 +
 +namespace mozilla {
 +
@@ -204,7 +202,6 @@ new file mode 100644
 +  nsIGlobalObject*
 +  GetParentObject() const
 +  {
-+    // Can be nullptr on workers.
 +    return mGlobal;
 +  }
 +

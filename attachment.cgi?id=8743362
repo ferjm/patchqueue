@@ -57,9 +57,9 @@ diff --git a/dom/interfaces/base/nsIServiceWorkerManager.idl b/dom/interfaces/ba
  %{ C++
  #define SERVICEWORKERMANAGER_CONTRACTID "@mozilla.org/serviceworkers/manager;1"
  %}
-diff --git a/dom/sync/BackgroundSync.cpp b/dom/sync/BackgroundSync.cpp
---- a/dom/sync/BackgroundSync.cpp
-+++ b/dom/sync/BackgroundSync.cpp
+diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
+--- a/dom/backgroundsync/BackgroundSync.cpp
++++ b/dom/backgroundsync/BackgroundSync.cpp
 @@ -144,29 +144,32 @@ private:
  
  
@@ -162,9 +162,9 @@ diff --git a/dom/sync/BackgroundSync.cpp b/dom/sync/BackgroundSync.cpp
  {
    MOZ_ASSERT(IsBackgroundSyncThread());
  
-diff --git a/dom/sync/BackgroundSync.h b/dom/sync/BackgroundSync.h
---- a/dom/sync/BackgroundSync.h
-+++ b/dom/sync/BackgroundSync.h
+diff --git a/dom/backgroundsync/BackgroundSync.h b/dom/backgroundsync/BackgroundSync.h
+--- a/dom/backgroundsync/BackgroundSync.h
++++ b/dom/backgroundsync/BackgroundSync.h
 @@ -50,21 +50,23 @@ class BackgroundSync final : public nsII
  public:
    NS_DECL_CYCLE_COLLECTING_ISUPPORTS
@@ -228,9 +228,9 @@ diff --git a/dom/sync/BackgroundSync.h b/dom/sync/BackgroundSync.h
  } // namespace mozilla
  
  #endif // mozilla_dom_BackgroundSync_h
-diff --git a/dom/sync/BackgroundSyncIPCTypes.ipdlh b/dom/sync/BackgroundSyncIPCTypes.ipdlh
---- a/dom/sync/BackgroundSyncIPCTypes.ipdlh
-+++ b/dom/sync/BackgroundSyncIPCTypes.ipdlh
+diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh
+--- a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh
++++ b/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh
 @@ -4,16 +4,17 @@
  
  include PBackgroundSharedTypes;

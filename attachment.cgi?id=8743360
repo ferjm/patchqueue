@@ -3,9 +3,9 @@
 # Parent  dec8e9207c9a61f9d74660fa6e9d1d1235789495
 Bug 1217544 - Implement one-off BackgroundSync API. Part 3: IPC. r=baku
 
-diff --git a/dom/sync/BackgroundSync.cpp b/dom/sync/BackgroundSync.cpp
---- a/dom/sync/BackgroundSync.cpp
-+++ b/dom/sync/BackgroundSync.cpp
+diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
+--- a/dom/backgroundsync/BackgroundSync.cpp
++++ b/dom/backgroundsync/BackgroundSync.cpp
 @@ -1,85 +1,286 @@
  /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
  /* vim: set ts=8 sts=2 et sw=2 tw=80: */
@@ -438,9 +438,9 @@ diff --git a/dom/sync/BackgroundSync.cpp b/dom/sync/BackgroundSync.cpp
  
  } // namespace dom
  } // namespace mozilla
-diff --git a/dom/sync/BackgroundSync.h b/dom/sync/BackgroundSync.h
---- a/dom/sync/BackgroundSync.h
-+++ b/dom/sync/BackgroundSync.h
+diff --git a/dom/backgroundsync/BackgroundSync.h b/dom/backgroundsync/BackgroundSync.h
+--- a/dom/backgroundsync/BackgroundSync.h
++++ b/dom/backgroundsync/BackgroundSync.h
 @@ -2,49 +2,61 @@
  /* vim: set ts=8 sts=2 et sw=2 tw=80: */
  /* This Source Code Form is subject to the terms of the Mozilla Public
@@ -558,10 +558,10 @@ diff --git a/dom/sync/BackgroundSync.h b/dom/sync/BackgroundSync.h
  } // namespace mozilla
  
  #endif // mozilla_dom_BackgroundSync_h
-diff --git a/dom/sync/BackgroundSyncChild.cpp b/dom/sync/BackgroundSyncChild.cpp
+diff --git a/dom/backgroundsync/BackgroundSyncChild.cpp b/dom/backgroundsync/BackgroundSyncChild.cpp
 new file mode 100644
 --- /dev/null
-+++ b/dom/sync/BackgroundSyncChild.cpp
++++ b/dom/backgroundsync/BackgroundSyncChild.cpp
 @@ -0,0 +1,130 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
@@ -693,10 +693,10 @@ new file mode 100644
 +
 +} // namespace dom
 +} // namespace mozilla
-diff --git a/dom/sync/BackgroundSyncChild.h b/dom/sync/BackgroundSyncChild.h
+diff --git a/dom/backgroundsync/BackgroundSyncChild.h b/dom/backgroundsync/BackgroundSyncChild.h
 new file mode 100644
 --- /dev/null
-+++ b/dom/sync/BackgroundSyncChild.h
++++ b/dom/backgroundsync/BackgroundSyncChild.h
 @@ -0,0 +1,62 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
@@ -760,10 +760,10 @@ new file mode 100644
 +} // namespace mozilla
 +
 +#endif // mozilla_dom_BackgroundSyncChild_h
-diff --git a/dom/sync/BackgroundSyncIPCTypes.ipdlh b/dom/sync/BackgroundSyncIPCTypes.ipdlh
+diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh
 new file mode 100644
 --- /dev/null
-+++ b/dom/sync/BackgroundSyncIPCTypes.ipdlh
++++ b/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh
 @@ -0,0 +1,54 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -819,10 +819,10 @@ new file mode 100644
 +
 +} // namespace dom
 +} // namespace mozilla
-diff --git a/dom/sync/BackgroundSyncParent.cpp b/dom/sync/BackgroundSyncParent.cpp
+diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/BackgroundSyncParent.cpp
 new file mode 100644
 --- /dev/null
-+++ b/dom/sync/BackgroundSyncParent.cpp
++++ b/dom/backgroundsync/BackgroundSyncParent.cpp
 @@ -0,0 +1,73 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
@@ -897,10 +897,10 @@ new file mode 100644
 +
 +} // namespace dom
 +} // namespace mozilla
-diff --git a/dom/sync/BackgroundSyncParent.h b/dom/sync/BackgroundSyncParent.h
+diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/BackgroundSyncParent.h
 new file mode 100644
 --- /dev/null
-+++ b/dom/sync/BackgroundSyncParent.h
++++ b/dom/backgroundsync/BackgroundSyncParent.h
 @@ -0,0 +1,44 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
@@ -946,10 +946,10 @@ new file mode 100644
 +#endif // mozilla_dom_BackgroundSyncParent_h
 +
 +
-diff --git a/dom/sync/PBackgroundSync.ipdl b/dom/sync/PBackgroundSync.ipdl
+diff --git a/dom/backgroundsync/PBackgroundSync.ipdl b/dom/backgroundsync/PBackgroundSync.ipdl
 new file mode 100644
 --- /dev/null
-+++ b/dom/sync/PBackgroundSync.ipdl
++++ b/dom/backgroundsync/PBackgroundSync.ipdl
 @@ -0,0 +1,28 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -979,9 +979,9 @@ new file mode 100644
 +
 +} // namespace dom
 +} // namespace mozilla
-diff --git a/dom/sync/moz.build b/dom/sync/moz.build
---- a/dom/sync/moz.build
-+++ b/dom/sync/moz.build
+diff --git a/dom/backgroundsync/moz.build b/dom/backgroundsync/moz.build
+--- a/dom/backgroundsync/moz.build
++++ b/dom/backgroundsync/moz.build
 @@ -3,17 +3,24 @@
  # License, v. 2.0. If a copy of the MPL was not distributed with this
  # file, You can obtain one at http://mozilla.org/MPL/2.0/.
@@ -1296,7 +1296,7 @@ diff --git a/ipc/glue/moz.build b/ipc/glue/moz.build
      '/caps',
      '/dom/broadcastchannel',
      '/dom/indexedDB',
-+    '/dom/sync',
++    '/dom/backgroundsync',
      '/dom/workers',
      '/media/webrtc/trunk',
      '/xpcom/build',
