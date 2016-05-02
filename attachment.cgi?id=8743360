@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  79e244a6a3497e5d072aa0d64261febc7e1af698
+# Parent  dec8e9207c9a61f9d74660fa6e9d1d1235789495
 Bug 1217544 - Implement one-off BackgroundSync API. Part 3: IPC. r=baku
 
 diff --git a/dom/sync/BackgroundSync.cpp b/dom/sync/BackgroundSync.cpp
@@ -1096,11 +1096,11 @@ diff --git a/ipc/glue/BackgroundChildImpl.h b/ipc/glue/BackgroundChildImpl.h
    virtual bool
    DeallocPFileSystemRequestChild(PFileSystemRequestChild*) override;
  
-+  virtual PSyncManagerChild*
-+  AllocPSyncManagerChild() override;
++  virtual PBackgroundSyncChild*
++  AllocPBackgroundSyncChild() override;
 +
 +  virtual bool
-+  DeallocPSyncManagerChild(PSyncManagerChild* aActor) override;
++  DeallocPBackgroundSyncChild(PBackgroundSyncChild* aActor) override;
  };
  
  class BackgroundChildImpl::ThreadLocal final
@@ -1215,11 +1215,11 @@ diff --git a/ipc/glue/BackgroundParentImpl.h b/ipc/glue/BackgroundParentImpl.h
    virtual bool
    DeallocPFileSystemRequestParent(PFileSystemRequestParent*) override;
  
-+  virtual PSyncManagerParent*
-+  AllocPSyncManagerParent() override;
++  virtual PBackgroundSyncParent*
++  AllocPBackgroundSyncParent() override;
 +
 +  virtual bool
-+  DeallocPSyncManagerParent(PSyncManagerParent* aActor) override;
++  DeallocPBackgroundSyncParent(PBackgroundSyncParent* aActor) override;
  };
  
  } // namespace ipc
@@ -1247,24 +1247,24 @@ diff --git a/ipc/glue/PBackground.ipdl b/ipc/glue/PBackground.ipdl
  include PBackgroundIDBSharedTypes;
  include PFileSystemParams;
  
-@@ -53,16 +54,17 @@ sync protocol PBackground
+@@ -40,16 +41,17 @@ using mozilla::dom::asmjscache::WritePar
+ namespace mozilla {
+ namespace ipc {
+ 
+ sync protocol PBackground
+ {
+   manages PAsmJSCacheEntry;
+   manages PBackgroundIDBFactory;
+   manages PBackgroundIndexedDBUtils;
++  manages PBackgroundSync;
+   manages PBackgroundTest;
+   manages PBlob;
+   manages PBroadcastChannel;
+   manages PCache;
+   manages PCacheStorage;
    manages PCacheStreamControl;
    manages PFileDescriptorSet;
    manages PFileSystemRequest;
-   manages PMessagePort;
-   manages PCameras;
-   manages PNuwa;
-   manages PQuota;
-   manages PServiceWorkerManager;
-+  manages PBackgroundSync;
-   manages PUDPSocket;
-   manages PVsync;
- 
- parent:
-   // Only called at startup during mochitests to check the basic infrastructure.
-   async PBackgroundTest(nsCString testArg);
- 
-   async PBackgroundIDBFactory(LoggingInfo loggingInfo);
 @@ -95,16 +97,18 @@ parent:
    async PAsmJSCacheEntry(OpenMode openMode,
                           WriteParams write,
@@ -1274,7 +1274,7 @@ diff --git a/ipc/glue/PBackground.ipdl b/ipc/glue/PBackground.ipdl
  
    async PFileSystemRequest(FileSystemParams params);
  
-+  async PSyncManager();
++  async PBackgroundSync();
 +
  child:
    async PCache();
