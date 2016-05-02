@@ -1,0 +1,370 @@
+# HG changeset patch
+# User Fernando Jimenez <ferjmoreno@gmail.com>
+# Parent  9be8dd3400b42418e3649def0ea627397ed04f61
+Bug 1217544 - Implement one-off BackgroundSync API. Part 1: BackgroundSync interface. r=baku
+
+diff --git a/dom/moz.build b/dom/moz.build
+--- a/dom/moz.build
++++ b/dom/moz.build
+@@ -96,16 +96,17 @@ DIRS += [
+     'ipc',
+     'workers',
+     'camera',
+     'audiochannel',
+     'broadcastchannel',
+     'messagechannel',
+     'promise',
+     'smil',
++    'sync',
+     'telephony',
+     'tv',
+     'voicemail',
+     'inputmethod',
+     'webidl',
+     'xbl',
+     'xml',
+     'xslt',
+diff --git a/dom/sync/BackgroundSync.cpp b/dom/sync/BackgroundSync.cpp
+new file mode 100644
+--- /dev/null
++++ b/dom/sync/BackgroundSync.cpp
+@@ -0,0 +1,136 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
++ * You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#include "BackgroundSync.h"
++
++#include "mozilla/dom/Promise.h"
++#include "mozilla/dom/PromiseWorkerProxy.h"
++#include "mozilla/dom/BackgroundSyncBinding.h"
++#include "mozilla/ipc/BackgroundChild.h"
++#include "mozilla/ipc/BackgroundUtils.h"
++#include "mozilla/ipc/PBackgroundChild.h"
++#include "mozilla/Preferences.h"
++#include "nsIGlobalObject.h"
++#include "WorkerPrivate.h"
++
++namespace mozilla {
++
++using namespace ipc;
++
++namespace dom {
++
++using namespace workers;
++
++// BackgroundSync
++
++// static
++already_AddRefed<BackgroundSync>
++BackgroundSync::CreateOnMainThread(nsIGlobalObject* aGlobal,
++                                nsIPrincipal* aPrincipal,
++                                ErrorResult& aRv)
++{
++  MOZ_ASSERT(aGlobal);
++  MOZ_ASSERT(aPrincipal);
++  MOZ_ASSERT(NS_IsMainThread());
++
++  PrincipalInfo principalInfo;
++  nsresult rv = PrincipalToPrincipalInfo(aPrincipal, &principalInfo);
++  if (NS_WARN_IF(NS_FAILED(rv))) {
++    aRv.Throw(rv);
++    return nullptr;
++  }
++
++  RefPtr<BackgroundSync> ref = new BackgroundSync(aGlobal, principalInfo);
++  return ref.forget();
++}
++
++// static
++already_AddRefed<BackgroundSync>
++BackgroundSync::CreateOnWorker(WorkerPrivate* aWorkerPrivate)
++{
++  MOZ_ASSERT(aWorkerPrivate);
++  aWorkerPrivate->AssertIsOnWorkerThread();
++
++  const PrincipalInfo& principalInfo = aWorkerPrivate->GetPrincipalInfo();
++
++  RefPtr<BackgroundSync> ref = new BackgroundSync(nullptr, principalInfo);
++  return ref.forget();
++}
++
++BackgroundSync::BackgroundSync(nsIGlobalObject* aGlobal,
++                         const PrincipalInfo& aPrincipalInfo)
++  : mGlobal(aGlobal)
++  , mPrincipalInfo(new PrincipalInfo(aPrincipalInfo))
++{}
++
++BackgroundSync::~BackgroundSync()
++{}
++
++// Bindings methods.
++
++JSObject*
++BackgroundSync::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
++{
++  return BackgroundSyncBinding::Wrap(aCx, this, aGivenProto);
++}
++
++// static
++bool
++BackgroundSync::PrefEnabled(JSContext* aCx, JSObject* aObj)
++{
++  using mozilla::dom::workers::WorkerPrivate;
++  using mozilla::dom::workers::GetWorkerPrivateFromContext;
++
++  // If we are on the main thread, then check the pref directly.
++  if (NS_IsMainThread()) {
++    bool enabled = false;
++    Preferences::GetBool("dom.background.sync.enabled", &enabled);
++    return enabled;
++  }
++
++  // Otherwise check the pref via the worker private helper.
++  WorkerPrivate* workerPrivate = GetWorkerPrivateFromContext(aCx);
++  if (!workerPrivate) {
++    return false;
++  }
++
++  return workerPrivate->BackgroundSyncEnabled();
++}
++
++// WebIDL interace methods.
++
++already_AddRefed<Promise>
++BackgroundSync::Register(const nsAString& aName, ErrorResult& aRv)
++{
++  RefPtr<Promise> p = Promise::Create(mGlobal, aRv);
++  if (NS_WARN_IF(aRv.Failed())) {
++    return nullptr;
++  }
++
++  return p.forget();
++}
++
++already_AddRefed<Promise>
++BackgroundSync::GetTags(ErrorResult& aRv)
++{
++  RefPtr<Promise> p = Promise::Create(mGlobal, aRv);
++  if (NS_WARN_IF(aRv.Failed())) {
++    return nullptr;
++  }
++
++  return p.forget();
++}
++
++NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(BackgroundSync, mGlobal)
++NS_IMPL_CYCLE_COLLECTING_ADDREF(BackgroundSync)
++NS_IMPL_CYCLE_COLLECTING_RELEASE(BackgroundSync)
++NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(BackgroundSync)
++  NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
++  NS_INTERFACE_MAP_ENTRY(nsISupports)
++NS_INTERFACE_MAP_END
++
++} // namespace dom
++} // namespace mozilla
+diff --git a/dom/sync/BackgroundSync.h b/dom/sync/BackgroundSync.h
+new file mode 100644
+--- /dev/null
++++ b/dom/sync/BackgroundSync.h
+@@ -0,0 +1,87 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
++ * You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#ifndef mozilla_dom_BackgroundSync_h
++#define mozilla_dom_BackgroundSync_h
++
++#include "nsIPrincipal.h"
++#include "nsWrapperCache.h"
++
++#include "mozilla/AlreadyAddRefed.h"
++#include "mozilla/ErrorResult.h"
++#include "mozilla/dom/BindingDeclarations.h"
++
++#include "nsCOMPtr.h"
++#include "jsapi.h"
++
++class nsIGlobalObject;
++
++namespace mozilla {
++
++namespace ipc {
++  class PrincipalInfo;
++} // namespace ipc
++
++namespace dom {
++
++namespace workers {
++  class WorkerPrivate;
++} // namespace workers
++
++class Promise;
++
++class BackgroundSync final : public nsISupports
++                        , public nsWrapperCache
++{
++public:
++  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
++  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(BackgroundSync)
++
++  static already_AddRefed<BackgroundSync>
++  CreateOnMainThread(nsIGlobalObject* aGlobal,
++                     nsIPrincipal* aPrincipal,
++                     ErrorResult& aRv);
++
++  static already_AddRefed<BackgroundSync>
++  CreateOnWorker(workers::WorkerPrivate* aWorkerPrivate);
++
++  // Binding methods.
++
++  nsIGlobalObject*
++  GetParentObject() const
++  {
++    // Can be nullptr on workers.
++    return mGlobal;
++  }
++
++  JSObject*
++  WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
++
++  static bool PrefEnabled(JSContext* aCx, JSObject* aObj);
++
++  // WebIDL interface methods.
++
++  already_AddRefed<Promise>
++  Register(const nsAString& aName, ErrorResult& aRv);
++
++  already_AddRefed<Promise>
++  GetTags(ErrorResult& aRv);
++
++private:
++  BackgroundSync(nsIGlobalObject* aGlobal,
++              const mozilla::ipc::PrincipalInfo& aPrincipalInfo);
++
++  ~BackgroundSync();
++
++  nsCOMPtr<nsIGlobalObject> mGlobal;
++
++  nsAutoPtr<mozilla::ipc::PrincipalInfo> mPrincipalInfo;
++};
++
++} // namespace dom
++} // namespace mozilla
++
++#endif // mozilla_dom_BackgroundSync_h
+diff --git a/dom/sync/moz.build b/dom/sync/moz.build
+new file mode 100644
+--- /dev/null
++++ b/dom/sync/moz.build
+@@ -0,0 +1,20 @@
++# vim: set filetype=python:
++# This Source Code Form is subject to the terms of the Mozilla Public
++# License, v. 2.0. If a copy of the MPL was not distributed with this
++# file, You can obtain one at http://mozilla.org/MPL/2.0/.
++
++EXPORTS.mozilla.dom += [
++    'BackgroundSync.h'
++]
++
++UNIFIED_SOURCES += [
++    'BackgroundSync.cpp'
++]
++
++LOCAL_INCLUDES += [
++    '/dom/workers'
++]
++
++include('/ipc/chromium/chromium-config.mozbuild')
++
++FINAL_LIBRARY = 'xul'
+diff --git a/dom/tests/mochitest/general/test_interfaces.html b/dom/tests/mochitest/general/test_interfaces.html
+--- a/dom/tests/mochitest/general/test_interfaces.html
++++ b/dom/tests/mochitest/general/test_interfaces.html
+@@ -158,16 +158,18 @@ var interfaceNamesInGlobalScope =
+     "AudioParam",
+ // IMPORTANT: Do not change this list without review from a DOM peer!
+     "AudioProcessingEvent",
+ // IMPORTANT: Do not change this list without review from a DOM peer!
+     "AudioStreamTrack",
+ // IMPORTANT: Do not change this list without review from a DOM peer!
+     {name: "AVInputPort", b2g: true, permission: ["inputport"]},
+ // IMPORTANT: Do not change this list without review from a DOM peer!
++    {name: "BackgroundSync", b2g: true},
++// IMPORTANT: Do not change this list without review from a DOM peer!
+     "BarProp",
+ // IMPORTANT: Do not change this list without review from a DOM peer!
+     "BatteryManager",
+ // IMPORTANT: Do not change this list without review from a DOM peer!
+     {name: "BeforeAfterKeyboardEvent", b2g: true,
+      permission: ["embed-apps", "before-after-keyboard-event"]},
+ // IMPORTANT: Do not change this list without review from a DOM peer!
+     "BeforeUnloadEvent",
+diff --git a/dom/webidl/BackgroundSync.webidl b/dom/webidl/BackgroundSync.webidl
+new file mode 100644
+--- /dev/null
++++ b/dom/webidl/BackgroundSync.webidl
+@@ -0,0 +1,17 @@
++/* -*- Mode: IDL; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++* License, v. 2.0. If a copy of the MPL was not distributed with this file,
++* You can obtain one at http://mozilla.org/MPL/2.0/.
++*
++* The origin of this IDL file is
++* https://wicg.github.io/BackgroundSync/spec/
++*/
++
++[Exposed=(Window,Worker),
++ Func="mozilla::dom::BackgroundSync::PrefEnabled"]
++interface BackgroundSync {
++  [Throws]
++  Promise<void> register(DOMString tag);
++  [Throws]
++  Promise<sequence<DOMString>> getTags();
++};
+diff --git a/dom/webidl/moz.build b/dom/webidl/moz.build
+--- a/dom/webidl/moz.build
++++ b/dom/webidl/moz.build
+@@ -45,16 +45,17 @@ WEBIDL_FILES = [
+     'AudioNode.webidl',
+     'AudioParam.webidl',
+     'AudioProcessingEvent.webidl',
+     'AudioStreamTrack.webidl',
+     'AudioTrack.webidl',
+     'AudioTrackList.webidl',
+     'AutocompleteInfo.webidl',
+     'AVInputPort.webidl',
++    'BackgroundSync.webidl',
+     'BarProp.webidl',
+     'BaseKeyframeTypes.webidl',
+     'BatteryManager.webidl',
+     'BeforeAfterKeyboardEvent.webidl',
+     'BeforeUnloadEvent.webidl',
+     'BiquadFilterNode.webidl',
+     'Blob.webidl',
+     'BoxObject.webidl',
+diff --git a/dom/workers/WorkerPrefs.h b/dom/workers/WorkerPrefs.h
+--- a/dom/workers/WorkerPrefs.h
++++ b/dom/workers/WorkerPrefs.h
+@@ -28,16 +28,17 @@ WORKER_SIMPLE_PREF("dom.caches.enabled",
+ WORKER_SIMPLE_PREF("dom.caches.testing.enabled", DOMCachesTestingEnabled, DOM_CACHES_TESTING)
+ WORKER_SIMPLE_PREF("dom.performance.enable_user_timing_logging", PerformanceLoggingEnabled, PERFORMANCE_LOGGING_ENABLED)
+ WORKER_SIMPLE_PREF("dom.webnotifications.enabled", DOMWorkerNotificationEnabled, DOM_WORKERNOTIFICATION)
+ WORKER_SIMPLE_PREF("dom.webnotifications.serviceworker.enabled", DOMServiceWorkerNotificationEnabled, DOM_SERVICEWORKERNOTIFICATION)
+ WORKER_SIMPLE_PREF("dom.serviceWorkers.enabled", ServiceWorkersEnabled, SERVICEWORKERS_ENABLED)
+ WORKER_SIMPLE_PREF("dom.serviceWorkers.testing.enabled", ServiceWorkersTestingEnabled, SERVICEWORKERS_TESTING_ENABLED)
+ WORKER_SIMPLE_PREF("dom.serviceWorkers.openWindow.enabled", OpenWindowEnabled, OPEN_WINDOW_ENABLED)
+ WORKER_SIMPLE_PREF("dom.push.enabled", PushEnabled, PUSH_ENABLED)
++WORKER_SIMPLE_PREF("dom.background.sync.enabled", BackgroundSyncEnabled, BACKGROUND_SYNC_ENABLED)
+ WORKER_SIMPLE_PREF("dom.requestcontext.enabled", RequestContextEnabled, REQUESTCONTEXT_ENABLED)
+ WORKER_SIMPLE_PREF("gfx.offscreencanvas.enabled", OffscreenCanvasEnabled, OFFSCREENCANVAS_ENABLED)
+ WORKER_PREF("dom.workers.latestJSVersion", JSVersionChanged)
+ WORKER_PREF("intl.accept_languages", PrefLanguagesChanged)
+ WORKER_PREF("general.appname.override", AppNameOverrideChanged)
+ WORKER_PREF("general.appversion.override", AppVersionOverrideChanged)
+ WORKER_PREF("general.platform.override", PlatformOverrideChanged)
+ #ifdef JS_GC_ZEAL

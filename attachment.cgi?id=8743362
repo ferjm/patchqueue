@@ -1,0 +1,888 @@
+# HG changeset patch
+# User Fernando Jimenez <ferjmoreno@gmail.com>
+# Parent  a6d58308ca79a55eacaca9fab9f0d559a2aaa497
+Bug 1217544 - Implement one-off BackgroundSync API. Part 4: Sync event. r=baku
+
+diff --git a/dom/bindings/Bindings.conf b/dom/bindings/Bindings.conf
+--- a/dom/bindings/Bindings.conf
++++ b/dom/bindings/Bindings.conf
+@@ -1256,16 +1256,22 @@ DOMInterfaces = {
+ 'SVGUnitTypes' : {
+     'concrete': False,
+ },
+ 
+ 'SVGZoomAndPan' : {
+     'concrete': False,
+ },
+ 
++'SyncEvent': {
++    'headerFile': 'mozilla/dom/ServiceWorkerEvents.h',
++    'nativeType': 'mozilla::dom::workers::SyncEvent',
++    'workers': True
++},
++
+ 'TestFunctions': {
+     'wrapperCache': False
+ },
+ 
+ 'Text': {
+     # Total hack to allow binding code to realize that nsTextNode can
+     # in fact be cast to Text.
+     'headerFile': 'nsTextNode.h',
+diff --git a/dom/interfaces/base/nsIServiceWorkerManager.idl b/dom/interfaces/base/nsIServiceWorkerManager.idl
+--- a/dom/interfaces/base/nsIServiceWorkerManager.idl
++++ b/dom/interfaces/base/nsIServiceWorkerManager.idl
+@@ -186,19 +186,23 @@ interface nsIServiceWorkerManager : nsIS
+                                   in AString aData,
+                                   in AString aBehavior);
+   [optional_argc] void sendPushEvent(in ACString aOriginAttributes,
+                                      in ACString aScope,
+                                      [optional] in uint32_t aDataLength,
+                                      [optional, array, size_is(aDataLength)] in uint8_t aDataBytes);
+   void sendPushSubscriptionChangeEvent(in ACString aOriginAttributes,
+                                        in ACString scope);
+-
+   void addListener(in nsIServiceWorkerManagerListener aListener);
+ 
+   void removeListener(in nsIServiceWorkerManagerListener aListener);
+ 
+   bool shouldReportToWindow(in mozIDOMWindowProxy aWindow, in ACString aScope);
++
++  void sendSyncEvent(in ACString aOriginAttributes,
++                     in ACString scope,
++                     in AString aTag,
++                     in boolean aLastChance);
+ };
+ 
+ %{ C++
+ #define SERVICEWORKERMANAGER_CONTRACTID "@mozilla.org/serviceworkers/manager;1"
+ %}
+diff --git a/dom/sync/SyncIPCTypes.ipdlh b/dom/sync/SyncIPCTypes.ipdlh
+--- a/dom/sync/SyncIPCTypes.ipdlh
++++ b/dom/sync/SyncIPCTypes.ipdlh
+@@ -4,16 +4,17 @@
+ 
+ include PBackgroundSharedTypes;
+ 
+ namespace mozilla {
+ namespace dom {
+ 
+ struct SyncRegisterArgs
+ {
++  nsString mScope;
+   nsString mTag;
+ };
+ 
+ struct SyncGetTagsArgs
+ {
+ };
+ 
+ union SyncOpArgs
+diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
+--- a/dom/sync/SyncManager.cpp
++++ b/dom/sync/SyncManager.cpp
+@@ -141,29 +141,31 @@ private:
+ };
+ 
+ // SyncManager
+ 
+ // static
+ already_AddRefed<SyncManager>
+ SyncManager::CreateOnMainThread(nsIGlobalObject* aGlobal,
+                                 nsIPrincipal* aPrincipal,
++                                const nsAString& aScope,
+                                 ErrorResult& aRv)
+ {
+   MOZ_ASSERT(aGlobal);
+   MOZ_ASSERT(aPrincipal);
++  MOZ_ASSERT(!aScope.IsEmpty());
+   MOZ_ASSERT(NS_IsMainThread());
+ 
+   PrincipalInfo principalInfo;
+   aRv = PrincipalToPrincipalInfo(aPrincipal, &principalInfo);
+   if (NS_WARN_IF(aRv.Failed())) {
+     return nullptr;
+   }
+ 
+-  RefPtr<SyncManager> ref = new SyncManager(aGlobal, principalInfo);
++  RefPtr<SyncManager> ref = new SyncManager(aGlobal, principalInfo, aScope);
+ 
+   // Register as observer for inner-window-destroyed.
+   nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
+   if (obs) {
+     aRv = obs->AddObserver(ref, "inner-window-destroyed",
+                            false /* ownsWeak */);
+     if (NS_WARN_IF(aRv.Failed())) {
+       return nullptr;
+@@ -179,40 +181,44 @@ SyncManager::CreateOnMainThread(nsIGloba
+   ref->mInnerID = window->WindowID();
+ 
+   return ref.forget();
+ }
+ 
+ // static
+ already_AddRefed<SyncManager>
+ SyncManager::CreateOnWorker(nsIGlobalObject* aGlobal,
+-                            WorkerPrivate* aWorkerPrivate)
++                            WorkerPrivate* aWorkerPrivate,
++                            const nsAString& aScope)
+ {
+   MOZ_ASSERT(aWorkerPrivate);
++  MOZ_ASSERT(!aScope.IsEmpty());
+   aWorkerPrivate->AssertIsOnWorkerThread();
+ 
+   const PrincipalInfo& principalInfo = aWorkerPrivate->GetPrincipalInfo();
+ 
+-  RefPtr<SyncManager> ref = new SyncManager(aGlobal, principalInfo);
++  RefPtr<SyncManager> ref = new SyncManager(aGlobal, principalInfo, aScope);
+ 
+   ref->mWorkerFeature = new SyncManagerFeature(ref);
+   if (NS_WARN_IF(!aWorkerPrivate->AddFeature(ref->mWorkerFeature))) {
+     ref->mWorkerFeature = nullptr;
+     return nullptr;
+   }
+ 
+   return ref.forget();
+ }
+ 
+ SyncManager::SyncManager(nsIGlobalObject* aGlobal,
+-                         const PrincipalInfo& aPrincipalInfo)
++                         const PrincipalInfo& aPrincipalInfo,
++                         const nsAString& aScope)
+   : mInnerID(0)
+   , mGlobal(aGlobal)
+   , mShuttingDown(false)
+   , mPrincipalInfo(MakeUnique<PrincipalInfo>(aPrincipalInfo))
++  , mScope(aScope)
+ {
+ #ifdef DEBUG
+   mThread = do_GetCurrentThread();
+ #endif
+ 
+   MOZ_ASSERT(aGlobal);
+ 
+   // Register this component to PBackground.
+@@ -388,17 +394,17 @@ SyncManager::ExecuteOp(const SyncOpArgs&
+ 
+ // WebIDL interface methods.
+ 
+ already_AddRefed<Promise>
+ SyncManager::Register(const nsAString& aTag, ErrorResult& aRv)
+ {
+   MOZ_ASSERT(IsSyncManagerThread());
+ 
+-  const SyncRegisterArgs args((nsString(aTag)));
++  const SyncRegisterArgs args(mScope, (nsString(aTag)));
+   return ExecuteOp(SyncOpArgs(args), aRv);
+ }
+ 
+ already_AddRefed<Promise>
+ SyncManager::GetTags(ErrorResult& aRv)
+ {
+   MOZ_ASSERT(IsSyncManagerThread());
+ 
+diff --git a/dom/sync/SyncManager.h b/dom/sync/SyncManager.h
+--- a/dom/sync/SyncManager.h
++++ b/dom/sync/SyncManager.h
+@@ -50,21 +50,23 @@ class SyncManager final : public nsIIPCB
+ public:
+   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_AMBIGUOUS(
+       SyncManager, nsIIPCBackgroundChildCreateCallback)
+ 
+   static already_AddRefed<SyncManager>
+   CreateOnMainThread(nsIGlobalObject* aGlobal,
+                      nsIPrincipal* aPrincipal,
++                     const nsAString& aScope,
+                      ErrorResult& aRv);
+ 
+   static already_AddRefed<SyncManager>
+   CreateOnWorker(nsIGlobalObject* aGlobal,
+-                 workers::WorkerPrivate* aWorkerPrivate);
++                 workers::WorkerPrivate* aWorkerPrivate,
++                 const nsAString& aScope);
+ 
+   // Binding methods.
+ 
+   nsIGlobalObject*
+   GetParentObject() const
+   {
+     return mGlobal;
+   }
+@@ -80,17 +82,18 @@ public:
+   Register(const nsAString& aTag, ErrorResult& aRv);
+ 
+   already_AddRefed<Promise>
+   GetTags(ErrorResult& aRv);
+ 
+   void Shutdown();
+ private:
+   SyncManager(nsIGlobalObject* aGlobal,
+-              const mozilla::ipc::PrincipalInfo& aPrincipalInfo);
++              const mozilla::ipc::PrincipalInfo& aPrincipalInfo,
++              const nsAString& aScope);
+ 
+   ~SyncManager();
+ 
+   bool IsSyncManagerThread();
+ 
+   already_AddRefed<Promise>
+   ExecuteOp(const SyncOpArgs& aArgs, ErrorResult& aRv);
+ 
+@@ -103,15 +106,17 @@ private:
+   RefPtr<SyncManagerChild> mActor;
+ 
+   bool mShuttingDown;
+ 
+   UniquePtr<mozilla::ipc::PrincipalInfo> mPrincipalInfo;
+ 
+   nsCOMPtr<nsIThread> mThread;
+ 
++  nsString mScope;
++
+   nsTArray<RefPtr<SyncOpRunnable>> mPendingOperations;
+ };
+ 
+ } // namespace dom
+ } // namespace mozilla
+ 
+ #endif // mozilla_dom_SyncManager_h
+diff --git a/dom/webidl/SyncEvent.webidl b/dom/webidl/SyncEvent.webidl
+new file mode 100644
+--- /dev/null
++++ b/dom/webidl/SyncEvent.webidl
+@@ -0,0 +1,20 @@
++/* -*- Mode: IDL; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
++ * You can obtain one at http://mozilla.org/MPL/2.0/.
++ *
++ * The origin of this IDL file is
++ * https://wicg.github.io/BackgroundSync/spec/
++ */
++
++[Constructor(DOMString type, optional SyncEventInit eventInitDict),
++ Exposed=ServiceWorker]
++interface SyncEvent : ExtendableEvent {
++  readonly attribute DOMString tag;
++  readonly attribute boolean lastChance;
++};
++
++dictionary SyncEventInit : ExtendableEventInit {
++  required DOMString tag;
++  boolean lastChance = false;
++};
+diff --git a/dom/webidl/moz.build b/dom/webidl/moz.build
+--- a/dom/webidl/moz.build
++++ b/dom/webidl/moz.build
+@@ -531,16 +531,17 @@ WEBIDL_FILES = [
+     'SVGTransformList.webidl',
+     'SVGTSpanElement.webidl',
+     'SVGUnitTypes.webidl',
+     'SVGURIReference.webidl',
+     'SVGUseElement.webidl',
+     'SVGViewElement.webidl',
+     'SVGZoomAndPan.webidl',
+     'SVGZoomEvent.webidl',
++    'SyncEvent.webidl',
+     'SyncManager.webidl',
+     'SystemUpdate.webidl',
+     'TCPServerSocket.webidl',
+     'TCPServerSocketEvent.webidl',
+     'TCPSocket.webidl',
+     'TCPSocketErrorEvent.webidl',
+     'TCPSocketEvent.webidl',
+     'Telephony.webidl',
+diff --git a/dom/workers/PServiceWorkerManager.ipdl b/dom/workers/PServiceWorkerManager.ipdl
+--- a/dom/workers/PServiceWorkerManager.ipdl
++++ b/dom/workers/PServiceWorkerManager.ipdl
+@@ -28,18 +28,22 @@ parent:
+   async PropagateRemove(nsCString host);
+ 
+   async PropagateRemoveAll();
+ 
+   async Shutdown();
+ 
+ child:
+   async NotifyRegister(ServiceWorkerRegistrationData data);
+-  async NotifySoftUpdate(PrincipalOriginAttributes originAttributes, nsString scope);
++  async NotifySoftUpdate(PrincipalOriginAttributes originAttributes,
++                         nsString scope);
+   async NotifyUnregister(PrincipalInfo principalInfo, nsString scope);
+   async NotifyRemove(nsCString host);
+   async NotifyRemoveAll();
+-
++  async NotifySyncEvent(PrincipalInfo principalInfo,
++                        nsString scope,
++                        nsString tag,
++                        bool lastChance);
+   async __delete__();
+ };
+ 
+ } // namespace dom
+ } // namespace mozilla
+diff --git a/dom/workers/ServiceWorkerEvents.cpp b/dom/workers/ServiceWorkerEvents.cpp
+--- a/dom/workers/ServiceWorkerEvents.cpp
++++ b/dom/workers/ServiceWorkerEvents.cpp
+@@ -1002,17 +1002,17 @@ ExtractBytesFromData(const OwningArrayBu
+     const ArrayBuffer& buffer = aDataInit.GetAsArrayBuffer();
+     return ExtractBytesFromArrayBuffer(buffer, aBytes);
+   } else if (aDataInit.IsUSVString()) {
+     return ExtractBytesFromUSVString(aDataInit.GetAsUSVString(), aBytes);
+   }
+   NS_NOTREACHED("Unexpected push message data");
+   return NS_ERROR_FAILURE;
+ }
+-}
++} // namespace
+ 
+ PushMessageData::PushMessageData(nsISupports* aOwner,
+                                  const nsTArray<uint8_t>& aBytes)
+   : mOwner(aOwner), mBytes(aBytes) {}
+ 
+ PushMessageData::~PushMessageData()
+ {
+ }
+@@ -1145,16 +1145,50 @@ NS_IMPL_CYCLE_COLLECTION_INHERITED(PushE
+ JSObject*
+ PushEvent::WrapObjectInternal(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
+ {
+   return mozilla::dom::PushEventBinding::Wrap(aCx, this, aGivenProto);
+ }
+ 
+ #endif /* ! MOZ_SIMPLEPUSH */
+ 
++// Background Sync
++
++SyncEvent::SyncEvent(EventTarget* aOwner)
++  : ExtendableEvent(aOwner)
++{
++}
++
++already_AddRefed<SyncEvent>
++SyncEvent::Constructor(mozilla::dom::EventTarget* aOwner,
++                       const nsAString& aType,
++                       const SyncEventInit& aOptions,
++                       ErrorResult& aRv)
++{
++  RefPtr<SyncEvent> e = new SyncEvent(aOwner);
++  bool trusted = e->Init(aOwner);
++  e->InitEvent(aType, aOptions.mBubbles, aOptions.mCancelable);
++  e->SetTrusted(trusted);
++  e->mTag = aOptions.mTag;
++  e->mLastChance = aOptions.mLastChance;
++  return e.forget();
++}
++
++NS_IMPL_ADDREF_INHERITED(SyncEvent, ExtendableEvent)
++NS_IMPL_RELEASE_INHERITED(SyncEvent, ExtendableEvent)
++
++NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(SyncEvent)
++NS_INTERFACE_MAP_END_INHERITING(ExtendableEvent)
++
++NS_IMPL_CYCLE_COLLECTION_CLASS(SyncEvent)
++NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(SyncEvent, ExtendableEvent)
++NS_IMPL_CYCLE_COLLECTION_UNLINK_END
++NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(SyncEvent, ExtendableEvent)
++NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
++
+ ExtendableMessageEvent::ExtendableMessageEvent(EventTarget* aOwner)
+   : ExtendableEvent(aOwner)
+   , mData(JS::UndefinedValue())
+ {
+   mozilla::HoldJSObjects(this);
+ }
+ 
+ ExtendableMessageEvent::~ExtendableMessageEvent()
+diff --git a/dom/workers/ServiceWorkerEvents.h b/dom/workers/ServiceWorkerEvents.h
+--- a/dom/workers/ServiceWorkerEvents.h
++++ b/dom/workers/ServiceWorkerEvents.h
+@@ -14,16 +14,18 @@
+ #include "mozilla/dom/Promise.h"
+ #include "mozilla/dom/Response.h"
+ #include "mozilla/dom/workers/bindings/ServiceWorker.h"
+ 
+ #ifndef MOZ_SIMPLEPUSH
+ #include "mozilla/dom/File.h"
+ #endif
+ 
++#include "mozilla/dom/SyncEventBinding.h"
++
+ #include "nsProxyRelease.h"
+ #include "nsContentUtils.h"
+ 
+ class nsIInterceptedChannel;
+ 
+ namespace mozilla {
+ namespace dom {
+ class Blob;
+@@ -311,11 +313,60 @@ public:
+ 
+   void SetPorts(MessagePortList* aPorts);
+ 
+   void SetSource(ServiceWorkerClient* aClient);
+ 
+   void SetSource(ServiceWorker* aServiceWorker);
+ };
+ 
++class SyncEvent final : public ExtendableEvent
++{
++  nsString mTag;
++  bool mLastChance;
++
++protected:
++  explicit SyncEvent(mozilla::dom::EventTarget* aOwner);
++  ~SyncEvent() {}
++
++public:
++  NS_DECL_ISUPPORTS_INHERITED
++  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(SyncEvent, ExtendableEvent)
++  NS_FORWARD_TO_EVENT
++
++  virtual JSObject* WrapObjectInternal(JSContext* aCx,
++                                       JS::Handle<JSObject*> aGivenProto) override
++  {
++    return mozilla::dom::SyncEventBinding_workers::Wrap(aCx, this, aGivenProto);
++  }
++
++  static already_AddRefed<SyncEvent>
++  Constructor(mozilla::dom::EventTarget* aOwner,
++              const nsAString& aType,
++              const SyncEventInit& aOptions,
++              ErrorResult& aRv);
++
++  static already_AddRefed<SyncEvent>
++  Constructor(const GlobalObject& aGlobal,
++              const nsAString& aType,
++              const SyncEventInit& aOptions,
++              ErrorResult& aRv)
++  {
++    nsCOMPtr<EventTarget> owner = do_QueryInterface(aGlobal.GetAsSupports());
++    return Constructor(owner, aType, aOptions, aRv);
++  }
++
++  void
++  GetTag(nsAString& aTag)
++  {
++    aTag = mTag;
++  }
++
++  bool
++  LastChance()
++  {
++    return mLastChance;
++  }
++};
++
+ END_WORKERS_NAMESPACE
+ 
+ #endif /* mozilla_dom_workers_serviceworkerevents_h__ */
+diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
+--- a/dom/workers/ServiceWorkerManager.cpp
++++ b/dom/workers/ServiceWorkerManager.cpp
+@@ -1082,16 +1082,40 @@ ServiceWorkerManager::SendNotificationCl
+   ServiceWorkerPrivate* workerPrivate = info->WorkerPrivate();
+   return workerPrivate->SendNotificationClickEvent(aID, aTitle, aDir,
+                                                    aLang, aBody, aTag,
+                                                    aIcon, aData, aBehavior,
+                                                    NS_ConvertUTF8toUTF16(aScope));
+ }
+ 
+ NS_IMETHODIMP
++ServiceWorkerManager::SendSyncEvent(const nsACString& aOriginAttributes,
++                                    const nsACString& aScope,
++                                    const nsAString& aTag,
++                                    const bool aLastChance)
++{
++  PrincipalOriginAttributes attrs;
++  if (!attrs.PopulateFromSuffix(aOriginAttributes)) {
++    return NS_ERROR_INVALID_ARG;
++  }
++
++  ServiceWorkerInfo* serviceWorker =
++    GetActiveWorkerInfoForScope(attrs, aScope);
++  if (NS_WARN_IF(!serviceWorker)) {
++    return NS_ERROR_FAILURE;
++  }
++
++  RefPtr<ServiceWorkerRegistrationInfo> registration =
++    GetRegistration(serviceWorker->GetPrincipal(), aScope);
++
++  return serviceWorker->WorkerPrivate()->SendSyncEvent(aTag, aLastChance,
++                                                       registration);
++}
++
++NS_IMETHODIMP
+ ServiceWorkerManager::GetReadyPromise(mozIDOMWindow* aWindow,
+                                       nsISupports** aPromise)
+ {
+   AssertIsOnMainThread();
+ 
+   if (NS_WARN_IF(!aWindow)) {
+     return NS_ERROR_DOM_INVALID_STATE_ERR;
+   }
+diff --git a/dom/workers/ServiceWorkerManagerChild.cpp b/dom/workers/ServiceWorkerManagerChild.cpp
+--- a/dom/workers/ServiceWorkerManagerChild.cpp
++++ b/dom/workers/ServiceWorkerManagerChild.cpp
+@@ -90,11 +90,41 @@ ServiceWorkerManagerChild::RecvNotifyRem
+ 
+   RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
+   MOZ_ASSERT(swm);
+ 
+   swm->RemoveAll();
+   return true;
+ }
+ 
++bool
++ServiceWorkerManagerChild::RecvNotifySyncEvent(const PrincipalInfo& aPrincipalInfo,
++                                               const nsString& aScope,
++                                               const nsString& aTag,
++                                               const bool& aLastChance)
++{
++  if (mShuttingDown) {
++    return true;
++  }
++
++  nsCOMPtr<nsIPrincipal> principal = PrincipalInfoToPrincipal(aPrincipalInfo);
++  if (NS_WARN_IF(!principal)) {
++    return true;
++  }
++
++  nsAutoCString originSuffix;
++  nsresult rv = principal->GetOriginSuffix(originSuffix);
++  if (NS_WARN_IF(NS_FAILED(rv))) {
++    return true;
++  }
++
++  RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
++  MOZ_ASSERT(swm);
++
++  swm->SendSyncEvent(originSuffix,
++                     NS_ConvertUTF16toUTF8(aScope),
++                     aTag, aLastChance);
++  return true;
++}
++
+ } // namespace workers
+ } // namespace dom
+ } // namespace mozilla
+diff --git a/dom/workers/ServiceWorkerManagerChild.h b/dom/workers/ServiceWorkerManagerChild.h
+--- a/dom/workers/ServiceWorkerManagerChild.h
++++ b/dom/workers/ServiceWorkerManagerChild.h
+@@ -41,16 +41,21 @@ public:
+ 
+   virtual bool RecvNotifyUnregister(const PrincipalInfo& aPrincipalInfo,
+                                     const nsString& aScope) override;
+ 
+   virtual bool RecvNotifyRemove(const nsCString& aHost) override;
+ 
+   virtual bool RecvNotifyRemoveAll() override;
+ 
++  virtual bool RecvNotifySyncEvent(const PrincipalInfo& aPrincipalInfo,
++                                   const nsString& aScope,
++                                   const nsString& aTag,
++                                   const bool& aLastChance) override;
++
+ private:
+   ServiceWorkerManagerChild()
+     : mShuttingDown(false)
+   {}
+ 
+   ~ServiceWorkerManagerChild() {}
+ 
+   bool mShuttingDown;
+diff --git a/dom/workers/ServiceWorkerPrivate.cpp b/dom/workers/ServiceWorkerPrivate.cpp
+--- a/dom/workers/ServiceWorkerPrivate.cpp
++++ b/dom/workers/ServiceWorkerPrivate.cpp
+@@ -79,17 +79,17 @@ private:
+ 
+   RefPtr<ServiceWorkerPrivate> mPrivate;
+ };
+ 
+ NS_IMPL_ISUPPORTS0(KeepAliveToken)
+ 
+ ServiceWorkerPrivate::ServiceWorkerPrivate(ServiceWorkerInfo* aInfo)
+   : mInfo(aInfo)
+-  , mIsPushWorker(false)
++  , mIsPushOrSyncWorker(false)
+   , mDebuggerCount(0)
+   , mTokenCount(0)
+ {
+   AssertIsOnMainThread();
+   MOZ_ASSERT(aInfo);
+ 
+   mIdleWorkerTimer = do_CreateInstance(NS_TIMER_CONTRACTID);
+   MOZ_ASSERT(mIdleWorkerTimer);
+@@ -1497,16 +1497,101 @@ ServiceWorkerPrivate::SendFetchEvent(nsI
+ 
+   if (NS_WARN_IF(!r->Dispatch())) {
+     return NS_ERROR_FAILURE;
+   }
+ 
+   return NS_OK;
+ }
+ 
++namespace {
++class SendSyncEventRunnable final : public ExtendableFunctionalEventWorkerRunnable
++{
++  nsString mTag;
++  bool mLastChance;
++
++public:
++  SendSyncEventRunnable(WorkerPrivate* aWorkerPrivate,
++                        KeepAliveToken* aKeepAliveToken,
++                        const nsAString& aTag,
++                        const bool aLastChance,
++                        nsMainThreadPtrHandle<ServiceWorkerRegistrationInfo> aRegistration)
++    : ExtendableFunctionalEventWorkerRunnable(
++        aWorkerPrivate, aKeepAliveToken, aRegistration)
++    , mTag(aTag)
++    , mLastChance(aLastChance)
++  {
++    AssertIsOnMainThread();
++    MOZ_ASSERT(aWorkerPrivate);
++    MOZ_ASSERT(aWorkerPrivate->IsServiceWorker());
++  }
++
++  bool
++  WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate) override
++  {
++    MOZ_ASSERT(aWorkerPrivate);
++    GlobalObject globalObj(aCx, aWorkerPrivate->GlobalScope()->GetWrapper());
++
++    SyncEventInit sei;
++    sei.mTag = mTag;
++    sei.mLastChance = mLastChance;
++    sei.mBubbles = false;
++    sei.mCancelable = false;
++
++    ErrorResult result;
++    RefPtr<SyncEvent> event =
++      SyncEvent::Constructor(globalObj, NS_LITERAL_STRING("sync"), sei, result);
++    if (NS_WARN_IF(result.Failed())) {
++      result.SuppressException();
++      return false;
++    }
++    event->SetTrusted(true);
++
++    DispatchExtendableEventOnWorkerScope(aCx, aWorkerPrivate->GlobalScope(),
++                                         event, nullptr);
++
++    return true;
++  }
++};
++} // anonymous namespace
++
++nsresult
++ServiceWorkerPrivate::SendSyncEvent(const nsAString& aTag,
++                                    const bool aLastChance,
++                                    ServiceWorkerRegistrationInfo* aRegistration)
++{
++  nsresult rv = SpawnWorkerIfNeeded(SyncEvent, nullptr);
++  NS_ENSURE_SUCCESS(rv, rv);
++
++  MOZ_ASSERT(mKeepAliveToken);
++
++  nsMainThreadPtrHandle<ServiceWorkerRegistrationInfo> regInfo(
++      new nsMainThreadPtrHolder<ServiceWorkerRegistrationInfo>(aRegistration, false));
++
++
++  RefPtr<WorkerRunnable> runnable = new SendSyncEventRunnable(mWorkerPrivate,
++                                                              mKeepAliveToken,
++                                                              aTag,
++                                                              aLastChance,
++                                                              regInfo);
++
++  if (mInfo->State() == ServiceWorkerState::Activating) {
++    mPendingFunctionalEvents.AppendElement(runnable.forget());
++    return NS_OK;
++  }
++
++  MOZ_ASSERT(mInfo->State() == ServiceWorkerState::Activated);
++
++  if (NS_WARN_IF(!runnable->Dispatch())) {
++    return NS_ERROR_FAILURE;
++  }
++
++  return NS_OK;
++}
++
+ nsresult
+ ServiceWorkerPrivate::SpawnWorkerIfNeeded(WakeUpReason aWhy,
+                                           nsIRunnable* aLoadFailedRunnable,
+                                           nsILoadGroup* aLoadGroup)
+ {
+   AssertIsOnMainThread();
+ 
+   // XXXcatalinb: We need to have a separate load group that's linked to
+@@ -1591,17 +1676,17 @@ ServiceWorkerPrivate::SpawnWorkerIfNeede
+   mWorkerPrivate = WorkerPrivate::Constructor(jsapi.cx(),
+                                               scriptSpec,
+                                               false, WorkerTypeService,
+                                               mInfo->Scope(), &info, error);
+   if (NS_WARN_IF(error.Failed())) {
+     return error.StealNSResult();
+   }
+ 
+-  mIsPushWorker = false;
++  mIsPushOrSyncWorker = false;
+   RenewKeepAliveToken(aWhy);
+ 
+   return NS_OK;
+ }
+ 
+ void
+ ServiceWorkerPrivate::StoreISupports(nsISupports* aSupports)
+ {
+@@ -1656,17 +1741,17 @@ ServiceWorkerPrivate::NoteDeadServiceWor
+   mInfo = nullptr;
+   TerminateWorker();
+ }
+ 
+ void
+ ServiceWorkerPrivate::NoteStoppedControllingDocuments()
+ {
+   AssertIsOnMainThread();
+-  if (mIsPushWorker || mDebuggerCount) {
++  if (mIsPushOrSyncWorker || mDebuggerCount) {
+     return;
+   }
+ 
+   TerminateWorker();
+ }
+ 
+ void
+ ServiceWorkerPrivate::Activated()
+@@ -1794,18 +1879,19 @@ ServiceWorkerPrivate::TerminateWorkerCal
+ }
+ 
+ void
+ ServiceWorkerPrivate::RenewKeepAliveToken(WakeUpReason aWhy)
+ {
+   // We should have an active worker if we're renewing the keep alive token.
+   MOZ_ASSERT(mWorkerPrivate);
+ 
+-  if (aWhy == PushEvent || aWhy == PushSubscriptionChangeEvent) {
+-    mIsPushWorker = true;
++  if (aWhy == PushEvent || aWhy == PushSubscriptionChangeEvent ||
++      aWhy == SyncEvent) {
++    mIsPushOrSyncWorker = true;
+   }
+ 
+   // If there is at least one debugger attached to the worker, the idle worker
+   // timeout was canceled when the first debugger attached to the worker. It
+   // should not be reset until the last debugger detaches from the worker.
+   if (!mDebuggerCount) {
+     ResetIdleTimeout();
+   }
+diff --git a/dom/workers/ServiceWorkerPrivate.h b/dom/workers/ServiceWorkerPrivate.h
+--- a/dom/workers/ServiceWorkerPrivate.h
++++ b/dom/workers/ServiceWorkerPrivate.h
+@@ -105,16 +105,21 @@ public:
+                              const nsAString& aScope);
+ 
+   nsresult
+   SendFetchEvent(nsIInterceptedChannel* aChannel,
+                  nsILoadGroup* aLoadGroup,
+                  const nsAString& aDocumentId,
+                  bool aIsReload);
+ 
++  nsresult
++  SendSyncEvent(const nsAString& aTag,
++                const bool aLastChance,
++                ServiceWorkerRegistrationInfo* aRegistration);
++
+   void
+   StoreISupports(nsISupports* aSupports);
+ 
+   void
+   RemoveISupports(nsISupports* aSupports);
+ 
+   // This will terminate the current running worker thread and drop the
+   // workerPrivate reference.
+@@ -145,17 +150,18 @@ public:
+ private:
+   enum WakeUpReason {
+     FetchEvent = 0,
+     PushEvent,
+     PushSubscriptionChangeEvent,
+     MessageEvent,
+     NotificationClickEvent,
+     LifeCycleEvent,
+-    AttachEvent
++    AttachEvent,
++    SyncEvent
+   };
+ 
+   // Timer callbacks
+   static void
+   NoteIdleWorkerCallback(nsITimer* aTimer, void* aPrivate);
+ 
+   static void
+   TerminateWorkerCallback(nsITimer* aTimer, void *aPrivate);
+@@ -188,20 +194,20 @@ private:
+ 
+   // The WorkerPrivate object can only be closed by this class or by the
+   // RuntimeService class if gecko is shutting down. Closing the worker
+   // multiple times is OK, since the second attempt will be a no-op.
+   RefPtr<WorkerPrivate> mWorkerPrivate;
+ 
+   nsCOMPtr<nsITimer> mIdleWorkerTimer;
+ 
+-  // We keep track if this worker received any push events since it was last
+-  // woken up. The flag is reset to false every time a new WorkerPrivate
+-  // is created.
+-  bool mIsPushWorker;
++  // We keep track if this worker received any push or sync events since it
++  // was last woken up. The flag is reset to false every time a new
++  // WorkerPrivate is created.
++  bool mIsPushOrSyncWorker;
+ 
+   // We keep a token for |dom.serviceWorkers.idle_timeout| seconds to give the
+   // worker a grace period after each event.
+   RefPtr<KeepAliveToken> mKeepAliveToken;
+ 
+   uint64_t mDebuggerCount;
+ 
+   uint64_t mTokenCount;
+diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWorkerRegistration.cpp
+--- a/dom/workers/ServiceWorkerRegistration.cpp
++++ b/dom/workers/ServiceWorkerRegistration.cpp
+@@ -807,17 +807,17 @@ ServiceWorkerRegistrationMainThread::Get
+ 
+     nsCOMPtr<nsIPrincipal> principal = document->NodePrincipal();
+     if (!principal) {
+       aRv.Throw(NS_ERROR_FAILURE);
+       return nullptr;
+     }
+ 
+     mSyncManager = SyncManager::CreateOnMainThread(globalObject, principal,
+-                                                   aRv);
++                                                   mScope, aRv);
+   }
+ 
+   return mSyncManager;
+ }
+ 
+ ////////////////////////////////////////////////////
+ // Worker Thread implementation
+ class WorkerListener final : public ServiceWorkerRegistrationListener
+@@ -1258,16 +1258,17 @@ ServiceWorkerRegistrationWorkerThread::G
+ #endif /* ! MOZ_SIMPLEPUSH */
+ }
+ 
+ SyncManager*
+ ServiceWorkerRegistrationWorkerThread::GetSync(ErrorResult& aRv)
+ {
+   if (!mSyncManager) {
+     mSyncManager = SyncManager::CreateOnWorker(mWorkerPrivate->GlobalScope(),
+-                                               mWorkerPrivate);
++                                               mWorkerPrivate,
++                                               mScope);
+   }
+ 
+   return mSyncManager;
+ }
+ 
+ } // dom namespace
+ } // mozilla namespace
