@@ -56,7 +56,20 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
 diff --git a/dom/backgroundsync/BackgroundSync.h b/dom/backgroundsync/BackgroundSync.h
 --- a/dom/backgroundsync/BackgroundSync.h
 +++ b/dom/backgroundsync/BackgroundSync.h
-@@ -39,17 +39,18 @@ public:
+@@ -27,29 +27,30 @@ namespace dom {
+ 
+ namespace workers {
+   class WorkerPrivate;
+ } // namespace workers
+ 
+ class Promise;
+ 
+ class BackgroundSync final : public nsISupports
+-                        , public nsWrapperCache
++                           , public nsWrapperCache
+ {
+ public:
+   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
    NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(BackgroundSync)
  
    static already_AddRefed<BackgroundSync>
