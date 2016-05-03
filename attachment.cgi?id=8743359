@@ -1,12 +1,40 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  3b7fef312cd48ff7f49cd171356733104b250efe
+# Parent  9fa7a125700b41fd5099b359ebc070e947043eb2
 Bug 1217544 - Implement one-off BackgroundSync API. Part 2: ServiceWorkerRegistration. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
 --- a/dom/backgroundsync/BackgroundSync.cpp
 +++ b/dom/backgroundsync/BackgroundSync.cpp
-@@ -82,17 +82,17 @@ BackgroundSync::WrapObject(JSContext* aC
+@@ -44,24 +44,25 @@ BackgroundSync::CreateOnMainThread(nsIGl
+   }
+ 
+   RefPtr<BackgroundSync> ref = new BackgroundSync(aGlobal, principalInfo);
+   return ref.forget();
+ }
+ 
+ // static
+ already_AddRefed<BackgroundSync>
+-BackgroundSync::CreateOnWorker(WorkerPrivate* aWorkerPrivate)
++BackgroundSync::CreateOnWorker(nsIGlobalObject* aGlobal,
++                               WorkerPrivate* aWorkerPrivate)
+ {
+   MOZ_ASSERT(aWorkerPrivate);
+   aWorkerPrivate->AssertIsOnWorkerThread();
+ 
+   const PrincipalInfo& principalInfo = aWorkerPrivate->GetPrincipalInfo();
+ 
+-  RefPtr<BackgroundSync> ref = new BackgroundSync(nullptr,
++  RefPtr<BackgroundSync> ref = new BackgroundSync(aGlobal,
+                                                   principalInfo);
+   return ref.forget();
+ }
+ 
+ BackgroundSync::BackgroundSync(nsIGlobalObject* aGlobal,
+                                const PrincipalInfo& aPrincipalInfo)
+   : mGlobal(aGlobal)
+   , mPrincipalInfo(new PrincipalInfo(aPrincipalInfo))
+@@ -82,17 +83,17 @@ BackgroundSync::WrapObject(JSContext* aC
  bool
  BackgroundSync::PrefEnabled(JSContext* aCx, JSObject* aObj)
  {
@@ -198,7 +226,7 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
 +{
 +  if (!mBackgroundSync) {
 +    mBackgroundSync = BackgroundSync::CreateOnWorker(mWorkerPrivate->GlobalScope(),
-+                                               mWorkerPrivate);
++                                                     mWorkerPrivate);
 +  }
 +
 +  return mBackgroundSync;
