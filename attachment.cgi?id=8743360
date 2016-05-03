@@ -1,12 +1,12 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  dec8e9207c9a61f9d74660fa6e9d1d1235789495
+# Parent  1aa50f418562478d5fba5929ed8defe0b187c60a
 Bug 1217544 - Implement one-off BackgroundSync API. Part 3: IPC. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
 --- a/dom/backgroundsync/BackgroundSync.cpp
 +++ b/dom/backgroundsync/BackgroundSync.cpp
-@@ -1,85 +1,286 @@
+@@ -1,86 +1,286 @@
  /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
  /* vim: set ts=8 sts=2 et sw=2 tw=80: */
  /* This Source Code Form is subject to the terms of the Mozilla Public
@@ -151,16 +151,13 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
 +  }
 +};
 +
-+
  // BackgroundSync
  
  // static
  already_AddRefed<BackgroundSync>
  BackgroundSync::CreateOnMainThread(nsIGlobalObject* aGlobal,
--                                nsIPrincipal* aPrincipal,
--                                ErrorResult& aRv)
-+                                   nsIPrincipal* aPrincipal,
-+                                   ErrorResult& aRv)
+                                    nsIPrincipal* aPrincipal,
+                                    ErrorResult& aRv)
  {
    MOZ_ASSERT(aGlobal);
    MOZ_ASSERT(aPrincipal);
@@ -208,7 +205,8 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
  
    const PrincipalInfo& principalInfo = aWorkerPrivate->GetPrincipalInfo();
  
-   RefPtr<BackgroundSync> ref = new BackgroundSync(aGlobal, principalInfo);
+   RefPtr<BackgroundSync> ref = new BackgroundSync(aGlobal,
+                                                   principalInfo);
 +
 +  ref->mWorkerFeature = new BackgroundSyncFeature(ref);
 +  if (NS_WARN_IF(!aWorkerPrivate->AddFeature(ref->mWorkerFeature))) {
@@ -220,11 +218,10 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
  }
  
  BackgroundSync::BackgroundSync(nsIGlobalObject* aGlobal,
--                         const PrincipalInfo& aPrincipalInfo)
+                                const PrincipalInfo& aPrincipalInfo)
 -  : mGlobal(aGlobal)
 -  , mPrincipalInfo(new PrincipalInfo(aPrincipalInfo))
 -{}
-+                               const PrincipalInfo& aPrincipalInfo)
 +  : mInnerID(0)
 +  , mGlobal(aGlobal)
 +  , mShuttingDown(false)
@@ -253,7 +250,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
 +  MOZ_ASSERT(!mWorkerFeature);
 +  MOZ_ASSERT(!mActor);
 +}
- 
++
 +bool
 +BackgroundSync::IsBackgroundSyncThread() {
 +  return mThread == nsCOMPtr<nsIThread>(do_GetCurrentThread());
@@ -287,7 +284,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
 +
 +  mPendingOperations.Clear();
 +}
-+ 
+ 
  // Bindings methods.
  
  JSObject*
@@ -303,7 +300,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
  BackgroundSync::PrefEnabled(JSContext* aCx, JSObject* aObj)
  {
    using mozilla::dom::workers::WorkerPrivate;
-@@ -96,42 +297,126 @@ BackgroundSync::PrefEnabled(JSContext* a
+@@ -96,42 +296,126 @@ BackgroundSync::PrefEnabled(JSContext* a
    WorkerPrivate* workerPrivate = GetWorkerPrivateFromContext(aCx);
    if (!workerPrivate) {
      return false;
@@ -441,31 +438,24 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
 diff --git a/dom/backgroundsync/BackgroundSync.h b/dom/backgroundsync/BackgroundSync.h
 --- a/dom/backgroundsync/BackgroundSync.h
 +++ b/dom/backgroundsync/BackgroundSync.h
-@@ -2,49 +2,61 @@
- /* vim: set ts=8 sts=2 et sw=2 tw=80: */
- /* This Source Code Form is subject to the terms of the Mozilla Public
-  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+@@ -5,44 +5,57 @@
   * You can obtain one at http://mozilla.org/MPL/2.0/. */
  
  #ifndef mozilla_dom_BackgroundSync_h
  #define mozilla_dom_BackgroundSync_h
  
+ #include "jsapi.h"
+ #include "mozilla/AlreadyAddRefed.h"
+ #include "mozilla/ErrorResult.h"
 +#include "mozilla/dom/BackgroundSyncIPCTypes.h"
-+
+ #include "mozilla/dom/BindingDeclarations.h"
+ #include "nsCOMPtr.h"
 +#include "nsIIPCBackgroundChildCreateCallback.h"
 +#include "nsIObserver.h"
- #include "nsIPrincipal.h"
  #include "nsWrapperCache.h"
  
- #include "mozilla/AlreadyAddRefed.h"
-+#include "mozilla/dom/BindingDeclarations.h"
- #include "mozilla/ErrorResult.h"
--#include "mozilla/dom/BindingDeclarations.h"
- 
- #include "nsCOMPtr.h"
- #include "jsapi.h"
- 
  class nsIGlobalObject;
+ class nsIPrincipal;
  
  namespace mozilla {
  
@@ -481,26 +471,25 @@ diff --git a/dom/backgroundsync/BackgroundSync.h b/dom/backgroundsync/Background
  } // namespace workers
  
  class Promise;
+-
+-class BackgroundSync final : public nsISupports
 +class BackgroundSyncChild;
 +class SyncOpRunnable;
 + 
 +class BackgroundSync final : public nsIIPCBackgroundChildCreateCallback
 +                           , public nsIObserver
-+                           , public nsWrapperCache
-+{
+                            , public nsWrapperCache
+ {
 +  NS_DECL_NSIIPCBACKGROUNDCHILDCREATECALLBACK
 +  NS_DECL_NSIOBSERVER
- 
--class BackgroundSync final : public nsISupports
--                        , public nsWrapperCache
--{
++
  public:
    NS_DECL_CYCLE_COLLECTING_ISUPPORTS
--  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(BackgroundSync)
--
+   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(BackgroundSync)
+ 
 +  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_AMBIGUOUS(
 +      BackgroundSync, nsIIPCBackgroundChildCreateCallback)
-+ 
++
    static already_AddRefed<BackgroundSync>
    CreateOnMainThread(nsIGlobalObject* aGlobal,
                       nsIPrincipal* aPrincipal,
@@ -509,7 +498,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.h b/dom/backgroundsync/Background
    static already_AddRefed<BackgroundSync>
    CreateOnWorker(nsIGlobalObject* aGlobal,
                   workers::WorkerPrivate* aWorkerPrivate);
-@@ -61,28 +73,46 @@ public:
+@@ -58,28 +71,46 @@ public:
    JSObject*
    WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
  
@@ -527,7 +516,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.h b/dom/backgroundsync/Background
 +  void Shutdown();
  private:
    BackgroundSync(nsIGlobalObject* aGlobal,
-               const mozilla::ipc::PrincipalInfo& aPrincipalInfo);
+                  const mozilla::ipc::PrincipalInfo& aPrincipalInfo);
  
    ~BackgroundSync();
  
@@ -1287,7 +1276,7 @@ diff --git a/ipc/glue/PBackground.ipdl b/ipc/glue/PBackground.ipdl
 diff --git a/ipc/glue/moz.build b/ipc/glue/moz.build
 --- a/ipc/glue/moz.build
 +++ b/ipc/glue/moz.build
-@@ -141,16 +141,17 @@ if CONFIG['_MSC_VER']:
+@@ -142,16 +142,17 @@ if CONFIG['_MSC_VER']:
      # 'reinterpret_cast': conversion from 'DWORD' to 'HANDLE' of greater size
      SOURCES['BackgroundChildImpl.cpp'].flags += ['-wd4312']
      SOURCES['BackgroundParentImpl.cpp'].flags += ['-wd4312']
