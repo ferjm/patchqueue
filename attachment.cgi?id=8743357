@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  e6fa15a5e1d7699fc95f6e66256de4e04c3e9ff5
+# Parent  ed7ae11297d3004257a98124d80cab8f34f30764
 Bug 1217544 - Implement one-off BackgroundSync API. Part 1: BackgroundSync interface. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
@@ -261,8 +261,7 @@ new file mode 100644
 diff --git a/dom/moz.build b/dom/moz.build
 --- a/dom/moz.build
 +++ b/dom/moz.build
-@@ -37,16 +37,17 @@ interfaces = [
- if not CONFIG['MOZ_SIMPLEPUSH']:
+@@ -38,16 +38,17 @@ if not CONFIG['MOZ_SIMPLEPUSH']:
      interfaces += ['push']
  
  DIRS += ['interfaces/' + i for i in interfaces]
@@ -270,15 +269,16 @@ diff --git a/dom/moz.build b/dom/moz.build
  DIRS += [
      'animation',
      'apps',
-+    'backgroundsync',
      'base',
++    'backgroundsync',
      'bluetooth',
      'activities',
      'archivereader',
-     'requestsync',
      'bindings',
      'battery',
      'browser-element',
+     'cache',
+     'canvas',
 diff --git a/dom/tests/mochitest/general/test_interfaces.html b/dom/tests/mochitest/general/test_interfaces.html
 --- a/dom/tests/mochitest/general/test_interfaces.html
 +++ b/dom/tests/mochitest/general/test_interfaces.html
