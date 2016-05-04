@@ -438,7 +438,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
 diff --git a/dom/backgroundsync/BackgroundSync.h b/dom/backgroundsync/BackgroundSync.h
 --- a/dom/backgroundsync/BackgroundSync.h
 +++ b/dom/backgroundsync/BackgroundSync.h
-@@ -5,44 +5,57 @@
+@@ -5,43 +5,54 @@
   * You can obtain one at http://mozilla.org/MPL/2.0/. */
  
  #ifndef mozilla_dom_BackgroundSync_h
@@ -485,11 +485,10 @@ diff --git a/dom/backgroundsync/BackgroundSync.h b/dom/backgroundsync/Background
 +
  public:
    NS_DECL_CYCLE_COLLECTING_ISUPPORTS
-   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(BackgroundSync)
- 
+-  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(BackgroundSync)
 +  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_AMBIGUOUS(
 +      BackgroundSync, nsIIPCBackgroundChildCreateCallback)
-+
+ 
    static already_AddRefed<BackgroundSync>
    CreateOnMainThread(nsIGlobalObject* aGlobal,
                       nsIPrincipal* aPrincipal,
@@ -497,8 +496,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.h b/dom/backgroundsync/Background
  
    static already_AddRefed<BackgroundSync>
    CreateOnWorker(nsIGlobalObject* aGlobal,
-                  workers::WorkerPrivate* aWorkerPrivate);
-@@ -58,28 +71,46 @@ public:
+@@ -58,28 +69,46 @@ public:
    JSObject*
    WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
  
