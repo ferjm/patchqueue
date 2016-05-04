@@ -1,4 +1,5 @@
-79d78c1c15a2c247c6c8b4f5274ccfbd77da7973:attachment.cgi?id=8743357
-eef45beea349246c38cfcab08ac23b73b173cce3:attachment.cgi?id=8743359
-c35f352400054fbbcf3bb907ab66042c5c3f5b5d:attachment.cgi?id=8743360
-0999d3831f2a03432c01a6bdf2bdd64d24779a26:attachment.cgi?id=8743362
+56832f7cf53317d8fe0994027e89cda0caf54d96:bug1217544.background.sync.part1.webidl.patch
+61ce601adb84ebe467b82173fdd5277341245ffb:bug1217544.background.sync.part2.serviceworkerregistration.patch
+4e2123d5b51f7a72ed6b17c40a4e311ad7a227b4:bug1217544.background.sync.part3.ipc.patch
+264cc148309eed356129b01b4246e7db76787ac9:bug1217544.background.sync.part4.syncevent.patch
+04b33e08583c2ee90c2c9f5b398fbbe2d53fde80:bug1217544.background.sync.part5.managerid.patch

@@ -1,45 +1,756 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  be85666950313b8af84b8cbf4ac44bb376dcd0a9
+# Parent  1aa50f418562478d5fba5929ed8defe0b187c60a
 Bug 1217544 - Implement one-off BackgroundSync API. Part 3: IPC. r=baku
 
-diff --git a/dom/sync/PSyncManager.ipdl b/dom/sync/PSyncManager.ipdl
+diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
+--- a/dom/backgroundsync/BackgroundSync.cpp
++++ b/dom/backgroundsync/BackgroundSync.cpp
+@@ -1,86 +1,286 @@
+ /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+ /* vim: set ts=8 sts=2 et sw=2 tw=80: */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+  * You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "BackgroundSync.h"
++#include "BackgroundSyncChild.h"
+ 
+ #include "mozilla/dom/Promise.h"
+ #include "mozilla/dom/PromiseWorkerProxy.h"
++#include "mozilla/dom/BackgroundSyncIPCTypes.h"
+ #include "mozilla/dom/BackgroundSyncBinding.h"
+ #include "mozilla/ipc/BackgroundChild.h"
+ #include "mozilla/ipc/BackgroundUtils.h"
+ #include "mozilla/ipc/PBackgroundChild.h"
++#include "mozilla/unused.h"
+ #include "mozilla/Preferences.h"
++#include "nsISupportsPrimitives.h"
+ #include "nsIGlobalObject.h"
+ #include "WorkerPrivate.h"
+ 
+ namespace mozilla {
+ 
+ using namespace ipc;
+ 
+ namespace dom {
+ 
+ using namespace workers;
+ 
++// Helpers
++
++class SyncOpRunnable final : public nsIRunnable,
++                             public nsICancelableRunnable
++{
++public:
++  NS_DECL_ISUPPORTS
++
++  SyncOpRunnable(Promise* aPromise, nsAutoPtr<SyncOp>& aOp)
++    : mPromise(aPromise)
++    , mOp(aOp)
++  {
++    MOZ_ASSERT(mPromise);
++    MOZ_ASSERT(mOp);
++  }
++
++  void SetActor(BackgroundSyncChild* aActor)
++  {
++    MOZ_ASSERT(!mActor);
++    MOZ_ASSERT(aActor);
++    mActor = aActor;
++  }
++
++  NS_IMETHODIMP Run() override
++  {
++    MOZ_ASSERT(mActor);
++    if (mActor->IsActorDestroyed()) {
++      return NS_OK;
++    }
++
++    return mActor->ExecuteOp(mPromise, mOp);
++  }
++
++  NS_IMETHODIMP Cancel() override
++  {
++    mActor = nullptr;
++    mPromise = nullptr;
++    mOp = nullptr;
++    return NS_OK;
++  }
++
++private:
++  ~SyncOpRunnable() {}
++
++  RefPtr<Promise> mPromise;
++  nsAutoPtr<SyncOp> mOp;
++  RefPtr<BackgroundSyncChild> mActor;
++};
++
++NS_IMPL_ISUPPORTS(SyncOpRunnable, nsICancelableRunnable, nsIRunnable)
++
++class TeardownRunnable final : public nsIRunnable,
++                               public nsICancelableRunnable
++{
++public:
++  NS_DECL_ISUPPORTS
++
++  explicit TeardownRunnable(BackgroundSyncChild* aActor)
++    : mActor(aActor)
++  {
++    MOZ_ASSERT(mActor);
++  }
++
++  NS_IMETHODIMP Run() override
++  {
++    MOZ_ASSERT(mActor);
++    if (!mActor->IsActorDestroyed()) {
++      mActor->SendShutdown();
++    }
++    return NS_OK;
++  }
++
++  NS_IMETHODIMP Cancel() override
++  {
++    mActor = nullptr;
++    return NS_OK;
++  }
++
++private:
++  ~TeardownRunnable() {};
++
++  RefPtr<BackgroundSyncChild> mActor;
++};
++
++NS_IMPL_ISUPPORTS(TeardownRunnable, nsICancelableRunnable, nsIRunnable)
++
++class BackgroundSyncFeature final : public workers::WorkerFeature
++{
++  // The manager keeps alive this feature.
++  BackgroundSync* MOZ_NON_OWNING_REF mManager;
++
++public:
++  explicit BackgroundSyncFeature(BackgroundSync* aManager)
++    : mManager(aManager)
++  {
++    MOZ_ASSERT(aManager);
++    MOZ_COUNT_CTOR(BackgroundSyncFeature);
++  }
++
++  virtual bool Notify(workers::Status aStatus) override
++  {
++    if (aStatus >= Closing) {
++      mManager->Shutdown();
++    }
++    return true;
++  }
++
++private:
++  ~BackgroundSyncFeature()
++  {
++    MOZ_COUNT_CTOR(BackgroundSyncFeature);
++  }
++};
++
+ // BackgroundSync
+ 
+ // static
+ already_AddRefed<BackgroundSync>
+ BackgroundSync::CreateOnMainThread(nsIGlobalObject* aGlobal,
+                                    nsIPrincipal* aPrincipal,
+                                    ErrorResult& aRv)
+ {
+   MOZ_ASSERT(aGlobal);
+   MOZ_ASSERT(aPrincipal);
+   MOZ_ASSERT(NS_IsMainThread());
+ 
+   PrincipalInfo principalInfo;
+-  nsresult rv = PrincipalToPrincipalInfo(aPrincipal, &principalInfo);
+-  if (NS_WARN_IF(NS_FAILED(rv))) {
+-    aRv.Throw(rv);
++  aRv = PrincipalToPrincipalInfo(aPrincipal, &principalInfo);
++  if (NS_WARN_IF(aRv.Failed())) {
+     return nullptr;
+   }
+ 
+   RefPtr<BackgroundSync> ref = new BackgroundSync(aGlobal, principalInfo);
++
++  // Register as observer for inner-window-destroyed.
++  nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
++  if (obs) {
++    aRv = obs->AddObserver(ref, "inner-window-destroyed",
++                           false /* ownsWeak */);
++    if (NS_WARN_IF(aRv.Failed())) {
++      return nullptr;
++    }
++  } else {
++    aRv.Throw(NS_ERROR_UNEXPECTED);
++    return nullptr;
++  }
++
++  nsCOMPtr<nsPIDOMWindowInner> window = do_QueryInterface(aGlobal);
++  MOZ_ASSERT(window);
++  MOZ_ASSERT(window->IsInnerWindow());
++  ref->mInnerID = window->WindowID();
++
+   return ref.forget();
+ }
+ 
+ // static
+ already_AddRefed<BackgroundSync>
+ BackgroundSync::CreateOnWorker(nsIGlobalObject* aGlobal,
+                                WorkerPrivate* aWorkerPrivate)
+ {
+   MOZ_ASSERT(aWorkerPrivate);
+   aWorkerPrivate->AssertIsOnWorkerThread();
+ 
+   const PrincipalInfo& principalInfo = aWorkerPrivate->GetPrincipalInfo();
+ 
+   RefPtr<BackgroundSync> ref = new BackgroundSync(aGlobal,
+                                                   principalInfo);
++
++  ref->mWorkerFeature = new BackgroundSyncFeature(ref);
++  if (NS_WARN_IF(!aWorkerPrivate->AddFeature(ref->mWorkerFeature))) {
++    ref->mWorkerFeature = nullptr;
++    return nullptr;
++  }
++
+   return ref.forget();
+ }
+ 
+ BackgroundSync::BackgroundSync(nsIGlobalObject* aGlobal,
+                                const PrincipalInfo& aPrincipalInfo)
+-  : mGlobal(aGlobal)
+-  , mPrincipalInfo(new PrincipalInfo(aPrincipalInfo))
+-{}
++  : mInnerID(0)
++  , mGlobal(aGlobal)
++  , mShuttingDown(false)
++  , mPrincipalInfo(MakeUnique<PrincipalInfo>(aPrincipalInfo))
++{
++#ifdef DEBUG
++  mThread = do_GetCurrentThread();
++#endif
++
++  MOZ_ASSERT(aGlobal);
++
++  // Register this component to PBackground.
++  PBackgroundChild* actor = BackgroundChild::GetForCurrentThread();
++  if (actor) {
++    ActorCreated(actor);
++  } else {
++    MOZ_ALWAYS_TRUE(BackgroundChild::GetOrCreateForCurrentThread(this));
++  }
++}
+ 
+ BackgroundSync::~BackgroundSync()
+-{}
++{
++  MOZ_ASSERT(IsBackgroundSyncThread());
++  Shutdown();
++  MOZ_ASSERT(!mWorkerFeature);
++  MOZ_ASSERT(!mActor);
++}
++
++bool
++BackgroundSync::IsBackgroundSyncThread() {
++  return mThread == nsCOMPtr<nsIThread>(do_GetCurrentThread());
++};
++
++void
++BackgroundSync::Shutdown()
++{
++  MOZ_ASSERT(IsBackgroundSyncThread());
++
++  mShuttingDown = true;
++
++  nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
++  if (obs) {
++    obs->RemoveObserver(this, "inner-window-destroyed");
++  }
++
++  if (mWorkerFeature) {
++    WorkerPrivate* workerPrivate = GetCurrentThreadWorkerPrivate();
++    MOZ_ASSERT(workerPrivate);
++    workerPrivate->AssertIsOnWorkerThread();
++    workerPrivate->RemoveFeature(mWorkerFeature);
++    mWorkerFeature = nullptr;
++  }
++
++  if (mActor) {
++    RefPtr<TeardownRunnable> runnable = new TeardownRunnable(mActor);
++    Unused << NS_WARN_IF(NS_FAILED(NS_DispatchToCurrentThread(runnable)));
++    mActor = nullptr;
++  }
++
++  mPendingOperations.Clear();
++}
+ 
+ // Bindings methods.
+ 
+ JSObject*
+ BackgroundSync::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
+ {
++  MOZ_ASSERT(IsBackgroundSyncThread());
++
+   return BackgroundSyncBinding::Wrap(aCx, this, aGivenProto);
+ }
+ 
+ // static
+ bool
+ BackgroundSync::PrefEnabled(JSContext* aCx, JSObject* aObj)
+ {
+   using mozilla::dom::workers::WorkerPrivate;
+@@ -96,42 +296,126 @@ BackgroundSync::PrefEnabled(JSContext* a
+   WorkerPrivate* workerPrivate = GetWorkerPrivateFromContext(aCx);
+   if (!workerPrivate) {
+     return false;
+   }
+ 
+   return workerPrivate->BackgroundSyncEnabled();
+ }
+ 
+-// WebIDL interace methods.
++// nsIIPCBackgroundChildCreateCallback methods.
++
++void
++BackgroundSync::ActorFailed()
++{
++  MOZ_CRASH("Failed to create a PBackgroundChild actor!");
++}
++
++void
++BackgroundSync::ActorCreated(PBackgroundChild* aActor)
++{
++  MOZ_ASSERT(IsBackgroundSyncThread());
++  MOZ_ASSERT(aActor);
++  MOZ_ASSERT(!mActor);
++
++  PBackgroundSyncChild* actor = aActor->SendPBackgroundSyncConstructor();
++  mActor = static_cast<BackgroundSyncChild*>(actor);
++  MOZ_ASSERT(mActor);
++
++  // Flush pending requests.
++  for (uint32_t i = 0, len = mPendingOperations.Length(); i < len; ++i) {
++    RefPtr<SyncOpRunnable> runnable = mPendingOperations[i];
++    MOZ_ASSERT(runnable);
++    runnable->SetActor(mActor);
++    if (NS_FAILED(NS_DispatchToCurrentThread(runnable))) {
++      NS_WARNING("Failed to dispatch to the current thread");
++      mPendingOperations.Clear();
++      return;
++    }
++  }
++  mPendingOperations.Clear();
++}
++
++// nsIObserver
++
++NS_IMETHODIMP
++BackgroundSync::Observe(nsISupports* aSubject,
++                        const char* aTopic,
++                        const char16_t* aData)
++{
++  MOZ_ASSERT(IsBackgroundSyncThread());
++  MOZ_ASSERT(NS_IsMainThread());
++  MOZ_ASSERT(!strcmp(aTopic, "inner-window-destroyed"));
++
++  nsCOMPtr<nsISupportsPRUint64> wrapper = do_QueryInterface(aSubject);
++  NS_ENSURE_TRUE(wrapper, NS_ERROR_FAILURE);
++
++  uint64_t innerID;
++  nsresult rv = wrapper->GetData(&innerID);
++  NS_ENSURE_SUCCESS(rv, rv);
++
++  if (innerID != mInnerID) {
++    return NS_OK;
++  }
++
++  Shutdown();
++
++  return NS_OK;
++}
+ 
+ already_AddRefed<Promise>
+-BackgroundSync::Register(const nsAString& aName, ErrorResult& aRv)
++BackgroundSync::ExecuteOp(const SyncOpArgs& aArgs, ErrorResult& aRv)
+ {
++  MOZ_ASSERT(IsBackgroundSyncThread());
++
+   RefPtr<Promise> p = Promise::Create(mGlobal, aRv);
+   if (NS_WARN_IF(aRv.Failed())) {
+     return nullptr;
+   }
+ 
++  nsAutoPtr<SyncOp> op(new SyncOp(*mPrincipalInfo, aArgs));
++  RefPtr<SyncOpRunnable> runnable = new SyncOpRunnable(p, op);
++
++  if (!mActor) {
++    mPendingOperations.AppendElement(runnable);
++    return p.forget();
++  }
++
++  runnable->SetActor(mActor);
++  nsresult rv = NS_DispatchToCurrentThread(runnable);
++  if (NS_WARN_IF(NS_FAILED(rv))) {
++    p->MaybeReject(rv);
++  }
++
+   return p.forget();
+ }
+ 
++// WebIDL interface methods.
++
++already_AddRefed<Promise>
++BackgroundSync::Register(const nsAString& aTag, ErrorResult& aRv)
++{
++  MOZ_ASSERT(IsBackgroundSyncThread());
++
++  const SyncRegisterArgs args((nsString(aTag)));
++  return ExecuteOp(SyncOpArgs(args), aRv);
++}
++
+ already_AddRefed<Promise>
+ BackgroundSync::GetTags(ErrorResult& aRv)
+ {
+-  RefPtr<Promise> p = Promise::Create(mGlobal, aRv);
+-  if (NS_WARN_IF(aRv.Failed())) {
+-    return nullptr;
+-  }
++  MOZ_ASSERT(IsBackgroundSyncThread());
+ 
+-  return p.forget();
++  const SyncGetTagsArgs args;
++  return ExecuteOp(SyncOpArgs(args), aRv);
+ }
+ 
+ NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(BackgroundSync, mGlobal)
+ NS_IMPL_CYCLE_COLLECTING_ADDREF(BackgroundSync)
+ NS_IMPL_CYCLE_COLLECTING_RELEASE(BackgroundSync)
+ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(BackgroundSync)
+   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
+-  NS_INTERFACE_MAP_ENTRY(nsISupports)
++  NS_INTERFACE_MAP_ENTRY(nsIIPCBackgroundChildCreateCallback)
++  NS_INTERFACE_MAP_ENTRY(nsIObserver)
+ NS_INTERFACE_MAP_END
+ 
+ } // namespace dom
+ } // namespace mozilla
+diff --git a/dom/backgroundsync/BackgroundSync.h b/dom/backgroundsync/BackgroundSync.h
+--- a/dom/backgroundsync/BackgroundSync.h
++++ b/dom/backgroundsync/BackgroundSync.h
+@@ -5,43 +5,54 @@
+  * You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #ifndef mozilla_dom_BackgroundSync_h
+ #define mozilla_dom_BackgroundSync_h
+ 
+ #include "jsapi.h"
+ #include "mozilla/AlreadyAddRefed.h"
+ #include "mozilla/ErrorResult.h"
++#include "mozilla/dom/BackgroundSyncIPCTypes.h"
+ #include "mozilla/dom/BindingDeclarations.h"
+ #include "nsCOMPtr.h"
++#include "nsIIPCBackgroundChildCreateCallback.h"
++#include "nsIObserver.h"
+ #include "nsWrapperCache.h"
+ 
+ class nsIGlobalObject;
+ class nsIPrincipal;
+ 
+ namespace mozilla {
+ 
+ namespace ipc {
+   class PrincipalInfo;
+ } // namespace ipc
+ 
+ namespace dom {
+ 
+ namespace workers {
++  class WorkerFeature;
+   class WorkerPrivate;
+ } // namespace workers
+ 
+ class Promise;
+-
+-class BackgroundSync final : public nsISupports
++class BackgroundSyncChild;
++class SyncOpRunnable;
++ 
++class BackgroundSync final : public nsIIPCBackgroundChildCreateCallback
++                           , public nsIObserver
+                            , public nsWrapperCache
+ {
++  NS_DECL_NSIIPCBACKGROUNDCHILDCREATECALLBACK
++  NS_DECL_NSIOBSERVER
++
+ public:
+   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+-  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(BackgroundSync)
++  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_AMBIGUOUS(
++      BackgroundSync, nsIIPCBackgroundChildCreateCallback)
+ 
+   static already_AddRefed<BackgroundSync>
+   CreateOnMainThread(nsIGlobalObject* aGlobal,
+                      nsIPrincipal* aPrincipal,
+                      ErrorResult& aRv);
+ 
+   static already_AddRefed<BackgroundSync>
+   CreateOnWorker(nsIGlobalObject* aGlobal,
+@@ -58,28 +69,46 @@ public:
+   JSObject*
+   WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
+ 
+   static bool PrefEnabled(JSContext* aCx, JSObject* aObj);
+ 
+   // WebIDL interface methods.
+ 
+   already_AddRefed<Promise>
+-  Register(const nsAString& aName, ErrorResult& aRv);
++  Register(const nsAString& aTag, ErrorResult& aRv);
+ 
+   already_AddRefed<Promise>
+   GetTags(ErrorResult& aRv);
+ 
++  void Shutdown();
+ private:
+   BackgroundSync(nsIGlobalObject* aGlobal,
+                  const mozilla::ipc::PrincipalInfo& aPrincipalInfo);
+ 
+   ~BackgroundSync();
+ 
++  bool IsBackgroundSyncThread();
++
++  already_AddRefed<Promise>
++  ExecuteOp(const SyncOpArgs& aArgs, ErrorResult& aRv);
++
++  uint64_t mInnerID;
++
+   nsCOMPtr<nsIGlobalObject> mGlobal;
+ 
+-  nsAutoPtr<mozilla::ipc::PrincipalInfo> mPrincipalInfo;
++  nsAutoPtr<workers::WorkerFeature> mWorkerFeature;
++
++  RefPtr<BackgroundSyncChild> mActor;
++
++  bool mShuttingDown;
++
++  UniquePtr<mozilla::ipc::PrincipalInfo> mPrincipalInfo;
++
++  nsCOMPtr<nsIThread> mThread;
++
++  nsTArray<RefPtr<SyncOpRunnable>> mPendingOperations;
+ };
+ 
+ } // namespace dom
+ } // namespace mozilla
+ 
+ #endif // mozilla_dom_BackgroundSync_h
+diff --git a/dom/backgroundsync/BackgroundSyncChild.cpp b/dom/backgroundsync/BackgroundSyncChild.cpp
 new file mode 100644
 --- /dev/null
-+++ b/dom/sync/PSyncManager.ipdl
-@@ -0,0 +1,28 @@
++++ b/dom/backgroundsync/BackgroundSyncChild.cpp
+@@ -0,0 +1,130 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
-+ * License, v. 2.0. If a copy of the MPL was not distributed with this
-+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
++ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 +
-+include protocol PBackground;
++#include "BackgroundSyncChild.h"
 +
-+include SyncIPCTypes;
-+
-+using struct nsID from "nsID.h";
++#include "mozilla/unused.h"
++#include "mozilla/ipc/PBackgroundChild.h"
 +
 +namespace mozilla {
++
++using namespace ipc;
++
 +namespace dom {
 +
-+protocol PSyncManager
++struct BackgroundSyncChild::PendingRequest final
 +{
-+  manager PBackground;
++  explicit PendingRequest(Promise* aPromise)
++    : mPromise(aPromise)
++  {}
 +
-+parent: // child -> parent messages
-+  async Request(nsID aRequestId, SyncOp aOp);
-+  async Shutdown();
++  RefPtr<Promise> mPromise;
++};
 +
-+child: // parent -> child messages
-+  async Response(nsID requestId, SyncOpResponse aResponse);
-+  async __delete__();
++BackgroundSyncChild::BackgroundSyncChild()
++  : mActorDestroyed(false)
++{
++}
++
++BackgroundSyncChild::~BackgroundSyncChild()
++{
++}
++
++void
++BackgroundSyncChild::ActorDestroy(ActorDestroyReason aWhy)
++{
++  mActorDestroyed = true;
++
++  // XXX Reject pending requests.
++/*  for (auto iter = mPendingRequests.Iter(); !iter.Done(); iter.Next()) {
++    PendingRequest* request = iter.Get();
++    if (NS_WARN_IF(!request)) {
++      continue;
++    }
++    request->mPromise->MaybeReject();
++  }
++*/
++  mPendingRequests.Clear();
++}
++
++nsresult
++BackgroundSyncChild::StorePendingRequest(Promise* aPromise, nsID& aID)
++{
++  nsresult rv;
++  nsCOMPtr<nsIUUIDGenerator> uuidGenerator =
++    do_GetService("@mozilla.org/uuid-generator;1", &rv);
++  NS_ENSURE_SUCCESS(rv, rv);
++
++  nsID id;
++  rv = uuidGenerator->GenerateUUIDInPlace(&id);
++  NS_ENSURE_SUCCESS(rv, rv);
++
++  PendingRequest* request = new PendingRequest(aPromise);
++  mPendingRequests.Put(id, request);
++
++  aID = id;
++
++  return NS_OK;
++}
++
++Promise*
++BackgroundSyncChild::GetPendingRequest(const nsID& aID)
++{
++  PendingRequest* request = mPendingRequests.Get(aID);
++  if (NS_WARN_IF(!request)) {
++    return nullptr;
++  }
++
++  RefPtr<Promise> promise = request->mPromise;
++
++  mPendingRequests.Remove(const_cast<nsID&>(aID));
++  return promise;
++}
++
++nsresult
++BackgroundSyncChild::ExecuteOp(Promise* aPromise, SyncOp* aOp)
++{
++  if (mActorDestroyed) {
++    return NS_OK;
++  }
++
++  nsID requestId;
++  nsresult rv = StorePendingRequest(aPromise, requestId);
++  NS_ENSURE_SUCCESS(rv, rv);
++
++  Unused << SendRequest(requestId, *aOp);
++
++  return NS_OK;
++}
++
++bool
++BackgroundSyncChild::RecvResponse(const nsID& aRequestId,
++                                  const SyncOpResponse& aResponse)
++{
++  Promise* p = GetPendingRequest(aRequestId);
++  if (!p) {
++    return false;
++  }
++
++  switch(aResponse.type()) {
++    case SyncOpResponse::TSyncRegisterResponse:
++      p->MaybeResolve(true);
++      return true;
++    case SyncOpResponse::TSyncGetTagsResponse:
++      p->MaybeResolve(aResponse.get_SyncGetTagsResponse().mTags());
++      return true;
++    case SyncOpResponse::TSyncOpError:
++      p->MaybeReject(
++          static_cast<nsresult>(aResponse.get_SyncOpError().mCode()));
++      return true;
++    default:
++      MOZ_CRASH("Unknown BackgroundSync response");
++      return false;
++  }
++}
++
++} // namespace dom
++} // namespace mozilla
+diff --git a/dom/backgroundsync/BackgroundSyncChild.h b/dom/backgroundsync/BackgroundSyncChild.h
+new file mode 100644
+--- /dev/null
++++ b/dom/backgroundsync/BackgroundSyncChild.h
+@@ -0,0 +1,62 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
++ * You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#ifndef mozilla_dom_BackgroundSyncChild_h
++#define mozilla_dom_BackgroundSyncChild_h
++
++#include "BackgroundSync.h"
++
++#include "mozilla/dom/PBackgroundSyncChild.h"
++
++#include "nsID.h"
++#include "nsClassHashtable.h"
++
++namespace mozilla {
++
++namespace ipc {
++class BackgroundChildImpl;
++} // namespace ipc
++
++namespace dom {
++
++class BackgroundSync;
++
++class BackgroundSyncChild final : public PBackgroundSyncChild
++{
++  friend class mozilla::ipc::BackgroundChildImpl;
++
++public:
++  NS_INLINE_DECL_REFCOUNTING(BackgroundSyncChild)
++
++  bool IsActorDestroyed() const
++  {
++    return mActorDestroyed;
++  }
++
++  nsresult ExecuteOp(Promise* aPromise, SyncOp* aOp);
++
++  virtual bool RecvResponse(const nsID& aRequestId,
++                            const SyncOpResponse& aResponse) override;
++
++private:
++  BackgroundSyncChild();
++  ~BackgroundSyncChild();
++
++  virtual void ActorDestroy(ActorDestroyReason aWhy) override;
++
++  nsresult StorePendingRequest(Promise* aPromise, nsID& aID);
++  Promise* GetPendingRequest(const nsID& aID);
++
++  bool mActorDestroyed;
++
++  struct PendingRequest;
++  nsClassHashtable<nsIDHashKey, PendingRequest> mPendingRequests;
 +};
 +
 +} // namespace dom
 +} // namespace mozilla
-diff --git a/dom/sync/SyncIPCTypes.ipdlh b/dom/sync/SyncIPCTypes.ipdlh
++
++#endif // mozilla_dom_BackgroundSyncChild_h
+diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh
 new file mode 100644
 --- /dev/null
-+++ b/dom/sync/SyncIPCTypes.ipdlh
++++ b/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh
 @@ -0,0 +1,54 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -95,759 +806,10 @@ new file mode 100644
 +
 +} // namespace dom
 +} // namespace mozilla
-diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
---- a/dom/sync/SyncManager.cpp
-+++ b/dom/sync/SyncManager.cpp
-@@ -1,85 +1,285 @@
- /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
- /* vim: set ts=8 sts=2 et sw=2 tw=80: */
- /* This Source Code Form is subject to the terms of the Mozilla Public
-  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
-  * You can obtain one at http://mozilla.org/MPL/2.0/. */
- 
- #include "SyncManager.h"
-+#include "SyncManagerChild.h"
- 
- #include "mozilla/dom/Promise.h"
- #include "mozilla/dom/PromiseWorkerProxy.h"
-+#include "mozilla/dom/SyncIPCTypes.h"
- #include "mozilla/dom/SyncManagerBinding.h"
- #include "mozilla/ipc/BackgroundChild.h"
- #include "mozilla/ipc/BackgroundUtils.h"
- #include "mozilla/ipc/PBackgroundChild.h"
- #include "mozilla/Preferences.h"
-+#include "mozilla/unused.h"
- #include "nsIGlobalObject.h"
-+#include "nsISupportsPrimitives.h"
- #include "WorkerPrivate.h"
- 
- namespace mozilla {
- 
- using namespace ipc;
- 
- namespace dom {
- 
- using namespace workers;
- 
-+// Helpers
-+
-+class SyncOpRunnable final : public nsIRunnable,
-+                             public nsICancelableRunnable
-+{
-+public:
-+  NS_DECL_ISUPPORTS
-+
-+  SyncOpRunnable(Promise* aPromise, nsAutoPtr<SyncOp>& aOp)
-+    : mPromise(aPromise)
-+    , mOp(aOp)
-+  {
-+    MOZ_ASSERT(mPromise);
-+    MOZ_ASSERT(mOp);
-+  }
-+
-+  void SetActor(SyncManagerChild* aActor)
-+  {
-+    MOZ_ASSERT(!mActor);
-+    MOZ_ASSERT(aActor);
-+    mActor = aActor;
-+  }
-+
-+  NS_IMETHODIMP Run() override
-+  {
-+    MOZ_ASSERT(mActor);
-+    if (mActor->IsActorDestroyed()) {
-+      return NS_OK;
-+    }
-+
-+    return mActor->ExecuteOp(mPromise, mOp);
-+  }
-+
-+  NS_IMETHODIMP Cancel() override
-+  {
-+    mActor = nullptr;
-+    mPromise = nullptr;
-+    mOp = nullptr;
-+    return NS_OK;
-+  }
-+
-+private:
-+  ~SyncOpRunnable() {}
-+
-+  RefPtr<Promise> mPromise;
-+  nsAutoPtr<SyncOp> mOp;
-+  RefPtr<SyncManagerChild> mActor;
-+};
-+
-+NS_IMPL_ISUPPORTS(SyncOpRunnable, nsICancelableRunnable, nsIRunnable)
-+
-+class TeardownRunnable final : public nsIRunnable,
-+                               public nsICancelableRunnable
-+{
-+public:
-+  NS_DECL_ISUPPORTS
-+
-+  explicit TeardownRunnable(SyncManagerChild* aActor)
-+    : mActor(aActor)
-+  {
-+    MOZ_ASSERT(mActor);
-+  }
-+
-+  NS_IMETHODIMP Run() override
-+  {
-+    MOZ_ASSERT(mActor);
-+    if (!mActor->IsActorDestroyed()) {
-+      mActor->SendShutdown();
-+    }
-+    return NS_OK;
-+  }
-+
-+  NS_IMETHODIMP Cancel() override
-+  {
-+    mActor = nullptr;
-+    return NS_OK;
-+  }
-+
-+private:
-+  ~TeardownRunnable() {};
-+
-+  RefPtr<SyncManagerChild> mActor;
-+};
-+
-+NS_IMPL_ISUPPORTS(TeardownRunnable, nsICancelableRunnable, nsIRunnable)
-+
-+class SyncManagerFeature final : public workers::WorkerFeature
-+{
-+  // The manager keeps alive this feature.
-+  SyncManager* MOZ_NON_OWNING_REF mManager;
-+
-+public:
-+  explicit SyncManagerFeature(SyncManager* aManager)
-+    : mManager(aManager)
-+  {
-+    MOZ_ASSERT(aManager);
-+    MOZ_COUNT_CTOR(SyncManagerFeature);
-+  }
-+
-+  virtual bool Notify(workers::Status aStatus) override
-+  {
-+    if (aStatus >= Closing) {
-+      mManager->Shutdown();
-+    }
-+    return true;
-+  }
-+
-+private:
-+  ~SyncManagerFeature()
-+  {
-+    MOZ_COUNT_CTOR(SyncManagerFeature);
-+  }
-+};
-+
- // SyncManager
- 
- // static
- already_AddRefed<SyncManager>
- SyncManager::CreateOnMainThread(nsIGlobalObject* aGlobal,
-                                 nsIPrincipal* aPrincipal,
-                                 ErrorResult& aRv)
- {
-   MOZ_ASSERT(aGlobal);
-   MOZ_ASSERT(aPrincipal);
-   MOZ_ASSERT(NS_IsMainThread());
- 
-   PrincipalInfo principalInfo;
--  nsresult rv = PrincipalToPrincipalInfo(aPrincipal, &principalInfo);
--  if (NS_WARN_IF(NS_FAILED(rv))) {
--    aRv.Throw(rv);
-+  aRv = PrincipalToPrincipalInfo(aPrincipal, &principalInfo);
-+  if (NS_WARN_IF(aRv.Failed())) {
-     return nullptr;
-   }
- 
-   RefPtr<SyncManager> ref = new SyncManager(aGlobal, principalInfo);
-+
-+  // Register as observer for inner-window-destroyed.
-+  nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
-+  if (obs) {
-+    aRv = obs->AddObserver(ref, "inner-window-destroyed",
-+                           false /* ownsWeak */);
-+    if (NS_WARN_IF(aRv.Failed())) {
-+      return nullptr;
-+    }
-+  } else {
-+    aRv.Throw(NS_ERROR_UNEXPECTED);
-+    return nullptr;
-+  }
-+
-+  nsCOMPtr<nsPIDOMWindowInner> window = do_QueryInterface(aGlobal);
-+  MOZ_ASSERT(window);
-+  MOZ_ASSERT(window->IsInnerWindow());
-+  ref->mInnerID = window->WindowID();
-+
-   return ref.forget();
- }
- 
- // static
- already_AddRefed<SyncManager>
- SyncManager::CreateOnWorker(nsIGlobalObject* aGlobal,
-                             WorkerPrivate* aWorkerPrivate)
- {
-   MOZ_ASSERT(aWorkerPrivate);
-   aWorkerPrivate->AssertIsOnWorkerThread();
- 
-   const PrincipalInfo& principalInfo = aWorkerPrivate->GetPrincipalInfo();
- 
-   RefPtr<SyncManager> ref = new SyncManager(aGlobal, principalInfo);
-+
-+  ref->mWorkerFeature = new SyncManagerFeature(ref);
-+  if (NS_WARN_IF(!aWorkerPrivate->AddFeature(ref->mWorkerFeature))) {
-+    ref->mWorkerFeature = nullptr;
-+    return nullptr;
-+  }
-+
-   return ref.forget();
- }
- 
- SyncManager::SyncManager(nsIGlobalObject* aGlobal,
-                          const PrincipalInfo& aPrincipalInfo)
--  : mGlobal(aGlobal)
--  , mPrincipalInfo(new PrincipalInfo(aPrincipalInfo))
--{}
-+  : mInnerID(0)
-+  , mGlobal(aGlobal)
-+  , mShuttingDown(false)
-+  , mPrincipalInfo(MakeUnique<PrincipalInfo>(aPrincipalInfo))
-+{
-+#ifdef DEBUG
-+  mThread = do_GetCurrentThread();
-+#endif
-+
-+  MOZ_ASSERT(aGlobal);
-+
-+  // Register this component to PBackground.
-+  PBackgroundChild* actor = BackgroundChild::GetForCurrentThread();
-+  if (actor) {
-+    ActorCreated(actor);
-+  } else {
-+    MOZ_ALWAYS_TRUE(BackgroundChild::GetOrCreateForCurrentThread(this));
-+  }
-+}
- 
- SyncManager::~SyncManager()
--{}
-+{
-+  MOZ_ASSERT(IsSyncManagerThread());
-+  Shutdown();
-+  MOZ_ASSERT(!mWorkerFeature);
-+  MOZ_ASSERT(!mActor);
-+}
-+
-+bool
-+SyncManager::IsSyncManagerThread() {
-+  return mThread == nsCOMPtr<nsIThread>(do_GetCurrentThread());
-+};
-+
-+void
-+SyncManager::Shutdown()
-+{
-+  MOZ_ASSERT(IsSyncManagerThread());
-+
-+  mShuttingDown = true;
-+
-+  nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
-+  if (obs) {
-+    obs->RemoveObserver(this, "inner-window-destroyed");
-+  }
-+
-+  if (mWorkerFeature) {
-+    WorkerPrivate* workerPrivate = GetCurrentThreadWorkerPrivate();
-+    MOZ_ASSERT(workerPrivate);
-+    workerPrivate->AssertIsOnWorkerThread();
-+    workerPrivate->RemoveFeature(mWorkerFeature);
-+    mWorkerFeature = nullptr;
-+  }
-+
-+  if (mActor) {
-+    RefPtr<TeardownRunnable> runnable = new TeardownRunnable(mActor);
-+    Unused << NS_WARN_IF(NS_FAILED(NS_DispatchToCurrentThread(runnable)));
-+    mActor = nullptr;
-+  }
-+
-+  mPendingOperations.Clear();
-+}
- 
- // Bindings methods.
- 
- JSObject*
- SyncManager::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
- {
-+  MOZ_ASSERT(IsSyncManagerThread());
-+
-   return SyncManagerBinding::Wrap(aCx, this, aGivenProto);
- }
- 
- // static
- bool
- SyncManager::PrefEnabled(JSContext* aCx, JSObject* aObj)
- {
-   using mozilla::dom::workers::WorkerPrivate;
-@@ -96,42 +296,126 @@ SyncManager::PrefEnabled(JSContext* aCx,
-   WorkerPrivate* workerPrivate = GetWorkerPrivateFromContext(aCx);
-   if (!workerPrivate) {
-     return false;
-   }
- 
-   return workerPrivate->BackgroundSyncEnabled();
- }
- 
--// WebIDL interace methods.
-+// nsIIPCBackgroundChildCreateCallback methods.
-+
-+void
-+SyncManager::ActorFailed()
-+{
-+  MOZ_CRASH("Failed to create a PBackgroundChild actor!");
-+}
-+
-+void
-+SyncManager::ActorCreated(PBackgroundChild* aActor)
-+{
-+  MOZ_ASSERT(IsSyncManagerThread());
-+  MOZ_ASSERT(aActor);
-+  MOZ_ASSERT(!mActor);
-+
-+  PSyncManagerChild* actor = aActor->SendPSyncManagerConstructor();
-+  mActor = static_cast<SyncManagerChild*>(actor);
-+  MOZ_ASSERT(mActor);
-+
-+  // Flush pending requests.
-+  for (uint32_t i = 0, len = mPendingOperations.Length(); i < len; ++i) {
-+    RefPtr<SyncOpRunnable> runnable = mPendingOperations[i];
-+    MOZ_ASSERT(runnable);
-+    runnable->SetActor(mActor);
-+    if (NS_FAILED(NS_DispatchToCurrentThread(runnable))) {
-+      NS_WARNING("Failed to dispatch to the current thread");
-+      mPendingOperations.Clear();
-+      return;
-+    }
-+  }
-+  mPendingOperations.Clear();
-+}
-+
-+// nsIObserver
-+
-+NS_IMETHODIMP
-+SyncManager::Observe(nsISupports* aSubject,
-+                     const char* aTopic,
-+                     const char16_t* aData)
-+{
-+  MOZ_ASSERT(IsSyncManagerThread());
-+  MOZ_ASSERT(NS_IsMainThread());
-+  MOZ_ASSERT(!strcmp(aTopic, "inner-window-destroyed"));
-+
-+  nsCOMPtr<nsISupportsPRUint64> wrapper = do_QueryInterface(aSubject);
-+  NS_ENSURE_TRUE(wrapper, NS_ERROR_FAILURE);
-+
-+  uint64_t innerID;
-+  nsresult rv = wrapper->GetData(&innerID);
-+  NS_ENSURE_SUCCESS(rv, rv);
-+
-+  if (innerID != mInnerID) {
-+    return NS_OK;
-+  }
-+
-+  Shutdown();
-+
-+  return NS_OK;
-+}
- 
- already_AddRefed<Promise>
--SyncManager::Register(const nsAString& aName, ErrorResult& aRv)
-+SyncManager::ExecuteOp(const SyncOpArgs& aArgs, ErrorResult& aRv)
- {
-+  MOZ_ASSERT(IsSyncManagerThread());
-+
-   RefPtr<Promise> p = Promise::Create(mGlobal, aRv);
-   if (NS_WARN_IF(aRv.Failed())) {
-     return nullptr;
-   }
- 
-+  nsAutoPtr<SyncOp> op(new SyncOp(*mPrincipalInfo, aArgs));
-+  RefPtr<SyncOpRunnable> runnable = new SyncOpRunnable(p, op);
-+
-+  if (!mActor) {
-+    mPendingOperations.AppendElement(runnable);
-+    return p.forget();
-+  }
-+
-+  runnable->SetActor(mActor);
-+  nsresult rv = NS_DispatchToCurrentThread(runnable);
-+  if (NS_WARN_IF(NS_FAILED(rv))) {
-+    p->MaybeReject(rv);
-+  }
-+
-   return p.forget();
- }
- 
-+// WebIDL interface methods.
-+
-+already_AddRefed<Promise>
-+SyncManager::Register(const nsAString& aTag, ErrorResult& aRv)
-+{
-+  MOZ_ASSERT(IsSyncManagerThread());
-+
-+  const SyncRegisterArgs args((nsString(aTag)));
-+  return ExecuteOp(SyncOpArgs(args), aRv);
-+}
-+
- already_AddRefed<Promise>
- SyncManager::GetTags(ErrorResult& aRv)
- {
--  RefPtr<Promise> p = Promise::Create(mGlobal, aRv);
--  if (NS_WARN_IF(aRv.Failed())) {
--    return nullptr;
--  }
-+  MOZ_ASSERT(IsSyncManagerThread());
- 
--  return p.forget();
-+  const SyncGetTagsArgs args;
-+  return ExecuteOp(SyncOpArgs(args), aRv);
- }
- 
- NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(SyncManager, mGlobal)
- NS_IMPL_CYCLE_COLLECTING_ADDREF(SyncManager)
- NS_IMPL_CYCLE_COLLECTING_RELEASE(SyncManager)
- NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(SyncManager)
-   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
--  NS_INTERFACE_MAP_ENTRY(nsISupports)
-+  NS_INTERFACE_MAP_ENTRY(nsIIPCBackgroundChildCreateCallback)
-+  NS_INTERFACE_MAP_ENTRY(nsIObserver)
- NS_INTERFACE_MAP_END
- 
- } // namespace dom
- } // namespace mozilla
-diff --git a/dom/sync/SyncManager.h b/dom/sync/SyncManager.h
---- a/dom/sync/SyncManager.h
-+++ b/dom/sync/SyncManager.h
-@@ -2,48 +2,60 @@
- /* vim: set ts=8 sts=2 et sw=2 tw=80: */
- /* This Source Code Form is subject to the terms of the Mozilla Public
-  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
-  * You can obtain one at http://mozilla.org/MPL/2.0/. */
- 
- #ifndef mozilla_dom_SyncManager_h
- #define mozilla_dom_SyncManager_h
- 
-+#include "mozilla/dom/SyncIPCTypes.h"
-+
-+#include "nsIIPCBackgroundChildCreateCallback.h"
-+#include "nsIObserver.h"
- #include "nsIPrincipal.h"
- #include "nsWrapperCache.h"
- 
- #include "mozilla/AlreadyAddRefed.h"
-+#include "mozilla/dom/BindingDeclarations.h"
- #include "mozilla/ErrorResult.h"
--#include "mozilla/dom/BindingDeclarations.h"
- 
- #include "nsCOMPtr.h"
- #include "jsapi.h"
- 
- class nsIGlobalObject;
- 
- namespace mozilla {
- 
- namespace ipc {
-   class PrincipalInfo;
- } // namespace ipc
- 
- namespace dom {
- 
- namespace workers {
-+  class WorkerFeature;
-   class WorkerPrivate;
- } // namespace workers
- 
- class Promise;
-+class SyncManagerChild;
-+class SyncOpRunnable;
- 
--class SyncManager final : public nsISupports
-+class SyncManager final : public nsIIPCBackgroundChildCreateCallback
-+                        , public nsIObserver
-                         , public nsWrapperCache
- {
-+  NS_DECL_NSIIPCBACKGROUNDCHILDCREATECALLBACK
-+  NS_DECL_NSIOBSERVER
-+
- public:
-   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
--  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(SyncManager)
-+  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_AMBIGUOUS(
-+      SyncManager, nsIIPCBackgroundChildCreateCallback)
- 
-   static already_AddRefed<SyncManager>
-   CreateOnMainThread(nsIGlobalObject* aGlobal,
-                      nsIPrincipal* aPrincipal,
-                      ErrorResult& aRv);
- 
-   static already_AddRefed<SyncManager>
-   CreateOnWorker(nsIGlobalObject* aGlobal,
-@@ -60,28 +72,46 @@ public:
-   JSObject*
-   WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
- 
-   static bool PrefEnabled(JSContext* aCx, JSObject* aObj);
- 
-   // WebIDL interface methods.
- 
-   already_AddRefed<Promise>
--  Register(const nsAString& aName, ErrorResult& aRv);
-+  Register(const nsAString& aTag, ErrorResult& aRv);
- 
-   already_AddRefed<Promise>
-   GetTags(ErrorResult& aRv);
- 
-+  void Shutdown();
- private:
-   SyncManager(nsIGlobalObject* aGlobal,
-               const mozilla::ipc::PrincipalInfo& aPrincipalInfo);
- 
-   ~SyncManager();
- 
-+  bool IsSyncManagerThread();
-+
-+  already_AddRefed<Promise>
-+  ExecuteOp(const SyncOpArgs& aArgs, ErrorResult& aRv);
-+
-+  uint64_t mInnerID;
-+
-   nsCOMPtr<nsIGlobalObject> mGlobal;
- 
--  nsAutoPtr<mozilla::ipc::PrincipalInfo> mPrincipalInfo;
-+  nsAutoPtr<workers::WorkerFeature> mWorkerFeature;
-+
-+  RefPtr<SyncManagerChild> mActor;
-+
-+  bool mShuttingDown;
-+
-+  UniquePtr<mozilla::ipc::PrincipalInfo> mPrincipalInfo;
-+
-+  nsCOMPtr<nsIThread> mThread;
-+
-+  nsTArray<RefPtr<SyncOpRunnable>> mPendingOperations;
- };
- 
- } // namespace dom
- } // namespace mozilla
- 
- #endif // mozilla_dom_SyncManager_h
-diff --git a/dom/sync/SyncManagerChild.cpp b/dom/sync/SyncManagerChild.cpp
+diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/BackgroundSyncParent.cpp
 new file mode 100644
 --- /dev/null
-+++ b/dom/sync/SyncManagerChild.cpp
-@@ -0,0 +1,130 @@
-+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
-+/* This Source Code Form is subject to the terms of the Mozilla Public
-+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
-+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
-+
-+#include "SyncManagerChild.h"
-+
-+#include "mozilla/unused.h"
-+#include "mozilla/ipc/PBackgroundChild.h"
-+
-+namespace mozilla {
-+
-+using namespace ipc;
-+
-+namespace dom {
-+
-+struct SyncManagerChild::PendingRequest final
-+{
-+  explicit PendingRequest(Promise* aPromise)
-+    : mPromise(aPromise)
-+  {}
-+
-+  RefPtr<Promise> mPromise;
-+};
-+
-+SyncManagerChild::SyncManagerChild()
-+  : mActorDestroyed(false)
-+{
-+}
-+
-+SyncManagerChild::~SyncManagerChild()
-+{
-+}
-+
-+void
-+SyncManagerChild::ActorDestroy(ActorDestroyReason aWhy)
-+{
-+  mActorDestroyed = true;
-+
-+  // XXX Reject pending requests.
-+/*  for (auto iter = mPendingRequests.Iter(); !iter.Done(); iter.Next()) {
-+    PendingRequest* request = iter.Get();
-+    if (NS_WARN_IF(!request)) {
-+      continue;
-+    }
-+    request->mPromise->MaybeReject();
-+  }
-+*/
-+  mPendingRequests.Clear();
-+}
-+
-+nsresult
-+SyncManagerChild::StorePendingRequest(Promise* aPromise, nsID& aID)
-+{
-+  nsresult rv;
-+  nsCOMPtr<nsIUUIDGenerator> uuidGenerator =
-+    do_GetService("@mozilla.org/uuid-generator;1", &rv);
-+  NS_ENSURE_SUCCESS(rv, rv);
-+
-+  nsID id;
-+  rv = uuidGenerator->GenerateUUIDInPlace(&id);
-+  NS_ENSURE_SUCCESS(rv, rv);
-+
-+  PendingRequest* request = new PendingRequest(aPromise);
-+  mPendingRequests.Put(id, request);
-+
-+  aID = id;
-+
-+  return NS_OK;
-+}
-+
-+Promise*
-+SyncManagerChild::GetPendingRequest(const nsID& aID)
-+{
-+  PendingRequest* request = mPendingRequests.Get(aID);
-+  if (NS_WARN_IF(!request)) {
-+    return nullptr;
-+  }
-+
-+  RefPtr<Promise> promise = request->mPromise;
-+
-+  mPendingRequests.Remove(const_cast<nsID&>(aID));
-+  return promise;
-+}
-+
-+nsresult
-+SyncManagerChild::ExecuteOp(Promise* aPromise, SyncOp* aOp)
-+{
-+  if (mActorDestroyed) {
-+    return NS_OK;
-+  }
-+
-+  nsID requestId;
-+  nsresult rv = StorePendingRequest(aPromise, requestId);
-+  NS_ENSURE_SUCCESS(rv, rv);
-+
-+  Unused << SendRequest(requestId, *aOp);
-+
-+  return NS_OK;
-+}
-+
-+bool
-+SyncManagerChild::RecvResponse(const nsID& aRequestId,
-+                               const SyncOpResponse& aResponse)
-+{
-+  Promise* p = GetPendingRequest(aRequestId);
-+  if (!p) {
-+    return false;
-+  }
-+
-+  switch(aResponse.type()) {
-+    case SyncOpResponse::TSyncRegisterResponse:
-+      p->MaybeResolve(true);
-+      return true;
-+    case SyncOpResponse::TSyncGetTagsResponse:
-+      p->MaybeResolve(aResponse.get_SyncGetTagsResponse().mTags());
-+      return true;
-+    case SyncOpResponse::TSyncOpError:
-+      p->MaybeReject(
-+          static_cast<nsresult>(aResponse.get_SyncOpError().mCode()));
-+      return true;
-+    default:
-+      MOZ_CRASH("Unknown BackgroundSync response");
-+      return false;
-+  }
-+}
-+
-+} // namespace dom
-+} // namespace mozilla
-diff --git a/dom/sync/SyncManagerChild.h b/dom/sync/SyncManagerChild.h
-new file mode 100644
---- /dev/null
-+++ b/dom/sync/SyncManagerChild.h
-@@ -0,0 +1,62 @@
-+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
-+/* This Source Code Form is subject to the terms of the Mozilla Public
-+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
-+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
-+
-+#ifndef mozilla_dom_SyncManagerChild_h
-+#define mozilla_dom_SyncManagerChild_h
-+
-+#include "SyncManager.h"
-+
-+#include "mozilla/dom/PSyncManagerChild.h"
-+
-+#include "nsID.h"
-+#include "nsClassHashtable.h"
-+
-+namespace mozilla {
-+
-+namespace ipc {
-+class BackgroundChildImpl;
-+} // namespace ipc
-+
-+namespace dom {
-+
-+class SyncManager;
-+
-+class SyncManagerChild final : public PSyncManagerChild
-+{
-+  friend class mozilla::ipc::BackgroundChildImpl;
-+
-+public:
-+  NS_INLINE_DECL_REFCOUNTING(SyncManagerChild)
-+
-+  bool IsActorDestroyed() const
-+  {
-+    return mActorDestroyed;
-+  }
-+
-+  nsresult ExecuteOp(Promise* aPromise, SyncOp* aOp);
-+
-+  virtual bool RecvResponse(const nsID& aRequestId,
-+                            const SyncOpResponse& aResponse) override;
-+
-+private:
-+  SyncManagerChild();
-+  ~SyncManagerChild();
-+
-+  virtual void ActorDestroy(ActorDestroyReason aWhy) override;
-+
-+  nsresult StorePendingRequest(Promise* aPromise, nsID& aID);
-+  Promise* GetPendingRequest(const nsID& aID);
-+
-+  bool mActorDestroyed;
-+
-+  struct PendingRequest;
-+  nsClassHashtable<nsIDHashKey, PendingRequest> mPendingRequests;
-+};
-+
-+} // namespace dom
-+} // namespace mozilla
-+
-+#endif // mozilla_dom_SyncManagerChild_h
-diff --git a/dom/sync/SyncManagerParent.cpp b/dom/sync/SyncManagerParent.cpp
-new file mode 100644
---- /dev/null
-+++ b/dom/sync/SyncManagerParent.cpp
++++ b/dom/backgroundsync/BackgroundSyncParent.cpp
 @@ -0,0 +1,73 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
@@ -855,7 +817,7 @@ new file mode 100644
 + * License, v. 2.0. If a copy of the MPL was not distributed with this file,
 + * You can obtain one at http://mozilla.org/MPL/2.0/. */
 +
-+#include "SyncManagerParent.h"
++#include "BackgroundSyncParent.h"
 +
 +#include "mozilla/unused.h"
 +#include "mozilla/ipc/BackgroundParent.h"
@@ -866,23 +828,23 @@ new file mode 100644
 +
 +namespace dom {
 +
-+SyncManagerParent::SyncManagerParent()
++BackgroundSyncParent::BackgroundSyncParent()
 +{
 +  AssertIsOnBackgroundThread();
 +}
 +
-+SyncManagerParent::~SyncManagerParent()
++BackgroundSyncParent::~BackgroundSyncParent()
 +{
 +  AssertIsOnBackgroundThread();
 +}
 +
-+void SyncManagerParent::ActorDestroy(ActorDestroyReason aWhy)
++void BackgroundSyncParent::ActorDestroy(ActorDestroyReason aWhy)
 +{
 +  AssertIsOnBackgroundThread();
 +}
 +
-+bool SyncManagerParent::RecvRequest(const nsID& aRequestId,
-+                                    const SyncOp& aOp)
++bool BackgroundSyncParent::RecvRequest(const nsID& aRequestId,
++                                       const SyncOp& aOp)
 +{
 +  AssertIsOnBackgroundThread();
 +
@@ -911,7 +873,7 @@ new file mode 100644
 +  return true;
 +}
 +
-+bool SyncManagerParent::RecvShutdown()
++bool BackgroundSyncParent::RecvShutdown()
 +{
 +  AssertIsOnBackgroundThread();
 +
@@ -922,10 +884,10 @@ new file mode 100644
 +
 +} // namespace dom
 +} // namespace mozilla
-diff --git a/dom/sync/SyncManagerParent.h b/dom/sync/SyncManagerParent.h
+diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/BackgroundSyncParent.h
 new file mode 100644
 --- /dev/null
-+++ b/dom/sync/SyncManagerParent.h
++++ b/dom/backgroundsync/BackgroundSyncParent.h
 @@ -0,0 +1,44 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
@@ -933,11 +895,11 @@ new file mode 100644
 + * License, v. 2.0. If a copy of the MPL was not distributed with this file,
 + * You can obtain one at http://mozilla.org/MPL/2.0/. */
 +
-+#ifndef mozilla_dom_SyncManagerParent_h
-+#define mozilla_dom_SyncManagerParent_h
++#ifndef mozilla_dom_BackgroundSyncParent_h
++#define mozilla_dom_BackgroundSyncParent_h
 +
-+#include "mozilla/dom/PSyncManagerParent.h"
-+#include "mozilla/dom/SyncIPCTypes.h"
++#include "mozilla/dom/PBackgroundSyncParent.h"
++#include "mozilla/dom/BackgroundSyncIPCTypes.h"
 +
 +#include "nsID.h"
 +
@@ -949,7 +911,7 @@ new file mode 100644
 +
 +namespace dom {
 +
-+class SyncManagerParent final : public PSyncManagerParent
++class BackgroundSyncParent final : public PBackgroundSyncParent
 +{
 +  friend class mozilla::ipc::BackgroundParentImpl;
 +
@@ -959,8 +921,8 @@ new file mode 100644
 +
 +  virtual bool RecvShutdown() override;
 +private:
-+  SyncManagerParent();
-+  ~SyncManagerParent();
++  BackgroundSyncParent();
++  ~BackgroundSyncParent();
 +
 +  virtual void ActorDestroy(ActorDestroyReason aWhy) override;
 +};
@@ -968,30 +930,63 @@ new file mode 100644
 +} // namespace dom
 +} // namespace mozilla
 +
-+#endif // mozilla_dom_SyncManagerParent_h
++#endif // mozilla_dom_BackgroundSyncParent_h
 +
 +
-diff --git a/dom/sync/moz.build b/dom/sync/moz.build
---- a/dom/sync/moz.build
-+++ b/dom/sync/moz.build
+diff --git a/dom/backgroundsync/PBackgroundSync.ipdl b/dom/backgroundsync/PBackgroundSync.ipdl
+new file mode 100644
+--- /dev/null
++++ b/dom/backgroundsync/PBackgroundSync.ipdl
+@@ -0,0 +1,28 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++include protocol PBackground;
++
++include BackgroundSyncIPCTypes;
++
++using struct nsID from "nsID.h";
++
++namespace mozilla {
++namespace dom {
++
++protocol PBackgroundSync
++{
++  manager PBackground;
++
++parent: // child -> parent messages
++  async Request(nsID aRequestId, SyncOp aOp);
++  async Shutdown();
++
++child: // parent -> child messages
++  async Response(nsID requestId, SyncOpResponse aResponse);
++  async __delete__();
++};
++
++} // namespace dom
++} // namespace mozilla
+diff --git a/dom/backgroundsync/moz.build b/dom/backgroundsync/moz.build
+--- a/dom/backgroundsync/moz.build
++++ b/dom/backgroundsync/moz.build
 @@ -3,17 +3,24 @@
  # License, v. 2.0. If a copy of the MPL was not distributed with this
  # file, You can obtain one at http://mozilla.org/MPL/2.0/.
  
  EXPORTS.mozilla.dom += [
-     'SyncManager.h'
+     'BackgroundSync.h'
  ]
  
  UNIFIED_SOURCES += [
--    'SyncManager.cpp'
-+    'SyncManager.cpp',
-+    'SyncManagerChild.cpp',
-+    'SyncManagerParent.cpp'
+-    'BackgroundSync.cpp'
++    'BackgroundSync.cpp',
++    'BackgroundSyncChild.cpp',
++    'BackgroundSyncParent.cpp'
 +]
 +
 +IPDL_SOURCES += [
-+    'PSyncManager.ipdl',
-+    'SyncIPCTypes.ipdlh'
++    'BackgroundSyncIPCTypes.ipdlh',
++    'PBackgroundSync.ipdl'
  ]
  
  LOCAL_INCLUDES += [
@@ -1012,7 +1007,7 @@ diff --git a/ipc/glue/BackgroundChildImpl.cpp b/ipc/glue/BackgroundChildImpl.cpp
  #include "ActorsChild.h" // IndexedDB
  #include "BroadcastChannelChild.h"
  #include "ServiceWorkerManagerChild.h"
-+#include "SyncManagerChild.h"
++#include "BackgroundSyncChild.h"
  #include "FileDescriptorSetChild.h"
  #ifdef MOZ_WEBRTC
  #include "CamerasChild.h"
@@ -1030,7 +1025,7 @@ diff --git a/ipc/glue/BackgroundChildImpl.cpp b/ipc/glue/BackgroundChildImpl.cpp
  using mozilla::dom::cache::PCacheStorageChild;
  using mozilla::dom::cache::PCacheStreamControlChild;
  using mozilla::dom::PNuwaChild;
-+using mozilla::dom::SyncManagerChild;
++using mozilla::dom::BackgroundSyncChild;
  
  // -----------------------------------------------------------------------------
  // BackgroundChildImpl::ThreadLocal
@@ -1052,18 +1047,18 @@ diff --git a/ipc/glue/BackgroundChildImpl.cpp b/ipc/glue/BackgroundChildImpl.cpp
 +// Background Sync API
 +// -----------------------------------------------------------------------------
 +
-+dom::PSyncManagerChild*
-+BackgroundChildImpl::AllocPSyncManagerChild()
++dom::PBackgroundSyncChild*
++BackgroundChildImpl::AllocPBackgroundSyncChild()
 +{
-+  RefPtr<SyncManagerChild> agent = new SyncManagerChild();
++  RefPtr<BackgroundSyncChild> agent = new BackgroundSyncChild();
 +  return agent.forget().take();
 +}
 +
 +bool
-+BackgroundChildImpl::DeallocPSyncManagerChild(PSyncManagerChild* aActor)
++BackgroundChildImpl::DeallocPBackgroundSyncChild(PBackgroundSyncChild* aActor)
 +{
-+  RefPtr<SyncManagerChild> child =
-+    dont_AddRef(static_cast<SyncManagerChild*>(aActor));
++  RefPtr<BackgroundSyncChild> child =
++    dont_AddRef(static_cast<BackgroundSyncChild*>(aActor));
 +  MOZ_ASSERT(child);
 +  return true;
 +}
@@ -1088,11 +1083,11 @@ diff --git a/ipc/glue/BackgroundChildImpl.h b/ipc/glue/BackgroundChildImpl.h
    virtual bool
    DeallocPFileSystemRequestChild(PFileSystemRequestChild*) override;
  
-+  virtual PSyncManagerChild*
-+  AllocPSyncManagerChild() override;
++  virtual PBackgroundSyncChild*
++  AllocPBackgroundSyncChild() override;
 +
 +  virtual bool
-+  DeallocPSyncManagerChild(PSyncManagerChild* aActor) override;
++  DeallocPBackgroundSyncChild(PBackgroundSyncChild* aActor) override;
  };
  
  class BackgroundChildImpl::ThreadLocal final
@@ -1113,7 +1108,7 @@ diff --git a/ipc/glue/BackgroundParentImpl.cpp b/ipc/glue/BackgroundParentImpl.c
  #include "nsTraceRefcnt.h"
  #include "nsXULAppAPI.h"
  #include "ServiceWorkerManagerParent.h"
-+#include "SyncManagerParent.h"
++#include "BackgroundSyncParent.h"
  
  #ifdef DISABLE_ASSERTS_FOR_FUZZING
  #define ASSERT_UNLESS_FUZZING(...) do { } while (0)
@@ -1131,7 +1126,7 @@ diff --git a/ipc/glue/BackgroundParentImpl.cpp b/ipc/glue/BackgroundParentImpl.c
  using mozilla::dom::NuwaParent;
  using mozilla::dom::PMessagePortParent;
  using mozilla::dom::PNuwaParent;
-+using mozilla::dom::SyncManagerParent;
++using mozilla::dom::BackgroundSyncParent;
  using mozilla::dom::UDPSocketParent;
  
  namespace {
@@ -1149,7 +1144,7 @@ diff --git a/ipc/glue/BackgroundParentImpl.cpp b/ipc/glue/BackgroundParentImpl.c
  using mozilla::dom::ContentParent;
  using mozilla::dom::BroadcastChannelParent;
  using mozilla::dom::ServiceWorkerRegistrationData;
-+using mozilla::dom::SyncManagerParent;
++using mozilla::dom::BackgroundSyncParent;
  using mozilla::dom::workers::ServiceWorkerManagerParent;
  
  BackgroundParentImpl::BackgroundParentImpl()
@@ -1167,23 +1162,23 @@ diff --git a/ipc/glue/BackgroundParentImpl.cpp b/ipc/glue/BackgroundParentImpl.c
    return true;
  }
  
-+mozilla::dom::PSyncManagerParent*
-+BackgroundParentImpl::AllocPSyncManagerParent()
++mozilla::dom::PBackgroundSyncParent*
++BackgroundParentImpl::AllocPBackgroundSyncParent()
 +{
 +  AssertIsInMainProcess();
 +  AssertIsOnBackgroundThread();
 +
-+  return new SyncManagerParent();
++  return new BackgroundSyncParent();
 +}
 +
 +bool
-+BackgroundParentImpl::DeallocPSyncManagerParent(PSyncManagerParent* aActor)
++BackgroundParentImpl::DeallocPBackgroundSyncParent(PBackgroundSyncParent* aActor)
 +{
 +  AssertIsInMainProcess();
 +  AssertIsOnBackgroundThread();
 +  MOZ_ASSERT(aActor);
 +
-+  delete static_cast<SyncManagerParent*>(aActor);
++  delete static_cast<BackgroundSyncParent*>(aActor);
 +  return true;
 +}
 +
@@ -1207,11 +1202,11 @@ diff --git a/ipc/glue/BackgroundParentImpl.h b/ipc/glue/BackgroundParentImpl.h
    virtual bool
    DeallocPFileSystemRequestParent(PFileSystemRequestParent*) override;
  
-+  virtual PSyncManagerParent*
-+  AllocPSyncManagerParent() override;
++  virtual PBackgroundSyncParent*
++  AllocPBackgroundSyncParent() override;
 +
 +  virtual bool
-+  DeallocPSyncManagerParent(PSyncManagerParent* aActor) override;
++  DeallocPBackgroundSyncParent(PBackgroundSyncParent* aActor) override;
  };
  
  } // namespace ipc
@@ -1230,7 +1225,7 @@ diff --git a/ipc/glue/PBackground.ipdl b/ipc/glue/PBackground.ipdl
  include protocol PNuwa;
  include protocol PQuota;
  include protocol PServiceWorkerManager;
-+include protocol PSyncManager;
++include protocol PBackgroundSync;
  include protocol PUDPSocket;
  include protocol PVsync;
  
@@ -1239,24 +1234,24 @@ diff --git a/ipc/glue/PBackground.ipdl b/ipc/glue/PBackground.ipdl
  include PBackgroundIDBSharedTypes;
  include PFileSystemParams;
  
-@@ -53,16 +54,17 @@ sync protocol PBackground
+@@ -40,16 +41,17 @@ using mozilla::dom::asmjscache::WritePar
+ namespace mozilla {
+ namespace ipc {
+ 
+ sync protocol PBackground
+ {
+   manages PAsmJSCacheEntry;
+   manages PBackgroundIDBFactory;
+   manages PBackgroundIndexedDBUtils;
++  manages PBackgroundSync;
+   manages PBackgroundTest;
+   manages PBlob;
+   manages PBroadcastChannel;
+   manages PCache;
+   manages PCacheStorage;
    manages PCacheStreamControl;
    manages PFileDescriptorSet;
    manages PFileSystemRequest;
-   manages PMessagePort;
-   manages PCameras;
-   manages PNuwa;
-   manages PQuota;
-   manages PServiceWorkerManager;
-+  manages PSyncManager;
-   manages PUDPSocket;
-   manages PVsync;
- 
- parent:
-   // Only called at startup during mochitests to check the basic infrastructure.
-   async PBackgroundTest(nsCString testArg);
- 
-   async PBackgroundIDBFactory(LoggingInfo loggingInfo);
 @@ -95,16 +97,18 @@ parent:
    async PAsmJSCacheEntry(OpenMode openMode,
                           WriteParams write,
@@ -1266,7 +1261,7 @@ diff --git a/ipc/glue/PBackground.ipdl b/ipc/glue/PBackground.ipdl
  
    async PFileSystemRequest(FileSystemParams params);
  
-+  async PSyncManager();
++  async PBackgroundSync();
 +
  child:
    async PCache();
@@ -1279,21 +1274,21 @@ diff --git a/ipc/glue/PBackground.ipdl b/ipc/glue/PBackground.ipdl
 diff --git a/ipc/glue/moz.build b/ipc/glue/moz.build
 --- a/ipc/glue/moz.build
 +++ b/ipc/glue/moz.build
-@@ -141,16 +141,17 @@ if CONFIG['_MSC_VER']:
+@@ -140,16 +140,17 @@ SOURCES += [
+ if CONFIG['_MSC_VER']:
+     # This is intended as a temporary hack to support building with VS2015.
      # 'reinterpret_cast': conversion from 'DWORD' to 'HANDLE' of greater size
      SOURCES['BackgroundChildImpl.cpp'].flags += ['-wd4312']
      SOURCES['BackgroundParentImpl.cpp'].flags += ['-wd4312']
  
  LOCAL_INCLUDES += [
      '/caps',
++    '/dom/backgroundsync',
      '/dom/broadcastchannel',
      '/dom/indexedDB',
-+    '/dom/sync',
      '/dom/workers',
      '/media/webrtc/trunk',
      '/xpcom/build',
  ]
  
  IPDL_SOURCES = [
-     'InputStreamParams.ipdlh',
-     'PBackground.ipdl',

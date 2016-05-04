@@ -1,14 +1,8 @@
-attachment.cgi?id=8743357
-attachment.cgi?id=8743359
-attachment.cgi?id=8743360
-attachment.cgi?id=8743362
-attachment.cgi?id=8743363
-attachment.cgi?id=8743364
-attachment.cgi?id=8743365
 bug1217544.background.sync.part1.webidl.patch
 bug1217544.background.sync.part2.serviceworkerregistration.patch
 bug1217544.background.sync.part3.ipc.patch
 bug1217544.background.sync.part4.syncevent.patch
+bug1217544.background.sync.part5.managerid.patch
 bug1217544.background.sync.part5.syncstore.patch
 bug1217544.background.sync.part6.syncservice.patch
 bug1217544.background.sync.tests.patch

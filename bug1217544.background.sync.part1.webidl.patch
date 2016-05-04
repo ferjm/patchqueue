@@ -1,33 +1,12 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  960029b66e4c3f02862d00d080a399cf15d00438
-Bug 1217544 - Implement one-off BackgroundSync API. Part 1: SyncManager interface. r=baku
+# Parent  ed7ae11297d3004257a98124d80cab8f34f30764
+Bug 1217544 - Implement one-off BackgroundSync API. Part 1: BackgroundSync interface. r=baku
 
-diff --git a/dom/moz.build b/dom/moz.build
---- a/dom/moz.build
-+++ b/dom/moz.build
-@@ -96,16 +96,17 @@ DIRS += [
-     'ipc',
-     'workers',
-     'camera',
-     'audiochannel',
-     'broadcastchannel',
-     'messagechannel',
-     'promise',
-     'smil',
-+    'sync',
-     'telephony',
-     'tv',
-     'voicemail',
-     'inputmethod',
-     'webidl',
-     'xbl',
-     'xml',
-     'xslt',
-diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
+diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
 new file mode 100644
 --- /dev/null
-+++ b/dom/sync/SyncManager.cpp
++++ b/dom/backgroundsync/BackgroundSync.cpp
 @@ -0,0 +1,136 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
@@ -35,11 +14,11 @@ new file mode 100644
 + * License, v. 2.0. If a copy of the MPL was not distributed with this file,
 + * You can obtain one at http://mozilla.org/MPL/2.0/. */
 +
-+#include "SyncManager.h"
++#include "BackgroundSync.h"
 +
 +#include "mozilla/dom/Promise.h"
 +#include "mozilla/dom/PromiseWorkerProxy.h"
-+#include "mozilla/dom/SyncManagerBinding.h"
++#include "mozilla/dom/BackgroundSyncBinding.h"
 +#include "mozilla/ipc/BackgroundChild.h"
 +#include "mozilla/ipc/BackgroundUtils.h"
 +#include "mozilla/ipc/PBackgroundChild.h"
@@ -55,13 +34,13 @@ new file mode 100644
 +
 +using namespace workers;
 +
-+// SyncManager
++// BackgroundSync
 +
 +// static
-+already_AddRefed<SyncManager>
-+SyncManager::CreateOnMainThread(nsIGlobalObject* aGlobal,
-+                                nsIPrincipal* aPrincipal,
-+                                ErrorResult& aRv)
++already_AddRefed<BackgroundSync>
++BackgroundSync::CreateOnMainThread(nsIGlobalObject* aGlobal,
++                                   nsIPrincipal* aPrincipal,
++                                   ErrorResult& aRv)
 +{
 +  MOZ_ASSERT(aGlobal);
 +  MOZ_ASSERT(aPrincipal);
@@ -74,52 +53,52 @@ new file mode 100644
 +    return nullptr;
 +  }
 +
-+  RefPtr<SyncManager> ref = new SyncManager(aGlobal, principalInfo);
++  RefPtr<BackgroundSync> ref = new BackgroundSync(aGlobal, principalInfo);
 +  return ref.forget();
 +}
 +
 +// static
-+already_AddRefed<SyncManager>
-+SyncManager::CreateOnWorker(WorkerPrivate* aWorkerPrivate)
++already_AddRefed<BackgroundSync>
++BackgroundSync::CreateOnWorker(WorkerPrivate* aWorkerPrivate)
 +{
 +  MOZ_ASSERT(aWorkerPrivate);
 +  aWorkerPrivate->AssertIsOnWorkerThread();
 +
 +  const PrincipalInfo& principalInfo = aWorkerPrivate->GetPrincipalInfo();
 +
-+  RefPtr<SyncManager> ref = new SyncManager(nullptr, principalInfo);
++  RefPtr<BackgroundSync> ref = new BackgroundSync(nullptr,
++                                                  principalInfo);
 +  return ref.forget();
 +}
 +
-+SyncManager::SyncManager(nsIGlobalObject* aGlobal,
-+                         const PrincipalInfo& aPrincipalInfo)
++BackgroundSync::BackgroundSync(nsIGlobalObject* aGlobal,
++                               const PrincipalInfo& aPrincipalInfo)
 +  : mGlobal(aGlobal)
 +  , mPrincipalInfo(new PrincipalInfo(aPrincipalInfo))
 +{}
 +
-+SyncManager::~SyncManager()
++BackgroundSync::~BackgroundSync()
 +{}
 +
 +// Bindings methods.
 +
 +JSObject*
-+SyncManager::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
++BackgroundSync::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 +{
-+  return SyncManagerBinding::Wrap(aCx, this, aGivenProto);
++  return BackgroundSyncBinding::Wrap(aCx, this, aGivenProto);
 +}
 +
 +// static
 +bool
-+SyncManager::PrefEnabled(JSContext* aCx, JSObject* aObj)
++BackgroundSync::PrefEnabled(JSContext* aCx, JSObject* aObj)
 +{
 +  using mozilla::dom::workers::WorkerPrivate;
 +  using mozilla::dom::workers::GetWorkerPrivateFromContext;
 +
 +  // If we are on the main thread, then check the pref directly.
 +  if (NS_IsMainThread()) {
-+    bool enabled = false;
-+    Preferences::GetBool("dom.background.sync.enabled", &enabled);
-+    return enabled;
++    Preferences::GetBool("dom.background.sync.enabled", false);
++    return false;
 +  }
 +
 +  // Otherwise check the pref via the worker private helper.
@@ -134,7 +113,7 @@ new file mode 100644
 +// WebIDL interace methods.
 +
 +already_AddRefed<Promise>
-+SyncManager::Register(const nsAString& aName, ErrorResult& aRv)
++BackgroundSync::Register(const nsAString& aName, ErrorResult& aRv)
 +{
 +  RefPtr<Promise> p = Promise::Create(mGlobal, aRv);
 +  if (NS_WARN_IF(aRv.Failed())) {
@@ -145,7 +124,7 @@ new file mode 100644
 +}
 +
 +already_AddRefed<Promise>
-+SyncManager::GetTags(ErrorResult& aRv)
++BackgroundSync::GetTags(ErrorResult& aRv)
 +{
 +  RefPtr<Promise> p = Promise::Create(mGlobal, aRv);
 +  if (NS_WARN_IF(aRv.Failed())) {
@@ -155,41 +134,39 @@ new file mode 100644
 +  return p.forget();
 +}
 +
-+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(SyncManager, mGlobal)
-+NS_IMPL_CYCLE_COLLECTING_ADDREF(SyncManager)
-+NS_IMPL_CYCLE_COLLECTING_RELEASE(SyncManager)
-+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(SyncManager)
++NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(BackgroundSync, mGlobal)
++NS_IMPL_CYCLE_COLLECTING_ADDREF(BackgroundSync)
++NS_IMPL_CYCLE_COLLECTING_RELEASE(BackgroundSync)
++NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(BackgroundSync)
 +  NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
 +  NS_INTERFACE_MAP_ENTRY(nsISupports)
 +NS_INTERFACE_MAP_END
 +
 +} // namespace dom
 +} // namespace mozilla
-diff --git a/dom/sync/SyncManager.h b/dom/sync/SyncManager.h
+diff --git a/dom/backgroundsync/BackgroundSync.h b/dom/backgroundsync/BackgroundSync.h
 new file mode 100644
 --- /dev/null
-+++ b/dom/sync/SyncManager.h
-@@ -0,0 +1,87 @@
++++ b/dom/backgroundsync/BackgroundSync.h
+@@ -0,0 +1,84 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this file,
 + * You can obtain one at http://mozilla.org/MPL/2.0/. */
 +
-+#ifndef mozilla_dom_SyncManager_h
-+#define mozilla_dom_SyncManager_h
++#ifndef mozilla_dom_BackgroundSync_h
++#define mozilla_dom_BackgroundSync_h
 +
-+#include "nsIPrincipal.h"
-+#include "nsWrapperCache.h"
-+
++#include "jsapi.h"
 +#include "mozilla/AlreadyAddRefed.h"
 +#include "mozilla/ErrorResult.h"
 +#include "mozilla/dom/BindingDeclarations.h"
-+
 +#include "nsCOMPtr.h"
-+#include "jsapi.h"
++#include "nsWrapperCache.h"
 +
 +class nsIGlobalObject;
++class nsIPrincipal;
 +
 +namespace mozilla {
 +
@@ -205,19 +182,19 @@ new file mode 100644
 +
 +class Promise;
 +
-+class SyncManager final : public nsISupports
++class BackgroundSync final : public nsISupports
 +                        , public nsWrapperCache
 +{
 +public:
 +  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
-+  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(SyncManager)
++  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(BackgroundSync)
 +
-+  static already_AddRefed<SyncManager>
++  static already_AddRefed<BackgroundSync>
 +  CreateOnMainThread(nsIGlobalObject* aGlobal,
 +                     nsIPrincipal* aPrincipal,
 +                     ErrorResult& aRv);
 +
-+  static already_AddRefed<SyncManager>
++  static already_AddRefed<BackgroundSync>
 +  CreateOnWorker(workers::WorkerPrivate* aWorkerPrivate);
 +
 +  // Binding methods.
@@ -225,7 +202,6 @@ new file mode 100644
 +  nsIGlobalObject*
 +  GetParentObject() const
 +  {
-+    // Can be nullptr on workers.
 +    return mGlobal;
 +  }
 +
@@ -243,10 +219,10 @@ new file mode 100644
 +  GetTags(ErrorResult& aRv);
 +
 +private:
-+  SyncManager(nsIGlobalObject* aGlobal,
-+              const mozilla::ipc::PrincipalInfo& aPrincipalInfo);
++  BackgroundSync(nsIGlobalObject* aGlobal,
++                 const mozilla::ipc::PrincipalInfo& aPrincipalInfo);
 +
-+  ~SyncManager();
++  ~BackgroundSync();
 +
 +  nsCOMPtr<nsIGlobalObject> mGlobal;
 +
@@ -256,11 +232,11 @@ new file mode 100644
 +} // namespace dom
 +} // namespace mozilla
 +
-+#endif // mozilla_dom_SyncManager_h
-diff --git a/dom/sync/moz.build b/dom/sync/moz.build
++#endif // mozilla_dom_BackgroundSync_h
+diff --git a/dom/backgroundsync/moz.build b/dom/backgroundsync/moz.build
 new file mode 100644
 --- /dev/null
-+++ b/dom/sync/moz.build
++++ b/dom/backgroundsync/moz.build
 @@ -0,0 +1,20 @@
 +# vim: set filetype=python:
 +# This Source Code Form is subject to the terms of the Mozilla Public
@@ -268,11 +244,11 @@ new file mode 100644
 +# file, You can obtain one at http://mozilla.org/MPL/2.0/.
 +
 +EXPORTS.mozilla.dom += [
-+    'SyncManager.h'
++    'BackgroundSync.h'
 +]
 +
 +UNIFIED_SOURCES += [
-+    'SyncManager.cpp'
++    'BackgroundSync.cpp'
 +]
 +
 +LOCAL_INCLUDES += [
@@ -282,32 +258,53 @@ new file mode 100644
 +include('/ipc/chromium/chromium-config.mozbuild')
 +
 +FINAL_LIBRARY = 'xul'
+diff --git a/dom/moz.build b/dom/moz.build
+--- a/dom/moz.build
++++ b/dom/moz.build
+@@ -38,16 +38,17 @@ if not CONFIG['MOZ_SIMPLEPUSH']:
+     interfaces += ['push']
+ 
+ DIRS += ['interfaces/' + i for i in interfaces]
+ 
+ DIRS += [
+     'animation',
+     'apps',
+     'base',
++    'backgroundsync',
+     'bluetooth',
+     'activities',
+     'archivereader',
+     'bindings',
+     'battery',
+     'browser-element',
+     'cache',
+     'canvas',
 diff --git a/dom/tests/mochitest/general/test_interfaces.html b/dom/tests/mochitest/general/test_interfaces.html
 --- a/dom/tests/mochitest/general/test_interfaces.html
 +++ b/dom/tests/mochitest/general/test_interfaces.html
-@@ -1301,16 +1301,18 @@ var interfaceNamesInGlobalScope =
-     "SVGUseElement",
+@@ -158,16 +158,18 @@ var interfaceNamesInGlobalScope =
+     "AudioParam",
  // IMPORTANT: Do not change this list without review from a DOM peer!
-     "SVGViewElement",
+     "AudioProcessingEvent",
  // IMPORTANT: Do not change this list without review from a DOM peer!
-     "SVGZoomAndPan",
+     "AudioStreamTrack",
  // IMPORTANT: Do not change this list without review from a DOM peer!
-     "SVGZoomEvent",
+     {name: "AVInputPort", b2g: true, permission: ["inputport"]},
  // IMPORTANT: Do not change this list without review from a DOM peer!
-+    {name: "SyncManager", b2g: true},
++    {name: "BackgroundSync", b2g: true},
 +// IMPORTANT: Do not change this list without review from a DOM peer!
-     {name: "RequestSyncManager", b2g: true, permission: ["requestsync-manager"] },
+     "BarProp",
  // IMPORTANT: Do not change this list without review from a DOM peer!
-     {name: "RequestSyncApp", b2g: true, permission: ["requestsync-manager"] },
+     "BatteryManager",
  // IMPORTANT: Do not change this list without review from a DOM peer!
-     {name: "RequestSyncTask", b2g: true, permission: ["requestsync-manager"] },
+     {name: "BeforeAfterKeyboardEvent", b2g: true,
+      permission: ["embed-apps", "before-after-keyboard-event"]},
  // IMPORTANT: Do not change this list without review from a DOM peer!
-     {name: "Telephony", b2g: true},
- // IMPORTANT: Do not change this list without review from a DOM peer!
-diff --git a/dom/webidl/SyncManager.webidl b/dom/webidl/SyncManager.webidl
+     "BeforeUnloadEvent",
+diff --git a/dom/webidl/BackgroundSync.webidl b/dom/webidl/BackgroundSync.webidl
 new file mode 100644
 --- /dev/null
-+++ b/dom/webidl/SyncManager.webidl
++++ b/dom/webidl/BackgroundSync.webidl
 @@ -0,0 +1,17 @@
 +/* -*- Mode: IDL; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -319,8 +316,8 @@ new file mode 100644
 +*/
 +
 +[Exposed=(Window,Worker),
-+ Func="mozilla::dom::SyncManager::PrefEnabled"]
-+interface SyncManager {
++ Func="mozilla::dom::BackgroundSync::PrefEnabled"]
++interface BackgroundSync {
 +  [Throws]
 +  Promise<void> register(DOMString tag);
 +  [Throws]
@@ -329,24 +326,24 @@ new file mode 100644
 diff --git a/dom/webidl/moz.build b/dom/webidl/moz.build
 --- a/dom/webidl/moz.build
 +++ b/dom/webidl/moz.build
-@@ -534,16 +534,17 @@ WEBIDL_FILES = [
-     'SVGTransformList.webidl',
-     'SVGTSpanElement.webidl',
-     'SVGUnitTypes.webidl',
-     'SVGURIReference.webidl',
-     'SVGUseElement.webidl',
-     'SVGViewElement.webidl',
-     'SVGZoomAndPan.webidl',
-     'SVGZoomEvent.webidl',
-+    'SyncManager.webidl',
-     'SystemUpdate.webidl',
-     'TCPServerSocket.webidl',
-     'TCPServerSocketEvent.webidl',
-     'TCPSocket.webidl',
-     'TCPSocketErrorEvent.webidl',
-     'TCPSocketEvent.webidl',
-     'Telephony.webidl',
-     'TelephonyCall.webidl',
+@@ -45,16 +45,17 @@ WEBIDL_FILES = [
+     'AudioNode.webidl',
+     'AudioParam.webidl',
+     'AudioProcessingEvent.webidl',
+     'AudioStreamTrack.webidl',
+     'AudioTrack.webidl',
+     'AudioTrackList.webidl',
+     'AutocompleteInfo.webidl',
+     'AVInputPort.webidl',
++    'BackgroundSync.webidl',
+     'BarProp.webidl',
+     'BaseKeyframeTypes.webidl',
+     'BatteryManager.webidl',
+     'BeforeAfterKeyboardEvent.webidl',
+     'BeforeUnloadEvent.webidl',
+     'BiquadFilterNode.webidl',
+     'Blob.webidl',
+     'BoxObject.webidl',
 diff --git a/dom/workers/WorkerPrefs.h b/dom/workers/WorkerPrefs.h
 --- a/dom/workers/WorkerPrefs.h
 +++ b/dom/workers/WorkerPrefs.h

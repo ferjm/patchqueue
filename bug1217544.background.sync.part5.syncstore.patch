@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  de70f576cc5331a27a764462987ed4b1e73fafba
+# Parent  ce90b71eb26e1cddfdc5f3bfe352dc90066fad21
 Bug 1217544 - Implement one-off BackgroundSync API. Part 5: Sync DB. r=baku
 
 diff --git a/dom/sync/SyncRegistration.cpp b/dom/sync/SyncRegistration.cpp

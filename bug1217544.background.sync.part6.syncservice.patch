@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  3a3beaa151110f1e5d4e7732ac9142fce99acad1
+# Parent  5901ee6f73622feed56745eaf2fb8947552d027a
 Bug 1217544 - Implement one-off BackgroundSync API. Part 6: SyncService. r=baku
 
 diff --git a/dom/interfaces/base/nsIServiceWorkerManager.idl b/dom/interfaces/base/nsIServiceWorkerManager.idl
@@ -1529,7 +1529,7 @@ diff --git a/dom/workers/PServiceWorkerManager.ipdl b/dom/workers/PServiceWorker
 diff --git a/dom/workers/ServiceWorkerEvents.cpp b/dom/workers/ServiceWorkerEvents.cpp
 --- a/dom/workers/ServiceWorkerEvents.cpp
 +++ b/dom/workers/ServiceWorkerEvents.cpp
-@@ -1153,41 +1153,31 @@ PushEvent::WrapObjectInternal(JSContext*
+@@ -1154,41 +1154,31 @@ PushEvent::WrapObjectInternal(JSContext*
  // Background Sync
  
  SyncEvent::SyncEvent(EventTarget* aOwner)

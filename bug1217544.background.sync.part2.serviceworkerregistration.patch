@@ -1,51 +1,51 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  4cfb44debe970a63f0baa9c9d1618e64c5ed0105
+# Parent  9fa7a125700b41fd5099b359ebc070e947043eb2
 Bug 1217544 - Implement one-off BackgroundSync API. Part 2: ServiceWorkerRegistration. r=baku
 
-diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
---- a/dom/sync/SyncManager.cpp
-+++ b/dom/sync/SyncManager.cpp
-@@ -44,24 +44,25 @@ SyncManager::CreateOnMainThread(nsIGloba
+diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
+--- a/dom/backgroundsync/BackgroundSync.cpp
++++ b/dom/backgroundsync/BackgroundSync.cpp
+@@ -44,24 +44,25 @@ BackgroundSync::CreateOnMainThread(nsIGl
    }
  
-   RefPtr<SyncManager> ref = new SyncManager(aGlobal, principalInfo);
+   RefPtr<BackgroundSync> ref = new BackgroundSync(aGlobal, principalInfo);
    return ref.forget();
  }
  
  // static
- already_AddRefed<SyncManager>
--SyncManager::CreateOnWorker(WorkerPrivate* aWorkerPrivate)
-+SyncManager::CreateOnWorker(nsIGlobalObject* aGlobal,
-+                            WorkerPrivate* aWorkerPrivate)
+ already_AddRefed<BackgroundSync>
+-BackgroundSync::CreateOnWorker(WorkerPrivate* aWorkerPrivate)
++BackgroundSync::CreateOnWorker(nsIGlobalObject* aGlobal,
++                               WorkerPrivate* aWorkerPrivate)
  {
    MOZ_ASSERT(aWorkerPrivate);
    aWorkerPrivate->AssertIsOnWorkerThread();
  
    const PrincipalInfo& principalInfo = aWorkerPrivate->GetPrincipalInfo();
  
--  RefPtr<SyncManager> ref = new SyncManager(nullptr, principalInfo);
-+  RefPtr<SyncManager> ref = new SyncManager(aGlobal, principalInfo);
+-  RefPtr<BackgroundSync> ref = new BackgroundSync(nullptr,
++  RefPtr<BackgroundSync> ref = new BackgroundSync(aGlobal,
+                                                   principalInfo);
    return ref.forget();
  }
  
- SyncManager::SyncManager(nsIGlobalObject* aGlobal,
-                          const PrincipalInfo& aPrincipalInfo)
+ BackgroundSync::BackgroundSync(nsIGlobalObject* aGlobal,
+                                const PrincipalInfo& aPrincipalInfo)
    : mGlobal(aGlobal)
    , mPrincipalInfo(new PrincipalInfo(aPrincipalInfo))
- {}
-@@ -82,17 +83,17 @@ bool
- SyncManager::PrefEnabled(JSContext* aCx, JSObject* aObj)
+@@ -82,17 +83,17 @@ BackgroundSync::WrapObject(JSContext* aC
+ bool
+ BackgroundSync::PrefEnabled(JSContext* aCx, JSObject* aObj)
  {
    using mozilla::dom::workers::WorkerPrivate;
    using mozilla::dom::workers::GetWorkerPrivateFromContext;
  
    // If we are on the main thread, then check the pref directly.
    if (NS_IsMainThread()) {
-     bool enabled = false;
--    Preferences::GetBool("dom.background.sync.enabled", &enabled);
-+    Preferences::GetBool("dom.backgroundSync.enabled", &enabled);
-     return enabled;
+-    Preferences::GetBool("dom.background.sync.enabled", false);
++    Preferences::GetBool("dom.backgroundSync.enabled", false);
+     return false;
    }
  
    // Otherwise check the pref via the worker private helper.
@@ -53,18 +53,31 @@ diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
    if (!workerPrivate) {
      return false;
    }
-diff --git a/dom/sync/SyncManager.h b/dom/sync/SyncManager.h
---- a/dom/sync/SyncManager.h
-+++ b/dom/sync/SyncManager.h
-@@ -41,24 +41,24 @@ public:
-   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(SyncManager)
+diff --git a/dom/backgroundsync/BackgroundSync.h b/dom/backgroundsync/BackgroundSync.h
+--- a/dom/backgroundsync/BackgroundSync.h
++++ b/dom/backgroundsync/BackgroundSync.h
+@@ -27,29 +27,30 @@ namespace dom {
  
-   static already_AddRefed<SyncManager>
+ namespace workers {
+   class WorkerPrivate;
+ } // namespace workers
+ 
+ class Promise;
+ 
+ class BackgroundSync final : public nsISupports
+-                        , public nsWrapperCache
++                           , public nsWrapperCache
+ {
+ public:
+   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(BackgroundSync)
+ 
+   static already_AddRefed<BackgroundSync>
    CreateOnMainThread(nsIGlobalObject* aGlobal,
                       nsIPrincipal* aPrincipal,
                       ErrorResult& aRv);
  
-   static already_AddRefed<SyncManager>
+   static already_AddRefed<BackgroundSync>
 -  CreateOnWorker(workers::WorkerPrivate* aWorkerPrivate);
 +  CreateOnWorker(nsIGlobalObject* aGlobal,
 +                 workers::WorkerPrivate* aWorkerPrivate);
@@ -74,15 +87,8 @@ diff --git a/dom/sync/SyncManager.h b/dom/sync/SyncManager.h
    nsIGlobalObject*
    GetParentObject() const
    {
--    // Can be nullptr on workers.
      return mGlobal;
    }
- 
-   JSObject*
-   WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
- 
-   static bool PrefEnabled(JSContext* aCx, JSObject* aObj);
- 
 diff --git a/dom/webidl/ServiceWorkerRegistration.webidl b/dom/webidl/ServiceWorkerRegistration.webidl
 --- a/dom/webidl/ServiceWorkerRegistration.webidl
 +++ b/dom/webidl/ServiceWorkerRegistration.webidl
@@ -95,8 +101,8 @@ diff --git a/dom/webidl/ServiceWorkerRegistration.webidl b/dom/webidl/ServiceWor
    [Throws, Exposed=(Window,Worker), Func="nsContentUtils::PushEnabled"]
    readonly attribute PushManager pushManager;
  #endif
-+  [Throws, Exposed=(Window,Worker), Func="SyncManager::PrefEnabled"]
-+  readonly attribute SyncManager sync;
++  [Throws, Exposed=(Window,Worker), Func="BackgroundSync::PrefEnabled"]
++  readonly attribute BackgroundSync sync;
  };
 diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWorkerRegistration.cpp
 --- a/dom/workers/ServiceWorkerRegistration.cpp
@@ -110,8 +116,8 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
  #include "mozilla/dom/PushManager.h"
  #endif
  
-+#include "mozilla/dom/SyncManagerBinding.h"
-+#include "mozilla/dom/SyncManager.h"
++#include "mozilla/dom/BackgroundSyncBinding.h"
++#include "mozilla/dom/BackgroundSync.h"
 +
  using namespace mozilla::dom::workers;
  
@@ -131,11 +137,11 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
  #ifndef MOZ_SIMPLEPUSH
  NS_IMPL_CYCLE_COLLECTION_INHERITED(ServiceWorkerRegistrationMainThread, ServiceWorkerRegistrationBase,
 -                                   mPushManager,
-+                                   mPushManager, mSyncManager,
++                                   mPushManager, mBackgroundSync,
                                     mInstallingWorker, mWaitingWorker, mActiveWorker);
  #else
  NS_IMPL_CYCLE_COLLECTION_INHERITED(ServiceWorkerRegistrationMainThread, ServiceWorkerRegistrationBase,
-+                                   mSyncManager,
++                                   mBackgroundSync,
                                     mInstallingWorker, mWaitingWorker, mActiveWorker);
  #endif
  
@@ -153,12 +159,12 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
  #endif /* ! MOZ_SIMPLEPUSH */
  }
  
-+SyncManager*
++BackgroundSync*
 +ServiceWorkerRegistrationMainThread::GetSync(ErrorResult& aRv)
 +{
 +  AssertIsOnMainThread();
 +
-+  if (!mSyncManager) {
++  if (!mBackgroundSync) {
 +    nsCOMPtr<nsIGlobalObject> globalObject = do_QueryInterface(GetOwner());
 +
 +    if (!globalObject) {
@@ -178,11 +184,11 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
 +      return nullptr;
 +    }
 +
-+    mSyncManager = SyncManager::CreateOnMainThread(globalObject, principal,
++    mBackgroundSync = BackgroundSync::CreateOnMainThread(globalObject, principal,
 +                                                   aRv);
 +  }
 +
-+  return mSyncManager;
++  return mBackgroundSync;
 +}
 +
  ////////////////////////////////////////////////////
@@ -202,7 +208,7 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
  #ifndef MOZ_SIMPLEPUSH
    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPushManager)
  #endif
-+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mSyncManager)
++  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mBackgroundSync)
  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
  
  NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(ServiceWorkerRegistrationWorkerThread,
@@ -210,7 +216,7 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
  #ifndef MOZ_SIMPLEPUSH
    NS_IMPL_CYCLE_COLLECTION_UNLINK(mPushManager)
  #endif
-+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mSyncManager)
++  NS_IMPL_CYCLE_COLLECTION_UNLINK(mBackgroundSync)
    tmp->ReleaseListener(RegistrationIsGoingAway);
  NS_IMPL_CYCLE_COLLECTION_UNLINK_END
  
@@ -228,15 +234,15 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
  #endif /* ! MOZ_SIMPLEPUSH */
  }
  
-+SyncManager*
++BackgroundSync*
 +ServiceWorkerRegistrationWorkerThread::GetSync(ErrorResult& aRv)
 +{
-+  if (!mSyncManager) {
-+    mSyncManager = SyncManager::CreateOnWorker(mWorkerPrivate->GlobalScope(),
-+                                               mWorkerPrivate);
++  if (!mBackgroundSync) {
++    mBackgroundSync = BackgroundSync::CreateOnWorker(mWorkerPrivate->GlobalScope(),
++                                                     mWorkerPrivate);
 +  }
 +
-+  return mSyncManager;
++  return mBackgroundSync;
 +}
 +
  } // dom namespace
@@ -253,7 +259,7 @@ diff --git a/dom/workers/ServiceWorkerRegistration.h b/dom/workers/ServiceWorker
  
  class Promise;
  class PushManager;
-+class SyncManager;
++class BackgroundSync;
  class WorkerListener;
  
  namespace workers {
@@ -271,7 +277,7 @@ diff --git a/dom/workers/ServiceWorkerRegistration.h b/dom/workers/ServiceWorker
    already_AddRefed<PushManager>
    GetPushManager(JSContext* aCx, ErrorResult& aRv);
  
-+  SyncManager*
++  BackgroundSync*
 +  GetSync(ErrorResult& aRv);
 +
    // DOMEventTargethelper
@@ -292,7 +298,7 @@ diff --git a/dom/workers/ServiceWorkerRegistration.h b/dom/workers/ServiceWorker
    RefPtr<PushManager> mPushManager;
  #endif
 +
-+  RefPtr<SyncManager> mSyncManager;
++  RefPtr<BackgroundSync> mBackgroundSync;
  };
  
  class ServiceWorkerRegistrationWorkerThread final : public ServiceWorkerRegistrationBase
@@ -310,7 +316,7 @@ diff --git a/dom/workers/ServiceWorkerRegistration.h b/dom/workers/ServiceWorker
    already_AddRefed<PushManager>
    GetPushManager(ErrorResult& aRv);
  
-+  SyncManager*
++  BackgroundSync*
 +  GetSync(ErrorResult& aRv);
 +
  private:
@@ -331,7 +337,7 @@ diff --git a/dom/workers/ServiceWorkerRegistration.h b/dom/workers/ServiceWorker
    RefPtr<PushManager> mPushManager;
  #endif
 +
-+  RefPtr<SyncManager> mSyncManager;
++  RefPtr<BackgroundSync> mBackgroundSync;
  };
  
  } // namespace dom

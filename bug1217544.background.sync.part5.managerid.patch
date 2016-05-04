@@ -1,0 +1,229 @@
+# HG changeset patch
+# User Fernando Jimenez <ferjmoreno@gmail.com>
+# Parent  264cc148309eed356129b01b4246e7db76787ac9
+Bug 1217544 - Implement one-off BackgroundSync API. Part 5: Ensure unique manager per principal. r=baku
+
+diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
+--- a/dom/backgroundsync/BackgroundSync.cpp
++++ b/dom/backgroundsync/BackgroundSync.cpp
+@@ -319,17 +319,18 @@ BackgroundSync::ActorFailed()
+ 
+ void
+ BackgroundSync::ActorCreated(PBackgroundChild* aActor)
+ {
+   MOZ_ASSERT(IsBackgroundSyncThread());
+   MOZ_ASSERT(aActor);
+   MOZ_ASSERT(!mActor);
+ 
+-  PBackgroundSyncChild* actor = aActor->SendPBackgroundSyncConstructor();
++  PBackgroundSyncChild* actor =
++    aActor->SendPBackgroundSyncConstructor(*mPrincipalInfo);
+   mActor = static_cast<BackgroundSyncChild*>(actor);
+   MOZ_ASSERT(mActor);
+ 
+   // Flush pending requests.
+   for (uint32_t i = 0, len = mPendingOperations.Length(); i < len; ++i) {
+     RefPtr<SyncOpRunnable> runnable = mPendingOperations[i];
+     MOZ_ASSERT(runnable);
+     runnable->SetActor(mActor);
+diff --git a/dom/backgroundsync/BackgroundSyncChild.h b/dom/backgroundsync/BackgroundSyncChild.h
+--- a/dom/backgroundsync/BackgroundSyncChild.h
++++ b/dom/backgroundsync/BackgroundSyncChild.h
+@@ -12,17 +12,17 @@
+ #include "mozilla/dom/PBackgroundSyncChild.h"
+ 
+ #include "nsID.h"
+ #include "nsClassHashtable.h"
+ 
+ namespace mozilla {
+ 
+ namespace ipc {
+-class BackgroundChildImpl;
++  class BackgroundChildImpl;
+ } // namespace ipc
+ 
+ namespace dom {
+ 
+ class BackgroundSync;
+ 
+ class BackgroundSyncChild final : public PBackgroundSyncChild
+ {
+diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/BackgroundSyncParent.cpp
+--- a/dom/backgroundsync/BackgroundSyncParent.cpp
++++ b/dom/backgroundsync/BackgroundSyncParent.cpp
+@@ -10,17 +10,17 @@
+ #include "mozilla/ipc/BackgroundParent.h"
+ 
+ namespace mozilla {
+ 
+ using namespace ipc;
+ 
+ namespace dom {
+ 
+-BackgroundSyncParent::BackgroundSyncParent()
++BackgroundSyncParent::BackgroundSyncParent(const PrincipalInfo& aPrincipalInfo)
+ {
+   AssertIsOnBackgroundThread();
+ }
+ 
+ BackgroundSyncParent::~BackgroundSyncParent()
+ {
+   AssertIsOnBackgroundThread();
+ }
+diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/BackgroundSyncParent.h
+--- a/dom/backgroundsync/BackgroundSyncParent.h
++++ b/dom/backgroundsync/BackgroundSyncParent.h
+@@ -10,32 +10,33 @@
+ #include "mozilla/dom/PBackgroundSyncParent.h"
+ #include "mozilla/dom/BackgroundSyncIPCTypes.h"
+ 
+ #include "nsID.h"
+ 
+ namespace mozilla {
+ 
+ namespace ipc {
+-class BackgroundParentImpl;
++  class BackgroundParentImpl;
++  class PrincipalInfo;
+ } // namespace ipc
+ 
+ namespace dom {
+ 
+ class BackgroundSyncParent final : public PBackgroundSyncParent
+ {
+   friend class mozilla::ipc::BackgroundParentImpl;
+ 
+ public:
+   virtual bool RecvRequest(const nsID& aRequestId,
+                            const SyncOp& aOp) override;
+ 
+   virtual bool RecvShutdown() override;
+ private:
+-  BackgroundSyncParent();
++  BackgroundSyncParent(const PrincipalInfo& aPrincipalInfo);
+   ~BackgroundSyncParent();
+ 
+   virtual void ActorDestroy(ActorDestroyReason aWhy) override;
+ };
+ 
+ } // namespace dom
+ } // namespace mozilla
+ 
+diff --git a/ipc/glue/BackgroundChildImpl.cpp b/ipc/glue/BackgroundChildImpl.cpp
+--- a/ipc/glue/BackgroundChildImpl.cpp
++++ b/ipc/glue/BackgroundChildImpl.cpp
+@@ -470,17 +470,18 @@ BackgroundChildImpl::DeallocPFileSystemR
+   return true;
+ }
+ 
+ // -----------------------------------------------------------------------------
+ // Background Sync API
+ // -----------------------------------------------------------------------------
+ 
+ dom::PBackgroundSyncChild*
+-BackgroundChildImpl::AllocPBackgroundSyncChild()
++BackgroundChildImpl::AllocPBackgroundSyncChild(
++    const PrincipalInfo& aPrincipalInfo)
+ {
+   RefPtr<BackgroundSyncChild> agent = new BackgroundSyncChild();
+   return agent.forget().take();
+ }
+ 
+ bool
+ BackgroundChildImpl::DeallocPBackgroundSyncChild(PBackgroundSyncChild* aActor)
+ {
+diff --git a/ipc/glue/BackgroundChildImpl.h b/ipc/glue/BackgroundChildImpl.h
+--- a/ipc/glue/BackgroundChildImpl.h
++++ b/ipc/glue/BackgroundChildImpl.h
+@@ -161,17 +161,17 @@ protected:
+ 
+   virtual PFileSystemRequestChild*
+   AllocPFileSystemRequestChild(const FileSystemParams&) override;
+ 
+   virtual bool
+   DeallocPFileSystemRequestChild(PFileSystemRequestChild*) override;
+ 
+   virtual PBackgroundSyncChild*
+-  AllocPBackgroundSyncChild() override;
++  AllocPBackgroundSyncChild(const PrincipalInfo& aPrincipalInfo) override;
+ 
+   virtual bool
+   DeallocPBackgroundSyncChild(PBackgroundSyncChild* aActor) override;
+ };
+ 
+ class BackgroundChildImpl::ThreadLocal final
+ {
+   friend class nsAutoPtr<ThreadLocal>;
+diff --git a/ipc/glue/BackgroundParentImpl.cpp b/ipc/glue/BackgroundParentImpl.cpp
+--- a/ipc/glue/BackgroundParentImpl.cpp
++++ b/ipc/glue/BackgroundParentImpl.cpp
+@@ -889,22 +889,23 @@ BackgroundParentImpl::DeallocPFileSystem
+   AssertIsOnBackgroundThread();
+ 
+   RefPtr<FileSystemRequestParent> parent =
+     dont_AddRef(static_cast<FileSystemRequestParent*>(aDoomed));
+   return true;
+ }
+ 
+ mozilla::dom::PBackgroundSyncParent*
+-BackgroundParentImpl::AllocPBackgroundSyncParent()
++BackgroundParentImpl::AllocPBackgroundSyncParent(
++    const PrincipalInfo& aPrincipalInfo)
+ {
+   AssertIsInMainProcess();
+   AssertIsOnBackgroundThread();
+ 
+-  return new BackgroundSyncParent();
++  return new BackgroundSyncParent(aPrincipalInfo);
+ }
+ 
+ bool
+ BackgroundParentImpl::DeallocPBackgroundSyncParent(PBackgroundSyncParent* aActor)
+ {
+   AssertIsInMainProcess();
+   AssertIsOnBackgroundThread();
+   MOZ_ASSERT(aActor);
+diff --git a/ipc/glue/BackgroundParentImpl.h b/ipc/glue/BackgroundParentImpl.h
+--- a/ipc/glue/BackgroundParentImpl.h
++++ b/ipc/glue/BackgroundParentImpl.h
+@@ -193,17 +193,17 @@ protected:
+   virtual bool
+   RecvPFileSystemRequestConstructor(PFileSystemRequestParent* aActor,
+                                     const FileSystemParams& aParams) override;
+ 
+   virtual bool
+   DeallocPFileSystemRequestParent(PFileSystemRequestParent*) override;
+ 
+   virtual PBackgroundSyncParent*
+-  AllocPBackgroundSyncParent() override;
++  AllocPBackgroundSyncParent(const PrincipalInfo& aPrincipalInfo) override;
+ 
+   virtual bool
+   DeallocPBackgroundSyncParent(PBackgroundSyncParent* aActor) override;
+ };
+ 
+ } // namespace ipc
+ } // namespace mozilla
+ 
+diff --git a/ipc/glue/PBackground.ipdl b/ipc/glue/PBackground.ipdl
+--- a/ipc/glue/PBackground.ipdl
++++ b/ipc/glue/PBackground.ipdl
+@@ -97,17 +97,17 @@ parent:
+   async PAsmJSCacheEntry(OpenMode openMode,
+                          WriteParams write,
+                          PrincipalInfo principalInfo);
+ 
+   async PQuota();
+ 
+   async PFileSystemRequest(FileSystemParams params);
+ 
+-  async PBackgroundSync();
++  async PBackgroundSync(PrincipalInfo aPrincipalInfo);
+ 
+ child:
+   async PCache();
+   async PCacheStreamControl();
+ 
+ both:
+   async PBlob(BlobConstructorParams params);
+ 
