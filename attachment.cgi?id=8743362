@@ -1,8 +1,203 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  d4557f48a3f67f278d8d5964d77a43488e55214a
+# Parent  c35f352400054fbbcf3bb907ab66042c5c3f5b5d
 Bug 1217544 - Implement one-off BackgroundSync API. Part 4: Sync event. r=baku
 
+diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
+--- a/dom/backgroundsync/BackgroundSync.cpp
++++ b/dom/backgroundsync/BackgroundSync.cpp
+@@ -143,29 +143,32 @@ private:
+ };
+ 
+ // BackgroundSync
+ 
+ // static
+ already_AddRefed<BackgroundSync>
+ BackgroundSync::CreateOnMainThread(nsIGlobalObject* aGlobal,
+                                    nsIPrincipal* aPrincipal,
++                                   const nsAString& aScope,
+                                    ErrorResult& aRv)
+ {
+   MOZ_ASSERT(aGlobal);
+   MOZ_ASSERT(aPrincipal);
++  MOZ_ASSERT(!aScope.IsEmpty());
+   MOZ_ASSERT(NS_IsMainThread());
+ 
+   PrincipalInfo principalInfo;
+   aRv = PrincipalToPrincipalInfo(aPrincipal, &principalInfo);
+   if (NS_WARN_IF(aRv.Failed())) {
+     return nullptr;
+   }
+ 
+-  RefPtr<BackgroundSync> ref = new BackgroundSync(aGlobal, principalInfo);
++  RefPtr<BackgroundSync> ref = new BackgroundSync(aGlobal, principalInfo,
++                                                  aScope);
+ 
+   // Register as observer for inner-window-destroyed.
+   nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
+   if (obs) {
+     aRv = obs->AddObserver(ref, "inner-window-destroyed",
+                            false /* ownsWeak */);
+     if (NS_WARN_IF(aRv.Failed())) {
+       return nullptr;
+@@ -181,41 +184,46 @@ BackgroundSync::CreateOnMainThread(nsIGl
+   ref->mInnerID = window->WindowID();
+ 
+   return ref.forget();
+ }
+ 
+ // static
+ already_AddRefed<BackgroundSync>
+ BackgroundSync::CreateOnWorker(nsIGlobalObject* aGlobal,
+-                               WorkerPrivate* aWorkerPrivate)
++                               WorkerPrivate* aWorkerPrivate,
++                               const nsAString& aScope)
+ {
+   MOZ_ASSERT(aWorkerPrivate);
++  MOZ_ASSERT(!aScope.IsEmpty());
+   aWorkerPrivate->AssertIsOnWorkerThread();
+ 
+   const PrincipalInfo& principalInfo = aWorkerPrivate->GetPrincipalInfo();
+ 
+   RefPtr<BackgroundSync> ref = new BackgroundSync(aGlobal,
+-                                                  principalInfo);
++                                                  principalInfo,
++                                                  aScope);
+ 
+   ref->mWorkerFeature = new BackgroundSyncFeature(ref);
+   if (NS_WARN_IF(!aWorkerPrivate->AddFeature(ref->mWorkerFeature))) {
+     ref->mWorkerFeature = nullptr;
+     return nullptr;
+   }
+ 
+   return ref.forget();
+ }
+ 
+ BackgroundSync::BackgroundSync(nsIGlobalObject* aGlobal,
+-                               const PrincipalInfo& aPrincipalInfo)
++                               const PrincipalInfo& aPrincipalInfo,
++                               const nsAString& aScope)
+   : mInnerID(0)
+   , mGlobal(aGlobal)
+   , mShuttingDown(false)
+   , mPrincipalInfo(MakeUnique<PrincipalInfo>(aPrincipalInfo))
++  , mScope(aScope)
+ {
+ #ifdef DEBUG
+   mThread = do_GetCurrentThread();
+ #endif
+ 
+   MOZ_ASSERT(aGlobal);
+ 
+   // Register this component to PBackground.
+@@ -390,17 +398,17 @@ BackgroundSync::ExecuteOp(const SyncOpAr
+ 
+ // WebIDL interface methods.
+ 
+ already_AddRefed<Promise>
+ BackgroundSync::Register(const nsAString& aTag, ErrorResult& aRv)
+ {
+   MOZ_ASSERT(IsBackgroundSyncThread());
+ 
+-  const SyncRegisterArgs args((nsString(aTag)));
++  const SyncRegisterArgs args(mScope, (nsString(aTag)));
+   return ExecuteOp(SyncOpArgs(args), aRv);
+ }
+ 
+ already_AddRefed<Promise>
+ BackgroundSync::GetTags(ErrorResult& aRv)
+ {
+   MOZ_ASSERT(IsBackgroundSyncThread());
+ 
+diff --git a/dom/backgroundsync/BackgroundSync.h b/dom/backgroundsync/BackgroundSync.h
+--- a/dom/backgroundsync/BackgroundSync.h
++++ b/dom/backgroundsync/BackgroundSync.h
+@@ -47,22 +47,24 @@ class BackgroundSync final : public nsII
+ public:
+   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_AMBIGUOUS(
+       BackgroundSync, nsIIPCBackgroundChildCreateCallback)
+ 
+   static already_AddRefed<BackgroundSync>
+   CreateOnMainThread(nsIGlobalObject* aGlobal,
+                      nsIPrincipal* aPrincipal,
++                     const nsAString& aScope,
+                      ErrorResult& aRv);
+ 
+   static already_AddRefed<BackgroundSync>
+   CreateOnWorker(nsIGlobalObject* aGlobal,
+-                 workers::WorkerPrivate* aWorkerPrivate);
+-
++                 workers::WorkerPrivate* aWorkerPrivate,
++                 const nsAString& aScope);
++ 
+   // Binding methods.
+ 
+   nsIGlobalObject*
+   GetParentObject() const
+   {
+     return mGlobal;
+   }
+ 
+@@ -77,17 +79,18 @@ public:
+   Register(const nsAString& aTag, ErrorResult& aRv);
+ 
+   already_AddRefed<Promise>
+   GetTags(ErrorResult& aRv);
+ 
+   void Shutdown();
+ private:
+   BackgroundSync(nsIGlobalObject* aGlobal,
+-                 const mozilla::ipc::PrincipalInfo& aPrincipalInfo);
++                 const mozilla::ipc::PrincipalInfo& aPrincipalInfo,
++                 const nsAString& aScope);
+ 
+   ~BackgroundSync();
+ 
+   bool IsBackgroundSyncThread();
+ 
+   already_AddRefed<Promise>
+   ExecuteOp(const SyncOpArgs& aArgs, ErrorResult& aRv);
+ 
+@@ -100,15 +103,17 @@ private:
+   RefPtr<BackgroundSyncChild> mActor;
+ 
+   bool mShuttingDown;
+ 
+   UniquePtr<mozilla::ipc::PrincipalInfo> mPrincipalInfo;
+ 
+   nsCOMPtr<nsIThread> mThread;
+ 
++  nsString mScope;
++
+   nsTArray<RefPtr<SyncOpRunnable>> mPendingOperations;
+ };
+ 
+ } // namespace dom
+ } // namespace mozilla
+ 
+ #endif // mozilla_dom_BackgroundSync_h
+diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh
+--- a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh
++++ b/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh
+@@ -4,16 +4,17 @@
+ 
+ include PBackgroundSharedTypes;
+ 
+ namespace mozilla {
+ namespace dom {
+ 
+ struct SyncRegisterArgs
+ {
++  nsString mScope;
+   nsString mTag;
+ };
+ 
+ struct SyncGetTagsArgs
+ {
+ };
+ 
+ union SyncOpArgs
 diff --git a/dom/bindings/Bindings.conf b/dom/bindings/Bindings.conf
 --- a/dom/bindings/Bindings.conf
 +++ b/dom/bindings/Bindings.conf
@@ -57,198 +252,6 @@ diff --git a/dom/interfaces/base/nsIServiceWorkerManager.idl b/dom/interfaces/ba
  %{ C++
  #define SERVICEWORKERMANAGER_CONTRACTID "@mozilla.org/serviceworkers/manager;1"
  %}
-diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
---- a/dom/backgroundsync/BackgroundSync.cpp
-+++ b/dom/backgroundsync/BackgroundSync.cpp
-@@ -144,29 +144,32 @@ private:
- 
- 
- // BackgroundSync
- 
- // static
- already_AddRefed<BackgroundSync>
- BackgroundSync::CreateOnMainThread(nsIGlobalObject* aGlobal,
-                                    nsIPrincipal* aPrincipal,
-+                                   const nsAString& aScope,
-                                    ErrorResult& aRv)
- {
-   MOZ_ASSERT(aGlobal);
-   MOZ_ASSERT(aPrincipal);
-+  MOZ_ASSERT(!aScope.IsEmpty());
-   MOZ_ASSERT(NS_IsMainThread());
- 
-   PrincipalInfo principalInfo;
-   aRv = PrincipalToPrincipalInfo(aPrincipal, &principalInfo);
-   if (NS_WARN_IF(aRv.Failed())) {
-     return nullptr;
-   }
- 
--  RefPtr<BackgroundSync> ref = new BackgroundSync(aGlobal, principalInfo);
-+  RefPtr<BackgroundSync> ref = new BackgroundSync(aGlobal, principalInfo,
-+                                                  aScope);
- 
-   // Register as observer for inner-window-destroyed.
-   nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
-   if (obs) {
-     aRv = obs->AddObserver(ref, "inner-window-destroyed",
-                            false /* ownsWeak */);
-     if (NS_WARN_IF(aRv.Failed())) {
-       return nullptr;
-@@ -182,40 +185,45 @@ BackgroundSync::CreateOnMainThread(nsIGl
-   ref->mInnerID = window->WindowID();
- 
-   return ref.forget();
- }
- 
- // static
- already_AddRefed<BackgroundSync>
- BackgroundSync::CreateOnWorker(nsIGlobalObject* aGlobal,
--                               WorkerPrivate* aWorkerPrivate)
-+                               WorkerPrivate* aWorkerPrivate,
-+                               const nsAString& aScope)
- {
-   MOZ_ASSERT(aWorkerPrivate);
-+  MOZ_ASSERT(!aScope.IsEmpty());
-   aWorkerPrivate->AssertIsOnWorkerThread();
- 
-   const PrincipalInfo& principalInfo = aWorkerPrivate->GetPrincipalInfo();
- 
--  RefPtr<BackgroundSync> ref = new BackgroundSync(aGlobal, principalInfo);
-+  RefPtr<BackgroundSync> ref = new BackgroundSync(aGlobal, principalInfo,
-+                                                  aScope);
- 
-   ref->mWorkerFeature = new BackgroundSyncFeature(ref);
-   if (NS_WARN_IF(!aWorkerPrivate->AddFeature(ref->mWorkerFeature))) {
-     ref->mWorkerFeature = nullptr;
-     return nullptr;
-   }
- 
-   return ref.forget();
- }
- 
- BackgroundSync::BackgroundSync(nsIGlobalObject* aGlobal,
--                               const PrincipalInfo& aPrincipalInfo)
-+                               const PrincipalInfo& aPrincipalInfo,
-+                               const nsAString& aScope)
-   : mInnerID(0)
-   , mGlobal(aGlobal)
-   , mShuttingDown(false)
-   , mPrincipalInfo(MakeUnique<PrincipalInfo>(aPrincipalInfo))
-+  , mScope(aScope)
- {
- #ifdef DEBUG
-   mThread = do_GetCurrentThread();
- #endif
- 
-   MOZ_ASSERT(aGlobal);
- 
-   // Register this component to PBackground.
-@@ -391,17 +399,17 @@ BackgroundSync::ExecuteOp(const SyncOpAr
- 
- // WebIDL interface methods.
- 
- already_AddRefed<Promise>
- BackgroundSync::Register(const nsAString& aTag, ErrorResult& aRv)
- {
-   MOZ_ASSERT(IsBackgroundSyncThread());
- 
--  const SyncRegisterArgs args((nsString(aTag)));
-+  const SyncRegisterArgs args(mScope, (nsString(aTag)));
-   return ExecuteOp(SyncOpArgs(args), aRv);
- }
- 
- already_AddRefed<Promise>
- BackgroundSync::GetTags(ErrorResult& aRv)
- {
-   MOZ_ASSERT(IsBackgroundSyncThread());
- 
-diff --git a/dom/backgroundsync/BackgroundSync.h b/dom/backgroundsync/BackgroundSync.h
---- a/dom/backgroundsync/BackgroundSync.h
-+++ b/dom/backgroundsync/BackgroundSync.h
-@@ -50,21 +50,23 @@ class BackgroundSync final : public nsII
- public:
-   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
-   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_AMBIGUOUS(
-       BackgroundSync, nsIIPCBackgroundChildCreateCallback)
-  
-   static already_AddRefed<BackgroundSync>
-   CreateOnMainThread(nsIGlobalObject* aGlobal,
-                      nsIPrincipal* aPrincipal,
-+                     const nsAString& aScope,
-                      ErrorResult& aRv);
- 
-   static already_AddRefed<BackgroundSync>
-   CreateOnWorker(nsIGlobalObject* aGlobal,
--                 workers::WorkerPrivate* aWorkerPrivate);
-+                 workers::WorkerPrivate* aWorkerPrivate,
-+                 const nsAString& aScope);
- 
-   // Binding methods.
- 
-   nsIGlobalObject*
-   GetParentObject() const
-   {
-     // Can be nullptr on workers.
-     return mGlobal;
-@@ -81,17 +83,18 @@ public:
-   Register(const nsAString& aTag, ErrorResult& aRv);
- 
-   already_AddRefed<Promise>
-   GetTags(ErrorResult& aRv);
- 
-   void Shutdown();
- private:
-   BackgroundSync(nsIGlobalObject* aGlobal,
--              const mozilla::ipc::PrincipalInfo& aPrincipalInfo);
-+                 const mozilla::ipc::PrincipalInfo& aPrincipalInfo,
-+                 const nsAString& aScope);
- 
-   ~BackgroundSync();
- 
-   bool IsBackgroundSyncThread();
- 
-   already_AddRefed<Promise>
-   ExecuteOp(const SyncOpArgs& aArgs, ErrorResult& aRv);
- 
-@@ -104,15 +107,17 @@ private:
-   RefPtr<BackgroundSyncChild> mActor;
- 
-   bool mShuttingDown;
- 
-   UniquePtr<mozilla::ipc::PrincipalInfo> mPrincipalInfo;
- 
-   nsCOMPtr<nsIThread> mThread;
- 
-+  nsString mScope;
-+
-   nsTArray<RefPtr<SyncOpRunnable>> mPendingOperations;
- };
- 
- } // namespace dom
- } // namespace mozilla
- 
- #endif // mozilla_dom_BackgroundSync_h
-diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh
---- a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh
-+++ b/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh
-@@ -4,16 +4,17 @@
- 
- include PBackgroundSharedTypes;
- 
- namespace mozilla {
- namespace dom {
- 
- struct SyncRegisterArgs
- {
-+  nsString mScope;
-   nsString mTag;
- };
- 
- struct SyncGetTagsArgs
- {
- };
- 
- union SyncOpArgs
 diff --git a/dom/webidl/BackgroundSyncEvent.webidl b/dom/webidl/BackgroundSyncEvent.webidl
 new file mode 100644
 --- /dev/null
@@ -326,26 +329,26 @@ diff --git a/dom/workers/PServiceWorkerManager.ipdl b/dom/workers/PServiceWorker
 diff --git a/dom/workers/ServiceWorkerEvents.cpp b/dom/workers/ServiceWorkerEvents.cpp
 --- a/dom/workers/ServiceWorkerEvents.cpp
 +++ b/dom/workers/ServiceWorkerEvents.cpp
-@@ -1002,17 +1002,17 @@ ExtractBytesFromData(const OwningArrayBu
-     const ArrayBuffer& buffer = aDataInit.GetAsArrayBuffer();
-     return ExtractBytesFromArrayBuffer(buffer, aBytes);
-   } else if (aDataInit.IsUSVString()) {
+@@ -1008,17 +1008,17 @@ ExtractBytesFromData(const OwningArrayBu
+     return NS_OK;
+   }
+   if (aDataInit.IsUSVString()) {
      return ExtractBytesFromUSVString(aDataInit.GetAsUSVString(), aBytes);
    }
    NS_NOTREACHED("Unexpected push message data");
    return NS_ERROR_FAILURE;
  }
 -}
-+} // namespace
++} // anonymous namespace
  
  PushMessageData::PushMessageData(nsISupports* aOwner,
-                                  const nsTArray<uint8_t>& aBytes)
-   : mOwner(aOwner), mBytes(aBytes) {}
+                                  nsTArray<uint8_t>&& aBytes)
+   : mOwner(aOwner), mBytes(Move(aBytes)) {}
  
  PushMessageData::~PushMessageData()
  {
  }
-@@ -1145,16 +1145,50 @@ NS_IMPL_CYCLE_COLLECTION_INHERITED(PushE
+@@ -1151,16 +1151,50 @@ NS_IMPL_CYCLE_COLLECTION_INHERITED(PushE
  JSObject*
  PushEvent::WrapObjectInternal(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
  {
@@ -418,7 +421,7 @@ diff --git a/dom/workers/ServiceWorkerEvents.h b/dom/workers/ServiceWorkerEvents
  namespace mozilla {
  namespace dom {
  class Blob;
-@@ -311,11 +313,61 @@ public:
+@@ -317,11 +319,61 @@ public:
  
    void SetPorts(MessagePortList* aPorts);
  
@@ -483,7 +486,7 @@ diff --git a/dom/workers/ServiceWorkerEvents.h b/dom/workers/ServiceWorkerEvents
 diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
 --- a/dom/workers/ServiceWorkerManager.cpp
 +++ b/dom/workers/ServiceWorkerManager.cpp
-@@ -1082,16 +1082,41 @@ ServiceWorkerManager::SendNotificationCl
+@@ -985,16 +985,41 @@ ServiceWorkerManager::SendNotificationCl
    ServiceWorkerPrivate* workerPrivate = info->WorkerPrivate();
    return workerPrivate->SendNotificationClickEvent(aID, aTitle, aDir,
                                                     aLang, aBody, aTag,
@@ -616,7 +619,7 @@ diff --git a/dom/workers/ServiceWorkerPrivate.cpp b/dom/workers/ServiceWorkerPri
  
    mIdleWorkerTimer = do_CreateInstance(NS_TIMER_CONTRACTID);
    MOZ_ASSERT(mIdleWorkerTimer);
-@@ -1497,16 +1497,102 @@ ServiceWorkerPrivate::SendFetchEvent(nsI
+@@ -1496,16 +1496,102 @@ ServiceWorkerPrivate::SendFetchEvent(nsI
  
    if (NS_WARN_IF(!r->Dispatch())) {
      return NS_ERROR_FAILURE;
@@ -719,7 +722,7 @@ diff --git a/dom/workers/ServiceWorkerPrivate.cpp b/dom/workers/ServiceWorkerPri
    AssertIsOnMainThread();
  
    // XXXcatalinb: We need to have a separate load group that's linked to
-@@ -1591,17 +1677,17 @@ ServiceWorkerPrivate::SpawnWorkerIfNeede
+@@ -1590,17 +1676,17 @@ ServiceWorkerPrivate::SpawnWorkerIfNeede
    mWorkerPrivate = WorkerPrivate::Constructor(jsapi.cx(),
                                                scriptSpec,
                                                false, WorkerTypeService,
@@ -738,7 +741,7 @@ diff --git a/dom/workers/ServiceWorkerPrivate.cpp b/dom/workers/ServiceWorkerPri
  void
  ServiceWorkerPrivate::StoreISupports(nsISupports* aSupports)
  {
-@@ -1656,17 +1742,17 @@ ServiceWorkerPrivate::NoteDeadServiceWor
+@@ -1655,17 +1741,17 @@ ServiceWorkerPrivate::NoteDeadServiceWor
    mInfo = nullptr;
    TerminateWorker();
  }
@@ -757,7 +760,7 @@ diff --git a/dom/workers/ServiceWorkerPrivate.cpp b/dom/workers/ServiceWorkerPri
  
  void
  ServiceWorkerPrivate::Activated()
-@@ -1794,18 +1880,19 @@ ServiceWorkerPrivate::TerminateWorkerCal
+@@ -1793,18 +1879,19 @@ ServiceWorkerPrivate::TerminateWorkerCal
  }
  
  void
@@ -871,7 +874,7 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
  ////////////////////////////////////////////////////
  // Worker Thread implementation
  class WorkerListener final : public ServiceWorkerRegistrationListener
-@@ -1258,16 +1258,17 @@ ServiceWorkerRegistrationWorkerThread::G
+@@ -1259,16 +1259,17 @@ ServiceWorkerRegistrationWorkerThread::G
  #endif /* ! MOZ_SIMPLEPUSH */
  }
  
@@ -880,7 +883,7 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
  {
    if (!mBackgroundSync) {
      mBackgroundSync = BackgroundSync::CreateOnWorker(mWorkerPrivate->GlobalScope(),
--                                               mWorkerPrivate);
+-                                                     mWorkerPrivate);
 +                                                     mWorkerPrivate,
 +                                                     mScope);
    }
