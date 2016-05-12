@@ -180,7 +180,7 @@ new file mode 100644
 diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/BackgroundSyncParent.cpp
 --- a/dom/backgroundsync/BackgroundSyncParent.cpp
 +++ b/dom/backgroundsync/BackgroundSyncParent.cpp
-@@ -10,17 +10,17 @@
+@@ -10,19 +10,74 @@
  #include "mozilla/ipc/BackgroundParent.h"
  
  namespace mozilla {
@@ -190,19 +190,86 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
  namespace dom {
  
 -BackgroundSyncParent::BackgroundSyncParent()
++class CreateManagerIdRunnable : public Runnable
++{
++public:
++  CreateManagerIdRunnable(const PrincipalInfo& aPrincipalInfo,
++                          BackgroundSyncParent* aParent,
++                          BackgroundSyncManagerId* aManagerId)
++    : mPrincipalInfo(aPrincipalInfo)
++    , mInitiatingThread(NS_GetCurrentThread())
++    , mParent(aParent)
++    , mManagerId(aManagerId)
++  {
++  }
++
++  NS_IMETHODIMP
++  Run() override
++  {
++    if (mManagerId) {
++      AssertIsOnBackgroundThread();
++      mParent->SetManagerId(mManagerId);
++      return NS_OK;
++    }
++
++    AssertIsOnMainThread();
++
++    nsresult rv;
++    RefPtr<nsIPrincipal> principal = PrincipalInfoToPrincipal(mPrincipalInfo,
++                                                              &rv);
++    if (NS_WARN_IF(NS_FAILED(rv))) {
++      return rv;
++    }
++
++    rv = BackgroundSyncManagerId::Create(principal, getter_AddRefs(mManagerId));
++    if (NS_WARN_IF(NS_FAILED(rv))) {
++      return rv;
++    }
++
++    MOZ_ALWAYS_SUCCEEDS(mInitiatingThread->Dispatch(this, NS_DISPATCH_NORMAL));
++
++    return NS_OK;
++  }
++
++private:
++  ~CreateManagerIdRunnable() {}
++
++  const PrincipalInfo mPrincipalInfo;
++  RefPtr<nsIThread> mInitiatingThread;
++  RefPtr<BackgroundSyncParent> mParent;
++  RefPtr<BackgroundSyncManagerId> mManagerId;
++};
++
 +BackgroundSyncParent::BackgroundSyncParent(const PrincipalInfo& aPrincipalInfo)
  {
    AssertIsOnBackgroundThread();
++
++  RefPtr<nsIRunnable> runnable = new CreateManagerIdRunnable(aPrincipalInfo,
++                                                             this,
++                                                             nullptr);
++  MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(runnable));
  }
  
  BackgroundSyncParent::~BackgroundSyncParent()
  {
    AssertIsOnBackgroundThread();
  }
+ 
+ void BackgroundSyncParent::ActorDestroy(ActorDestroyReason aWhy)
 diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/BackgroundSyncParent.h
 --- a/dom/backgroundsync/BackgroundSyncParent.h
 +++ b/dom/backgroundsync/BackgroundSyncParent.h
-@@ -10,32 +10,33 @@
+@@ -2,43 +2,56 @@
+ /* vim: set ts=8 sts=2 et sw=2 tw=80: */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+  * You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #ifndef mozilla_dom_BackgroundSyncParent_h
+ #define mozilla_dom_BackgroundSyncParent_h
+ 
++#include "BackgroundSyncManagerId.h"
++
  #include "mozilla/dom/PBackgroundSyncParent.h"
  #include "mozilla/dom/BackgroundSyncIPCTypes.h"
  
@@ -221,8 +288,11 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/Back
  class BackgroundSyncParent final : public PBackgroundSyncParent
  {
    friend class mozilla::ipc::BackgroundParentImpl;
++  friend class CreateManagerIdRunnable;
  
  public:
++  NS_INLINE_DECL_REFCOUNTING(BackgroundSyncParent)
++
    virtual bool RecvRequest(const nsID& aRequestId,
                             const SyncOp& aOp) override;
  
@@ -233,10 +303,20 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/Back
    ~BackgroundSyncParent();
  
    virtual void ActorDestroy(ActorDestroyReason aWhy) override;
++
++  void SetManagerId(BackgroundSyncManagerId* aManagerId)
++  {
++    mManagerId = aManagerId;
++  }
++
++  RefPtr<BackgroundSyncManagerId> mManagerId;
  };
  
  } // namespace dom
  } // namespace mozilla
+ 
+ #endif // mozilla_dom_BackgroundSyncParent_h
+ 
  
 diff --git a/dom/backgroundsync/moz.build b/dom/backgroundsync/moz.build
 --- a/dom/backgroundsync/moz.build
