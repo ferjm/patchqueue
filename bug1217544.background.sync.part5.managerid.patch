@@ -48,282 +48,6 @@ diff --git a/dom/backgroundsync/BackgroundSyncChild.h b/dom/backgroundsync/Backg
  
  class BackgroundSyncChild final : public PBackgroundSyncChild
  {
-diff --git a/dom/backgroundsync/BackgroundSyncManagerId.cpp b/dom/backgroundsync/BackgroundSyncManagerId.cpp
-new file mode 100644
---- /dev/null
-+++ b/dom/backgroundsync/BackgroundSyncManagerId.cpp
-@@ -0,0 +1,173 @@
-+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
-+/* This Source Code Form is subject to the terms of the Mozilla Public
-+ * License, v. 2.0. If a copy of the MPL was not distributed with this
-+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-+
-+#include "BackgroundSyncManagerId.h"
-+
-+#include "mozilla/ipc/BackgroundParent.h"
-+#include "mozilla/dom/quota/QuotaManager.h"
-+
-+namespace mozilla {
-+namespace dom {
-+
-+/**
-+ * BackgroundSyncManagerIdFactory
-+ */
-+
-+// static
-+already_AddRefed<BackgroundSyncManagerIdFactory>
-+BackgroundSyncManagerIdFactory::Create(Listener* aListener,
-+                                       const PrincipalInfo& aPrincipalInfo)
-+{
-+  AssertIsOnBackgroundThread();
-+
-+  RefPtr<BackgroundSyncManagerIdFactory> factory =
-+    new BackgroundSyncManagerIdFactory(aListener, aPrincipalInfo);
-+
-+  MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(factory));
-+
-+  return factory.forget();
-+}
-+
-+BackgroundSyncManagerIdFactory::BackgroundSyncManagerIdFactory(
-+    Listener* aListener, const PrincipalInfo& aPrincipalInfo)
-+  : mPrincipalInfo(aPrincipalInfo)
-+  , mInitiatingThread(NS_GetCurrentThread())
-+{
-+  AssertIsOnBackgroundThread();
-+  MOZ_ASSERT(mInitiatingThread);
-+  MOZ_ASSERT(aListener);
-+
-+  mListenerList.AppendElement(aListener);
-+}
-+
-+BackgroundSyncManagerIdFactory::~BackgroundSyncManagerIdFactory()
-+{
-+  // Since this is a Runnable that executes on multiple threads, its a race
-+  // to see which thread de-refs us last. Therefore we cannot guarantee which
-+  // thread we destruct on.
-+
-+  MOZ_ASSERT(mListenerList.IsEmpty());
-+}
-+
-+NS_IMETHODIMP
-+BackgroundSyncManagerIdFactory::Run()
-+{
-+  // Execute twice. First on the main thread and the back on the originating
-+  // thread.
-+
-+  if (mManagerId) {
-+    AssertIsOnBackgroundThread();
-+
-+    ListenerList::ForwardIterator iter(mListenerList);
-+    while (iter.HasMore()) {
-+      iter.GetNext()->OnBackgroundSyncManagerIdCreated(mManagerId);
-+    }
-+
-+    // The listener must clear its reference in
-+    // OnBackgroundSyncManagerIdCreated().
-+    MOZ_ASSERT(mListenerList.IsEmpty());
-+
-+    return NS_OK;
-+  }
-+
-+  AssertIsOnMainThread();
-+
-+  nsresult rv;
-+  RefPtr<nsIPrincipal> principal = PrincipalInfoToPrincipal(mPrincipalInfo,
-+                                                            &rv);
-+  if (NS_WARN_IF(NS_FAILED(rv))) {
-+    return rv;
-+  }
-+
-+  rv = BackgroundSyncManagerId::Create(principal, getter_AddRefs(mManagerId));
-+  if (NS_WARN_IF(NS_FAILED(rv))) {
-+    return rv;
-+  }
-+
-+  MOZ_ALWAYS_SUCCEEDS(mInitiatingThread->Dispatch(this, NS_DISPATCH_NORMAL));
-+
-+  return NS_OK;
-+}
-+
-+void
-+BackgroundSyncManagerIdFactory::AddListener(Listener* aListener)
-+{
-+  AssertIsOnBackgroundThread();
-+  MOZ_ASSERT(aListener);
-+  MOZ_ASSERT(!mListenerList.Contains(aListener));
-+
-+  mListenerList.AppendElement(aListener);
-+}
-+
-+void
-+BackgroundSyncManagerIdFactory::RemoveListener(Listener* aListener)
-+{
-+  AssertIsOnBackgroundThread();
-+  MOZ_ASSERT(aListener);
-+
-+  MOZ_ALWAYS_TRUE(mListenerList.RemoveElement(aListener));
-+}
-+
-+/**
-+ * BackgroundSyncManagerId
-+ */
-+
-+// static
-+nsresult
-+BackgroundSyncManagerId::Create(nsIPrincipal* aPrincipal,
-+                                BackgroundSyncManagerId** aManagerIdOut)
-+{
-+  MOZ_ASSERT(NS_IsMainThread());
-+
-+  // The QuotaManager::GetInfoFromPrincipal() has special logic for system
-+  // and about: principals.  We need to use the same modified origin in
-+  // order to interpret calls from QM correctly.
-+  nsCString quotaOrigin;
-+  nsresult rv = quota::QuotaManager::GetInfoFromPrincipal(aPrincipal,
-+                                                          nullptr,   //group
-+                                                          &quotaOrigin,
-+                                                          nullptr);  // is app
-+  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
-+
-+  RefPtr<BackgroundSyncManagerId> ref =
-+    new BackgroundSyncManagerId(aPrincipal, quotaOrigin);
-+  ref.forget(aManagerIdOut);
-+
-+  return NS_OK;
-+}
-+
-+already_AddRefed<nsIPrincipal>
-+BackgroundSyncManagerId::Principal() const
-+{
-+  MOZ_ASSERT(NS_IsMainThread());
-+  nsCOMPtr<nsIPrincipal> ref = mPrincipal;
-+  return ref.forget();
-+}
-+
-+BackgroundSyncManagerId::BackgroundSyncManagerId(nsIPrincipal* aPrincipal,
-+                                                 const nsACString& aQuotaOrigin)
-+    : mPrincipal(aPrincipal)
-+    , mQuotaOrigin(aQuotaOrigin)
-+{
-+  MOZ_ASSERT(mPrincipal);
-+}
-+
-+BackgroundSyncManagerId::~BackgroundSyncManagerId()
-+{
-+  // If we're already on the main thread, then default destruction is fine
-+  if (NS_IsMainThread()) {
-+    return;
-+  }
-+
-+  // Otherwise we need to proxy to main thread to do the release
-+
-+  // The PBackground worker thread shouldn't be running after the main thread
-+  // is stopped.  So main thread is guaranteed to exist here.
-+  NS_ReleaseOnMainThread(mPrincipal.forget());
-+}
-+
-+} // namespace dom
-+} // namespace mozilla
-diff --git a/dom/backgroundsync/BackgroundSyncManagerId.h b/dom/backgroundsync/BackgroundSyncManagerId.h
-new file mode 100644
---- /dev/null
-+++ b/dom/backgroundsync/BackgroundSyncManagerId.h
-@@ -0,0 +1,93 @@
-+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
-+/* This Source Code Form is subject to the terms of the Mozilla Public
-+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
-+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
-+
-+#ifndef mozilla_dom_BackgroundSyncManagerId_h
-+#define mozilla_dom_BackgroundSyncManagerId_h
-+
-+namespace mozilla {
-+namespace dom {
-+
-+using mozilla::ipc::PrincipalInfo;
-+
-+class BackgroundSyncManagerId final
-+{
-+public:
-+  // Main thread only.
-+  static nsresult Create(nsIPrincipal* aPrincipal,
-+                         BackgroundSyncManagerId** aManagerIdOut);
-+
-+  // Main thread only.
-+  already_AddRefed<nsIPrincipal> Principal() const;
-+
-+  const nsACString& QuotaOrigin() const { return mQuotaOrigin; }
-+
-+  bool operator==(const BackgroundSyncManagerId& aOther) const
-+  {
-+    return mQuotaOrigin == aOther.mQuotaOrigin;
-+  }
-+
-+private:
-+  BackgroundSyncManagerId(nsIPrincipal* aPrincipal, const nsACString& aOrigin);
-+  ~BackgroundSyncManagerId();
-+
-+  BackgroundSyncManagerId(const BackgroundSyncManagerId&) = delete;
-+  BackgroundSyncManagerId& operator=(const BackgroundSyncManagerId&) = delete;
-+
-+  // Only accessible on main thread.
-+  nsCOMPtr<nsIPrincipal> mPrincipal;
-+
-+  // Immutable to allow threadsafe access.
-+  const nsCString mQuotaOrigin;
-+
-+public:
-+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(BackgroundSyncManagerId)
-+};
-+
-+class BackgroundSyncManagerIdFactory : public Runnable
-+{
-+public:
-+  // An interface to be implemented by code wishing to use the
-+  // BackgroundSyncManagerIdFactory.
-+  // Note, the Listener implementation is responsible for calling
-+  // RemoveListener() on the PrincipalVerifier to clear the weak
-+  // reference.
-+  class Listener
-+  {
-+  public:
-+    virtual void OnBackgroundSyncManagerIdCreated(
-+        BackgroundSyncManagerId* aManagerId) = 0;
-+  };
-+
-+  static already_AddRefed<BackgroundSyncManagerIdFactory>
-+  Create(Listener* aListener, const PrincipalInfo& aPrincipalInfo);
-+
-+  void AddListener(Listener* aListener);
-+  // The Listener must call RemoveListener() when
-+  // OnBackgroundSyncManagerIdCreated is called or when
-+  // the Listener is destroyed.
-+  void RemoveListener(Listener* aListener);
-+
-+private:
-+  BackgroundSyncManagerIdFactory(Listener* aListener,
-+                                 const PrincipalInfo& aPrincipalInfo);
-+  virtual ~BackgroundSyncManagerIdFactory();
-+
-+  // Weak reference cleared by RemoveListener().
-+  typedef nsTObserverArray<Listener*> ListenerList;
-+  ListenerList mListenerList;
-+
-+  const PrincipalInfo mPrincipalInfo;
-+  RefPtr<nsIThread> mInitiatingThread;
-+  RefPtr<BackgroundSyncManagerId> mManagerId;
-+
-+public:
-+  NS_DECL_NSIRUNNABLE
-+};
-+
-+} // namespace dom
-+} // namespace mozilla
-+
-+#endif // mozilla_dom_BackgroundSyncManagerId_h
 diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/BackgroundSyncParent.cpp
 --- a/dom/backgroundsync/BackgroundSyncParent.cpp
 +++ b/dom/backgroundsync/BackgroundSyncParent.cpp
@@ -368,8 +92,8 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
  {
    AssertIsOnBackgroundThread();
 +
-+  mManagerIdFactory = BackgroundSyncManagerIdFactory::Create(this,
-+                                                             aPrincipalInfo);
++  mStorageManagerIdFactory =
++    StorageManagerIdFactory::Create(this, aPrincipalInfo);
  }
  
  BackgroundSyncParent::~BackgroundSyncParent()
@@ -414,9 +138,9 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
 +{
 +  AssertIsOnBackgroundThread();
 +
-+  // If we haven't created a BackgroundSyncManagerId for this parent yet, we
++  // If we haven't created a StorageManagerId for this parent yet, we
 +  // queue the request.
-+  if (!mManagerId) {
++  if (!mStorageManagerId) {
 +    RefPtr<PendingRequest> pendingRequest = new PendingRequest(aRequestId, aOp);
 +    mPendingRequests.AppendElement(pendingRequest);
 +    return true;
@@ -438,15 +162,15 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
  }
  
 +void
-+BackgroundSyncParent::OnBackgroundSyncManagerIdCreated(
-+    BackgroundSyncManagerId* aManagerId)
++BackgroundSyncParent::OnStorageManagerIdCreated(
++    StorageManagerId* aManagerId)
 +{
-+  MOZ_ASSERT(mManagerIdFactory);
-+  MOZ_ASSERT(!mManagerId);
++  MOZ_ASSERT(mStorageManagerIdFactory);
++  MOZ_ASSERT(!mStorageManagerId);
 +
-+  mManagerId = aManagerId;
-+  mManagerIdFactory->RemoveListener(this);
-+  mManagerIdFactory = nullptr;
++  mStorageManagerId = aManagerId;
++  mStorageManagerIdFactory->RemoveListener(this);
++  mStorageManagerIdFactory = nullptr;
 +
 +  // Flush pending requests.
 +  for (uint32_t i = 0, len = mPendingRequests.Length(); i < len; i++) {
@@ -471,7 +195,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/Back
  #ifndef mozilla_dom_BackgroundSyncParent_h
  #define mozilla_dom_BackgroundSyncParent_h
  
-+#include "BackgroundSyncManagerId.h"
++#include "StorageManagerId.h"
 +
  #include "mozilla/dom/PBackgroundSyncParent.h"
  #include "mozilla/dom/BackgroundSyncIPCTypes.h"
@@ -489,7 +213,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/Back
  namespace dom {
  
  class BackgroundSyncParent final : public PBackgroundSyncParent
-+                                 , BackgroundSyncManagerIdFactory::Listener
++                                 , StorageManagerIdFactory::Listener
  {
    friend class mozilla::ipc::BackgroundParentImpl;
 +  friend class CreateManagerIdRunnable;
@@ -510,12 +234,14 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/Back
 +
 +  void ExecuteRequest(const nsID& aRequestId, const SyncOp& aOp);
 +
-+  // BackgroundSyncManagerId method
-+  virtual void OnBackgroundSyncManagerIdCreated(
-+      BackgroundSyncManagerId* aManagerId) override;
++  // StorageManagerId method
++  virtual void
++  OnStorageManagerIdCreated(StorageManagerId* aManagerId) override;
 +
-+  RefPtr<BackgroundSyncManagerIdFactory> mManagerIdFactory;
-+  RefPtr<BackgroundSyncManagerId> mManagerId;
++  RefPtr<StorageManagerIdFactory> mStorageManagerIdFactory;
++  // We use this Id to ensure that we have a single StorageManager
++  // per principal.
++  RefPtr<StorageManagerId> mStorageManagerId;
 +
 +  class PendingRequest;
 +  nsTArray<RefPtr<PendingRequest>> mPendingRequests;
@@ -525,12 +251,287 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/Back
  } // namespace mozilla
  
  #endif // mozilla_dom_BackgroundSyncParent_h
- 
- 
+-
+-
+diff --git a/dom/backgroundsync/StorageManagerId.cpp b/dom/backgroundsync/StorageManagerId.cpp
+new file mode 100644
+--- /dev/null
++++ b/dom/backgroundsync/StorageManagerId.cpp
+@@ -0,0 +1,173 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#include "StorageManagerId.h"
++
++#include "mozilla/ipc/BackgroundParent.h"
++#include "mozilla/dom/quota/QuotaManager.h"
++
++namespace mozilla {
++namespace dom {
++
++/**
++ * StorageManagerIdFactory
++ */
++
++// static
++already_AddRefed<StorageManagerIdFactory>
++StorageManagerIdFactory::Create(Listener* aListener,
++                                const PrincipalInfo& aPrincipalInfo)
++{
++  AssertIsOnBackgroundThread();
++
++  RefPtr<StorageManagerIdFactory> factory =
++    new StorageManagerIdFactory(aListener, aPrincipalInfo);
++
++  MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(factory));
++
++  return factory.forget();
++}
++
++StorageManagerIdFactory::StorageManagerIdFactory(
++    Listener* aListener, const PrincipalInfo& aPrincipalInfo)
++  : mPrincipalInfo(aPrincipalInfo)
++  , mInitiatingThread(NS_GetCurrentThread())
++{
++  AssertIsOnBackgroundThread();
++  MOZ_ASSERT(mInitiatingThread);
++  MOZ_ASSERT(aListener);
++
++  mListenerList.AppendElement(aListener);
++}
++
++StorageManagerIdFactory::~StorageManagerIdFactory()
++{
++  // Since this is a Runnable that executes on multiple threads, its a race
++  // to see which thread de-refs us last. Therefore we cannot guarantee which
++  // thread we destruct on.
++
++  MOZ_ASSERT(mListenerList.IsEmpty());
++}
++
++NS_IMETHODIMP
++StorageManagerIdFactory::Run()
++{
++  // Execute twice. First on the main thread and the back on the originating
++  // thread.
++
++  if (mManagerId) {
++    AssertIsOnBackgroundThread();
++
++    ListenerList::ForwardIterator iter(mListenerList);
++    while (iter.HasMore()) {
++      iter.GetNext()->OnStorageManagerIdCreated(mManagerId);
++    }
++
++    // The listener must clear its reference in
++    // OnStorageManagerIdCreated().
++    MOZ_ASSERT(mListenerList.IsEmpty());
++
++    return NS_OK;
++  }
++
++  AssertIsOnMainThread();
++
++  nsresult rv;
++  RefPtr<nsIPrincipal> principal = PrincipalInfoToPrincipal(mPrincipalInfo,
++                                                            &rv);
++  if (NS_WARN_IF(NS_FAILED(rv))) {
++    return rv;
++  }
++
++  rv = StorageManagerId::Create(principal, getter_AddRefs(mManagerId));
++  if (NS_WARN_IF(NS_FAILED(rv))) {
++    return rv;
++  }
++
++  MOZ_ALWAYS_SUCCEEDS(mInitiatingThread->Dispatch(this, NS_DISPATCH_NORMAL));
++
++  return NS_OK;
++}
++
++void
++StorageManagerIdFactory::AddListener(Listener* aListener)
++{
++  AssertIsOnBackgroundThread();
++  MOZ_ASSERT(aListener);
++  MOZ_ASSERT(!mListenerList.Contains(aListener));
++
++  mListenerList.AppendElement(aListener);
++}
++
++void
++StorageManagerIdFactory::RemoveListener(Listener* aListener)
++{
++  AssertIsOnBackgroundThread();
++  MOZ_ASSERT(aListener);
++
++  MOZ_ALWAYS_TRUE(mListenerList.RemoveElement(aListener));
++}
++
++/**
++ * StorageManagerId
++ */
++
++// static
++nsresult
++StorageManagerId::Create(nsIPrincipal* aPrincipal,
++                         StorageManagerId** aManagerIdOut)
++{
++  MOZ_ASSERT(NS_IsMainThread());
++
++  // The QuotaManager::GetInfoFromPrincipal() has special logic for system
++  // and about: principals.  We need to use the same modified origin in
++  // order to interpret calls from QM correctly.
++  nsCString quotaOrigin;
++  nsresult rv = quota::QuotaManager::GetInfoFromPrincipal(aPrincipal,
++                                                          nullptr,   //group
++                                                          &quotaOrigin,
++                                                          nullptr);  // is app
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  RefPtr<StorageManagerId> ref =
++    new StorageManagerId(aPrincipal, quotaOrigin);
++  ref.forget(aManagerIdOut);
++
++  return NS_OK;
++}
++
++already_AddRefed<nsIPrincipal>
++StorageManagerId::Principal() const
++{
++  MOZ_ASSERT(NS_IsMainThread());
++  nsCOMPtr<nsIPrincipal> ref = mPrincipal;
++  return ref.forget();
++}
++
++StorageManagerId::StorageManagerId(nsIPrincipal* aPrincipal,
++                                   const nsACString& aQuotaOrigin)
++    : mPrincipal(aPrincipal)
++    , mQuotaOrigin(aQuotaOrigin)
++{
++  MOZ_ASSERT(mPrincipal);
++}
++
++StorageManagerId::~StorageManagerId()
++{
++  // If we're already on the main thread, then default destruction is fine
++  if (NS_IsMainThread()) {
++    return;
++  }
++
++  // Otherwise we need to proxy to main thread to do the release
++
++  // The PBackground worker thread shouldn't be running after the main thread
++  // is stopped.  So main thread is guaranteed to exist here.
++  NS_ReleaseOnMainThread(mPrincipal.forget());
++}
++
++} // namespace dom
++} // namespace mozilla
+diff --git a/dom/backgroundsync/StorageManagerId.h b/dom/backgroundsync/StorageManagerId.h
+new file mode 100644
+--- /dev/null
++++ b/dom/backgroundsync/StorageManagerId.h
+@@ -0,0 +1,92 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
++ * You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#ifndef mozilla_dom_StorageManagerId_h
++#define mozilla_dom_StorageManagerId_h
++
++namespace mozilla {
++namespace dom {
++
++using mozilla::ipc::PrincipalInfo;
++
++class StorageManagerId final
++{
++public:
++  // Main thread only.
++  static nsresult Create(nsIPrincipal* aPrincipal,
++                         StorageManagerId** aManagerIdOut);
++
++  // Main thread only.
++  already_AddRefed<nsIPrincipal> Principal() const;
++
++  const nsACString& QuotaOrigin() const { return mQuotaOrigin; }
++
++  bool operator==(const StorageManagerId& aOther) const
++  {
++    return mQuotaOrigin == aOther.mQuotaOrigin;
++  }
++
++private:
++  StorageManagerId(nsIPrincipal* aPrincipal, const nsACString& aOrigin);
++  ~StorageManagerId();
++
++  StorageManagerId(const StorageManagerId&) = delete;
++  StorageManagerId& operator=(const StorageManagerId&) = delete;
++
++  // Only accessible on main thread.
++  nsCOMPtr<nsIPrincipal> mPrincipal;
++
++  // Immutable to allow threadsafe access.
++  const nsCString mQuotaOrigin;
++
++public:
++  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(StorageManagerId)
++};
++
++class StorageManagerIdFactory : public Runnable
++{
++public:
++  // An interface to be implemented by code wishing to use the
++  // StorageManagerIdFactory.
++  // Note, the Listener implementation is responsible for calling
++  // RemoveListener() on the PrincipalVerifier to clear the weak
++  // reference.
++  class Listener
++  {
++  public:
++    virtual void OnStorageManagerIdCreated(StorageManagerId* aManagerId) = 0;
++  };
++
++  static already_AddRefed<StorageManagerIdFactory>
++  Create(Listener* aListener, const PrincipalInfo& aPrincipalInfo);
++
++  void AddListener(Listener* aListener);
++  // The Listener must call RemoveListener() when
++  // OnStorageManagerIdCreated is called or when
++  // the Listener is destroyed.
++  void RemoveListener(Listener* aListener);
++
++private:
++  StorageManagerIdFactory(Listener* aListener,
++                          const PrincipalInfo& aPrincipalInfo);
++  virtual ~StorageManagerIdFactory();
++
++  // Weak reference cleared by RemoveListener().
++  typedef nsTObserverArray<Listener*> ListenerList;
++  ListenerList mListenerList;
++
++  const PrincipalInfo mPrincipalInfo;
++  RefPtr<nsIThread> mInitiatingThread;
++  RefPtr<StorageManagerId> mManagerId;
++
++public:
++  NS_DECL_NSIRUNNABLE
++};
++
++} // namespace dom
++} // namespace mozilla
++
++#endif // mozilla_dom_StorageManagerId_h
 diff --git a/dom/backgroundsync/moz.build b/dom/backgroundsync/moz.build
 --- a/dom/backgroundsync/moz.build
 +++ b/dom/backgroundsync/moz.build
-@@ -5,16 +5,17 @@
+@@ -5,17 +5,18 @@
  
  EXPORTS.mozilla.dom += [
      'BackgroundSync.h'
@@ -539,8 +540,9 @@ diff --git a/dom/backgroundsync/moz.build b/dom/backgroundsync/moz.build
  UNIFIED_SOURCES += [
      'BackgroundSync.cpp',
      'BackgroundSyncChild.cpp',
-+    'BackgroundSyncManagerId.cpp',
-     'BackgroundSyncParent.cpp'
+-    'BackgroundSyncParent.cpp'
++    'BackgroundSyncParent.cpp',
++    'StorageManagerId.cpp'
  ]
  
  IPDL_SOURCES += [
@@ -548,6 +550,7 @@ diff --git a/dom/backgroundsync/moz.build b/dom/backgroundsync/moz.build
      'PBackgroundSync.ipdl'
  ]
  
+ LOCAL_INCLUDES += [
 diff --git a/ipc/glue/BackgroundChildImpl.cpp b/ipc/glue/BackgroundChildImpl.cpp
 --- a/ipc/glue/BackgroundChildImpl.cpp
 +++ b/ipc/glue/BackgroundChildImpl.cpp
