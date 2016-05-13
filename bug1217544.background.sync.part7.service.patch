@@ -3,6 +3,221 @@
 # Parent  4c5d3a85afe290ea105ec91a6181a885bbbd683e
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: BackgroundSyncService. r=baku
 
+diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/BackgroundSyncParent.cpp
+--- a/dom/backgroundsync/BackgroundSyncParent.cpp
++++ b/dom/backgroundsync/BackgroundSyncParent.cpp
+@@ -1,25 +1,30 @@
+ /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+ /* vim: set ts=8 sts=2 et sw=2 tw=80: */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+  * You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "BackgroundSyncParent.h"
++#include "BackgroundSyncService.h"
+ 
+ #include "mozilla/unused.h"
+ #include "mozilla/ipc/BackgroundParent.h"
+ 
+ namespace mozilla {
+ 
+ using namespace ipc;
+ 
+ namespace dom {
+ 
++namespace {
++  uint64_t sBackgroundSyncManagerParentId = 0;
++}
++
+ class BackgroundSyncParent::PendingRequest final
+ {
+ public:
+   NS_INLINE_DECL_REFCOUNTING(PendingRequest)
+ 
+   explicit PendingRequest(const nsID& aRequestId,
+                           const SyncOp& aOp)
+     : mRequestId(aRequestId)
+@@ -38,40 +43,55 @@ public:
+ private:
+   ~PendingRequest() {}
+ 
+   nsID mRequestId;
+   SyncOp mOp;
+ };
+ 
+ BackgroundSyncParent::BackgroundSyncParent(const PrincipalInfo& aPrincipalInfo)
++  : mService(BackgroundSyncService::GetOrCreate())
++  , mId(++sBackgroundSyncManagerParentId)
++  , mActorDestroyed(false)
+ {
+   AssertIsOnBackgroundThread();
+ 
+   mStorageManagerIdFactory =
+     StorageManagerIdFactory::Create(this, aPrincipalInfo);
++
++  mService->RegisterActor(this);
+ }
+ 
+ BackgroundSyncParent::~BackgroundSyncParent()
+ {
+   AssertIsOnBackgroundThread();
+ }
+ 
+ void
+ BackgroundSyncParent::ActorDestroy(ActorDestroyReason aWhy)
+ {
+   AssertIsOnBackgroundThread();
++
++  mActorDestroyed = true;
++
++  if (mService) {
++    mService->UnregisterActor(this);
++  }
+ }
+ 
+-void
++bool
+ BackgroundSyncParent::ExecuteRequest(const nsID& aRequestId,
+                                      const SyncOp& aOp)
+ {
+   AssertIsOnBackgroundThread();
+ 
++  if (NS_WARN_IF(!mService)) {
++    return false;
++  }
++
+   switch(aOp.mArgs().type()) {
+     case SyncOpArgs::TSyncRegisterArgs:
+     {
+       // XXX Do registration.
+       const SyncRegisterResponse response(true);
+       //const SyncOpError response(static_cast<uint32_t>(NS_ERROR_FAILURE));
+       Unused << SendResponse(aRequestId, response);
+       break;
+@@ -84,42 +104,52 @@ BackgroundSyncParent::ExecuteRequest(con
+       Unused << SendResponse(aRequestId, response);
+       break;
+     }
+     default:
+     {
+       MOZ_CRASH("Unknown BackgroundSync request");
+     }
+   }
++
++  return true;
+ }
+ 
+ bool
+ BackgroundSyncParent::RecvRequest(const nsID& aRequestId,
+                                   const SyncOp& aOp)
+ {
+   AssertIsOnBackgroundThread();
+ 
+   // If we haven't created a StorageManagerId for this parent yet, we
+   // queue the request.
+   if (!mStorageManagerId) {
+     RefPtr<PendingRequest> pendingRequest = new PendingRequest(aRequestId, aOp);
+     mPendingRequests.AppendElement(pendingRequest);
+     return true;
+   }
+ 
+-  ExecuteRequest(aRequestId, aOp);
+-  return true;
++  return ExecuteRequest(aRequestId, aOp);
+ }
+ 
+ bool
+ BackgroundSyncParent::RecvShutdown()
+ {
+   AssertIsOnBackgroundThread();
+ 
+-  Unused << Send__delete__(this);
++  if (NS_WARN_IF(!mService)) {
++    return false;
++  }
++
++  mService->UnregisterActor(this);
++  mService = nullptr;
++
++  if (!mActorDestroyed) {
++    Unused << Send__delete__(this);
++  }
+ 
+   return true;
+ }
+ 
+ void
+ BackgroundSyncParent::OnStorageManagerIdCreated(
+     StorageManagerId* aManagerId)
+ {
+diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/BackgroundSyncParent.h
+--- a/dom/backgroundsync/BackgroundSyncParent.h
++++ b/dom/backgroundsync/BackgroundSyncParent.h
+@@ -18,41 +18,63 @@ namespace mozilla {
+ 
+ namespace ipc {
+   class BackgroundParentImpl;
+   class PrincipalInfo;
+ } // namespace ipc
+ 
+ namespace dom {
+ 
++class BackgroundSyncService;
++
+ class BackgroundSyncParent final : public PBackgroundSyncParent
+                                  , StorageManagerIdFactory::Listener
+ {
+   friend class mozilla::ipc::BackgroundParentImpl;
+   friend class CreateManagerIdRunnable;
+ 
+ public:
+   NS_INLINE_DECL_REFCOUNTING(BackgroundSyncParent)
+ 
+   virtual bool RecvRequest(const nsID& aRequestId,
+                            const SyncOp& aOp) override;
+ 
+   virtual bool RecvShutdown() override;
++
++  uint64_t Id() const
++  {
++    return mId;
++  }
++
++  bool ActorDestroyed() const
++  {
++    return mActorDestroyed;
++  }
++
+ private:
+   BackgroundSyncParent(const PrincipalInfo& aPrincipalInfo);
+   ~BackgroundSyncParent();
+ 
+   virtual void ActorDestroy(ActorDestroyReason aWhy) override;
+ 
+-  void ExecuteRequest(const nsID& aRequestId, const SyncOp& aOp);
++  bool ExecuteRequest(const nsID& aRequestId, const SyncOp& aOp);
+ 
+   // StorageManagerId method
+   virtual void
+   OnStorageManagerIdCreated(StorageManagerId* aManagerId) override;
+ 
++  // BackgroundSyncParent objects keep BackgroundSyncService alive.
++  RefPtr<BackgroundSyncService> mService;
++
++  // The identifier will be used by the BackgroundSyncService to know
++  // which request belongs to which parent actor.
++  uint64_t mId;
++
++  bool mActorDestroyed;
++
+   RefPtr<StorageManagerIdFactory> mStorageManagerIdFactory;
+   // We use this Id to ensure that we have a single StorageManager
+   // per principal.
+   RefPtr<StorageManagerId> mStorageManagerId;
+ 
+   class PendingRequest;
+   nsTArray<RefPtr<PendingRequest>> mPendingRequests;
+ };
 diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/BackgroundSyncService.cpp
 new file mode 100644
 --- /dev/null
