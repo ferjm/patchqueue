@@ -1,13 +1,13 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  ed7ae11297d3004257a98124d80cab8f34f30764
+# Parent  4ffaaccecc2ebe2ba34614b0f87bf8672e52af88
 Bug 1217544 - Implement one-off BackgroundSync API. Part 1: BackgroundSync interface. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSync.cpp
-@@ -0,0 +1,136 @@
+@@ -0,0 +1,135 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -97,8 +97,7 @@ new file mode 100644
 +
 +  // If we are on the main thread, then check the pref directly.
 +  if (NS_IsMainThread()) {
-+    Preferences::GetBool("dom.background.sync.enabled", false);
-+    return false;
++    return Preferences::GetBool("dom.background.sync.enabled", false);
 +  }
 +
 +  // Otherwise check the pref via the worker private helper.
