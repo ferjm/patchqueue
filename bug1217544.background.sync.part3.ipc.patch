@@ -1,12 +1,12 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  1aa50f418562478d5fba5929ed8defe0b187c60a
+# Parent  fa9771995fa3eb0d67660ab2a712c5ade77f5b01
 Bug 1217544 - Implement one-off BackgroundSync API. Part 3: IPC. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
 --- a/dom/backgroundsync/BackgroundSync.cpp
 +++ b/dom/backgroundsync/BackgroundSync.cpp
-@@ -1,86 +1,286 @@
+@@ -1,86 +1,299 @@
  /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
  /* vim: set ts=8 sts=2 et sw=2 tw=80: */
  /* This Source Code Form is subject to the terms of the Mozilla Public
@@ -182,6 +182,12 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
 +    if (NS_WARN_IF(aRv.Failed())) {
 +      return nullptr;
 +    }
++
++    aRv = obs->AddObserver(ref, "xpcom-shutdown",
++                           false /* ownsWeak */);
++    if (NS_WARN_IF(aRv.Failed())) {
++      return nullptr;
++    }
 +  } else {
 +    aRv.Throw(NS_ERROR_UNEXPECTED);
 +    return nullptr;
@@ -259,13 +265,20 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
 +void
 +BackgroundSync::Shutdown()
 +{
++  if (mShuttingDown) {
++    return;
++  }
++
 +  MOZ_ASSERT(IsBackgroundSyncThread());
 +
 +  mShuttingDown = true;
 +
-+  nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
-+  if (obs) {
-+    obs->RemoveObserver(this, "inner-window-destroyed");
++  if (NS_IsMainThread()) {
++    nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
++    if (obs) {
++      obs->RemoveObserver(this, "inner-window-destroyed");
++      obs->RemoveObserver(this, "xpcom-shutdown");
++    }
 +  }
 +
 +  if (mWorkerFeature) {
@@ -300,7 +313,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
  BackgroundSync::PrefEnabled(JSContext* aCx, JSObject* aObj)
  {
    using mozilla::dom::workers::WorkerPrivate;
-@@ -96,42 +296,126 @@ BackgroundSync::PrefEnabled(JSContext* a
+@@ -95,42 +308,137 @@ BackgroundSync::PrefEnabled(JSContext* a
    WorkerPrivate* workerPrivate = GetWorkerPrivateFromContext(aCx);
    if (!workerPrivate) {
      return false;
@@ -324,6 +337,10 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
 +  MOZ_ASSERT(IsBackgroundSyncThread());
 +  MOZ_ASSERT(aActor);
 +  MOZ_ASSERT(!mActor);
++
++  if (mShuttingDown) {
++    return;
++  }
 +
 +  PBackgroundSyncChild* actor = aActor->SendPBackgroundSyncConstructor();
 +  mActor = static_cast<BackgroundSyncChild*>(actor);
@@ -352,17 +369,20 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
 +{
 +  MOZ_ASSERT(IsBackgroundSyncThread());
 +  MOZ_ASSERT(NS_IsMainThread());
-+  MOZ_ASSERT(!strcmp(aTopic, "inner-window-destroyed"));
++  MOZ_ASSERT(!strcmp(aTopic, "inner-window-destroyed") ||
++             !strcmp(aTopic, "xpcom-shutdown"));
 +
-+  nsCOMPtr<nsISupportsPRUint64> wrapper = do_QueryInterface(aSubject);
-+  NS_ENSURE_TRUE(wrapper, NS_ERROR_FAILURE);
++  if (!strcmp(aTopic, "inner-window-destroyed")) {
++    nsCOMPtr<nsISupportsPRUint64> wrapper = do_QueryInterface(aSubject);
++    NS_ENSURE_TRUE(wrapper, NS_ERROR_FAILURE);
 +
-+  uint64_t innerID;
-+  nsresult rv = wrapper->GetData(&innerID);
-+  NS_ENSURE_SUCCESS(rv, rv);
++    uint64_t innerID;
++    nsresult rv = wrapper->GetData(&innerID);
++    NS_ENSURE_SUCCESS(rv, rv);
 +
-+  if (innerID != mInnerID) {
-+    return NS_OK;
++    if (innerID != mInnerID) {
++      return NS_OK;
++    }
 +  }
 +
 +  Shutdown();
@@ -375,6 +395,10 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
 +BackgroundSync::ExecuteOp(const SyncOpArgs& aArgs, ErrorResult& aRv)
  {
 +  MOZ_ASSERT(IsBackgroundSyncThread());
++
++  if (mShuttingDown) {
++    return nullptr;
++  }
 +
    RefPtr<Promise> p = Promise::Create(mGlobal, aRv);
    if (NS_WARN_IF(aRv.Failed())) {
