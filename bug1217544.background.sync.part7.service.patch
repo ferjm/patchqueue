@@ -1,13 +1,13 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  d738ef5aadbe3a85b79a77c49c381a2ce367e08a
+# Parent  4c5d3a85afe290ea105ec91a6181a885bbbd683e
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: BackgroundSyncService. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/BackgroundSyncService.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncService.cpp
-@@ -0,0 +1,93 @@
+@@ -0,0 +1,95 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -39,6 +39,8 @@ new file mode 100644
 +  MOZ_ASSERT(sInstance == this);
 +  MOZ_ASSERT(mBackgroundSyncActors.Count() == 0);
 +
++  mOnlineStateObserver->RemoveListener(this);
++
 +  sInstance = nullptr;
 +}
 +
@@ -59,7 +61,7 @@ new file mode 100644
 +void
 +BackgroundSyncService::Init()
 +{
-+  OnlineStateObserver::Create(this);
++  mOnlineStateObserver = OnlineStateObserver::Create(this);
 +}
 +
 +void
@@ -105,7 +107,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.h b/dom/backgroundsync/Bac
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncService.h
-@@ -0,0 +1,42 @@
+@@ -0,0 +1,44 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -140,7 +142,9 @@ new file mode 100644
 +  virtual void
 +  OnOnlineStateChanged(OnlineStateObserver::OnlineState aState) override;
 +
++  RefPtr<OnlineStateObserver> mOnlineStateObserver;
 +  OnlineStateObserver::OnlineState mOnlineState;
++
 +  nsTHashtable<nsRefPtrHashKey<BackgroundSyncParent>> mBackgroundSyncActors;
 +};
 +
