@@ -180,7 +180,7 @@ new file mode 100644
 diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/BackgroundSyncParent.cpp
 --- a/dom/backgroundsync/BackgroundSyncParent.cpp
 +++ b/dom/backgroundsync/BackgroundSyncParent.cpp
-@@ -10,19 +10,74 @@
+@@ -10,36 +10,115 @@
  #include "mozilla/ipc/BackgroundParent.h"
  
  namespace mozilla {
@@ -240,6 +240,18 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
 +  RefPtr<BackgroundSyncManagerId> mManagerId;
 +};
 +
++struct BackgroundSyncParent::PendingRequest final
++{
++  explicit PendingRequest(const nsID& aRequestId,
++                          const SyncOp& aOp)
++    : mRequestId(aRequestId)
++    , mOp(aOp)
++  {}
++
++  nsID mRequestId;
++  SyncOp mOp;
++};
++
 +BackgroundSyncParent::BackgroundSyncParent(const PrincipalInfo& aPrincipalInfo)
  {
    AssertIsOnBackgroundThread();
@@ -255,11 +267,83 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
    AssertIsOnBackgroundThread();
  }
  
- void BackgroundSyncParent::ActorDestroy(ActorDestroyReason aWhy)
+-void BackgroundSyncParent::ActorDestroy(ActorDestroyReason aWhy)
++void
++BackgroundSyncParent::ActorDestroy(ActorDestroyReason aWhy)
+ {
+   AssertIsOnBackgroundThread();
+ }
+ 
+-bool BackgroundSyncParent::RecvRequest(const nsID& aRequestId,
+-                                       const SyncOp& aOp)
++void
++BackgroundSyncParent::SetManagerId(BackgroundSyncManagerId* aManagerId)
+ {
+-  AssertIsOnBackgroundThread();
++    mManagerId = aManagerId;
+ 
++    // Flush pending requests.
++    for (uint32_t i = 0, len = mPendingRequests.Length(); i < len; i++) {
++      ExecuteRequest(mPendingRequests[i].mRequestId, mPendingRequests[i].mOp);
++    }
++    mPendingRequests.Clear();
++}
++
++void
++BackgroundSyncParent::ExecuteRequest(const nsID& aRequestId,
++                                     const SyncOp& aOp)
++{
+   switch(aOp.mArgs().type()) {
+     case SyncOpArgs::TSyncRegisterArgs:
+     {
+       // XXX Do registration.
+       const SyncRegisterResponse response(true);
+       //const SyncOpError response(static_cast<uint32_t>(NS_ERROR_FAILURE));
+       Unused << SendResponse(aRequestId, response);
+       break;
+@@ -52,20 +131,37 @@ bool BackgroundSyncParent::RecvRequest(c
+       Unused << SendResponse(aRequestId, response);
+       break;
+     }
+     default:
+     {
+       MOZ_CRASH("Unknown BackgroundSync request");
+     }
+   }
++}
++
++bool
++BackgroundSyncParent::RecvRequest(const nsID& aRequestId,
++                                  const SyncOp& aOp)
++{
++  AssertIsOnBackgroundThread();
++
++  // If we haven't created a BackgroundSyncManagerId for this parent yet, we
++  // queue the request.
++  if (!mManagerId) {
++    mPendingRequests.AppendElement(PendingRequest(aRequestId, aOp));
++    return true;
++  }
++
++  ExecuteRequest(aRequestId, aOp);
+   return true;
+ }
+ 
+-bool BackgroundSyncParent::RecvShutdown()
++bool
++BackgroundSyncParent::RecvShutdown()
+ {
+   AssertIsOnBackgroundThread();
+ 
+   Unused << Send__delete__(this);
+ 
+   return true;
+ }
+ 
 diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/BackgroundSyncParent.h
 --- a/dom/backgroundsync/BackgroundSyncParent.h
 +++ b/dom/backgroundsync/BackgroundSyncParent.h
-@@ -2,43 +2,56 @@
+@@ -2,43 +2,57 @@
  /* vim: set ts=8 sts=2 et sw=2 tw=80: */
  /* This Source Code Form is subject to the terms of the Mozilla Public
   * License, v. 2.0. If a copy of the MPL was not distributed with this file,
@@ -304,12 +388,13 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/Back
  
    virtual void ActorDestroy(ActorDestroyReason aWhy) override;
 +
-+  void SetManagerId(BackgroundSyncManagerId* aManagerId)
-+  {
-+    mManagerId = aManagerId;
-+  }
++  void ExecuteRequest(const nsID& aRequestId, const SyncOp& aOp);
++
++  void SetManagerId(BackgroundSyncManagerId* aManagerId);
 +
 +  RefPtr<BackgroundSyncManagerId> mManagerId;
++  struct PendingRequest;
++  nsTArray<PendingRequest> mPendingRequests;
  };
  
  } // namespace dom
