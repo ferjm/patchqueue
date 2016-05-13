@@ -7,7 +7,7 @@ diff --git a/dom/backgroundsync/OnlineStateObserver.cpp b/dom/backgroundsync/Onl
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/OnlineStateObserver.cpp
-@@ -0,0 +1,121 @@
+@@ -0,0 +1,127 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -40,6 +40,7 @@ new file mode 100644
 +  Run() override
 +  {
 +    AssertIsOnBackgroundThread();
++    MOZ_ASSERT(mListener);
 +
 +    mListener->OnOnlineStateChanged(mState);
 +
@@ -49,7 +50,7 @@ new file mode 100644
 +private:
 +  ~OnlineStateChangeNotification() {}
 +
-+  RefPtr<OnlineStateObserver::Listener> mListener;
++  OnlineStateObserver::Listener* mListener;
 +  OnlineStateObserver::OnlineState mState;
 +};
 +
@@ -58,7 +59,7 @@ new file mode 100644
 + */
 +
 +// static
-+already_AddRefed<OnlineStateObserver>
++void
 +OnlineStateObserver::Create(Listener* aListener)
 +{
 +  AssertIsOnBackgroundThread();
@@ -66,8 +67,6 @@ new file mode 100644
 +  RefPtr<OnlineStateObserver> observer = new OnlineStateObserver(aListener);
 +
 +  MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(observer));
-+
-+  return observer.forget();
 +}
 +
 +OnlineStateObserver::OnlineStateObserver(Listener* aListener)
@@ -76,7 +75,14 @@ new file mode 100644
 +{
 +  AssertIsOnBackgroundThread();
 +  MOZ_ASSERT(mInitiatingThread);
-+  MOZ_ASSERT(aListener);
++  MOZ_ASSERT(mListener);
++}
++
++void
++OnlineStateObserver::RemoveListener(Listener* aListener)
++{
++  MOZ_ASSERT(aListener == mListener);
++  mListener = nullptr;
 +}
 +
 +NS_IMETHODIMP
@@ -160,29 +166,29 @@ new file mode 100644
 +    UNKNOWN
 +  } OnlineState;
 +
-+  // An interface to be implemented by code whishing to use the
++  // An interface to be implemented by code wishing to use the
 +  // OnlineStateObserver.
 +  // Note, the Listener implementation is responsible for calling
-+  // RemoveListener() to clear the weak reference when it not longer
-+  // wants to observe online state changes.
++  // RemoveListener() on the OnlineStateObserver to clear the weak
++  // reference.
 +  class Listener
 +  {
-+    NS_INLINE_DECL_THREADSAFE_REFCOUNTING(Listener);
 +  public:
 +    virtual void OnOnlineStateChanged(OnlineState aState) = 0;
-+
-+  private:
-+    virtual ~Listener();
 +  };
 +
-+  static already_AddRefed<OnlineStateObserver>
-+  Create(Listener *aListener);
++  void Create(Listener* aListener);
++
++  // The Listener must call RemoveListener() when it no
++  // longer need to receive online state change notifications.
++  void RemoveListener(Listener* aListener);
 +
 +private:
 +  OnlineStateObserver(Listener* aListener);
 +  ~OnlineStateObserver() {};
 +
-+  RefPtr<Listener> mListener;
++  // Weak reference cleared by RemoveListener().
++  Listener* mListener;
 +  RefPtr<nsIThread> mInitiatingThread;
 +};
 +
