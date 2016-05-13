@@ -1,0 +1,151 @@
+# HG changeset patch
+# User Fernando Jimenez <ferjmoreno@gmail.com>
+# Parent  ff363d92010b1802e090d0b38ca178312aacf3bf
+Bug 1217544 - Implement one-off BackgroundSync API. Part 6: BackgroundSyncService. r=baku
+
+diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/BackgroundSyncService.cpp
+new file mode 100644
+--- /dev/null
++++ b/dom/backgroundsync/BackgroundSyncService.cpp
+@@ -0,0 +1,76 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++* file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#include "BackgroundSyncService.h"
++
++namespace mozilla {
++namespace dom {
++
++namespace {
++  BackgroundSyncService* sInstance = nullptr;
++} // namespace
++
++BackgroundSyncService::BackgroundSyncService()
++  : mOnlineState(OnlineStateObserver::UNKNOWN)
++{
++  AssertIsOnBackgroundThread();
++
++  // sInstance is a raw BackgroundSyncService*.
++  MOZ_ASSERT(!sInstance);
++  sInstance = this;
++}
++
++BackgroundSyncService::~BackgroundSyncService()
++{
++  AssertIsOnBackgroundThread();
++  MOZ_ASSERT(sInstance == this);
++  MOZ_ASSERT(mBackgroundSyncActors.Count() == 0);
++
++  sInstance = nullptr;
++}
++
++// static
++already_AddRefed<BackgroundSyncService>
++BackgroundSyncService::GetOrCreate()
++{
++  AssertIsOnBackgroundThread();
++
++  RefPtr<BackgroundSyncService> instance = sInstance;
++  if (!instance) {
++    instance = new BackgroundSyncService();
++    instance->Init();
++  }
++  return instance.forget();
++}
++
++void
++BackgroundSyncService::Init()
++{
++  //NS_DispatchToMainThread(new BackgroundSyncServiceInitRunnable());
++}
++
++void
++BackgroundSyncService::RegisterActor(BackgroundSyncParent* aParent)
++{
++  AssertIsOnBackgroundThread();
++  MOZ_ASSERT(aParent);
++  MOZ_ASSERT(!mBackgroundSyncActors.Contains(aParent));
++
++  mBackgroundSyncActors.PutEntry(aParent);
++}
++
++void
++BackgroundSyncService::UnregisterActor(BackgroundSyncParent* aParent)
++{
++  AssertIsOnBackgroundThread();
++  MOZ_ASSERT(aParent);
++  MOZ_ASSERT(mBackgroundSyncActors.Contains(aParent));
++
++  mBackgroundSyncActors.RemoveEntry(aParent);
++}
++
++} // namespace dom
++} // namespace mozilla
+diff --git a/dom/backgroundsync/BackgroundSyncService.h b/dom/backgroundsync/BackgroundSyncService.h
+new file mode 100644
+--- /dev/null
++++ b/dom/backgroundsync/BackgroundSyncService.h
+@@ -0,0 +1,39 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
++* You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#ifndef mozilla_dom_BackgroundSyncService_h
++#define mozilla_dom_BackgroundSyncService_h
++
++#include "OnlineStateObserver.h"
++
++namespace mozilla {
++namespace dom {
++
++class BackgroundSyncService final
++{
++public:
++  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(BackgroundSyncService)
++
++  static already_AddRefed<BackgroundSyncService> GetOrCreate();
++
++  void RegisterActor(BackgroundSyncParent* aParent);
++  void UnregisterActor(BackgroundSyncParent* aParent);
++
++private:
++  BackgroundSyncService();
++  ~BackgroundSyncService();
++
++  void Init();
++
++  OnlineStateObserver::OnlineState mOnlineState;
++
++  nsTHashtable<nsRefPtrHashKey<BackgroundSyncParent>> mBackgroundSyncActors;
++};
++
++} // namespace dom
++} // namespace mozilla
++
++#endif // mozilla_dom_SyncService_h
+diff --git a/dom/backgroundsync/moz.build b/dom/backgroundsync/moz.build
+--- a/dom/backgroundsync/moz.build
++++ b/dom/backgroundsync/moz.build
+@@ -6,16 +6,17 @@
+ EXPORTS.mozilla.dom += [
+     'BackgroundSync.h'
+ ]
+ 
+ UNIFIED_SOURCES += [
+     'BackgroundSync.cpp',
+     'BackgroundSyncChild.cpp',
+     'BackgroundSyncParent.cpp',
++    'BackgroundSyncService.cpp',
+     'StorageManagerId.cpp'
+ ]
+ 
+ IPDL_SOURCES += [
+     'BackgroundSyncIPCTypes.ipdlh',
+     'PBackgroundSync.ipdl'
+ ]
+ 
