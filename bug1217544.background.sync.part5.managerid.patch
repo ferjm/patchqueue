@@ -1,12 +1,12 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  264cc148309eed356129b01b4246e7db76787ac9
+# Parent  6a406ecf2835861d749a82351551a2c4c73cf9a4
 Bug 1217544 - Implement one-off BackgroundSync API. Part 5: Ensure unique manager per principal. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
 --- a/dom/backgroundsync/BackgroundSync.cpp
 +++ b/dom/backgroundsync/BackgroundSync.cpp
-@@ -319,17 +319,18 @@ BackgroundSync::ActorFailed()
+@@ -318,17 +318,18 @@ BackgroundSync::ActorFailed()
  
  void
  BackgroundSync::ActorCreated(PBackgroundChild* aActor)
@@ -180,7 +180,7 @@ new file mode 100644
 diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/BackgroundSyncParent.cpp
 --- a/dom/backgroundsync/BackgroundSyncParent.cpp
 +++ b/dom/backgroundsync/BackgroundSyncParent.cpp
-@@ -10,36 +10,115 @@
+@@ -10,33 +10,133 @@
  #include "mozilla/ipc/BackgroundParent.h"
  
  namespace mozilla {
@@ -240,13 +240,28 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
 +  RefPtr<BackgroundSyncManagerId> mManagerId;
 +};
 +
-+struct BackgroundSyncParent::PendingRequest final
++class BackgroundSyncParent::PendingRequest final
 +{
++public:
++  NS_INLINE_DECL_REFCOUNTING(PendingRequest)
++
 +  explicit PendingRequest(const nsID& aRequestId,
 +                          const SyncOp& aOp)
 +    : mRequestId(aRequestId)
 +    , mOp(aOp)
 +  {}
++
++  nsID RequestId()
++  {
++    return mRequestId;
++  }
++
++  SyncOp Op()
++  {
++    return mOp;
++  }
++private:
++  ~PendingRequest() {}
 +
 +  nsID mRequestId;
 +  SyncOp mOp;
@@ -278,30 +293,32 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
 -                                       const SyncOp& aOp)
 +void
 +BackgroundSyncParent::SetManagerId(BackgroundSyncManagerId* aManagerId)
- {
--  AssertIsOnBackgroundThread();
-+    mManagerId = aManagerId;
- 
-+    // Flush pending requests.
-+    for (uint32_t i = 0, len = mPendingRequests.Length(); i < len; i++) {
-+      ExecuteRequest(mPendingRequests[i].mRequestId, mPendingRequests[i].mOp);
-+    }
-+    mPendingRequests.Clear();
++{
++  AssertIsOnBackgroundThread();
++
++  mManagerId = aManagerId;
++
++  // Flush pending requests.
++  for (uint32_t i = 0, len = mPendingRequests.Length(); i < len; i++) {
++    MOZ_ASSERT(mPendingRequests[i]);
++    ExecuteRequest(mPendingRequests[i]->RequestId(),
++                   mPendingRequests[i]->Op());
++  }
++  mPendingRequests.Clear();
 +}
 +
 +void
 +BackgroundSyncParent::ExecuteRequest(const nsID& aRequestId,
 +                                     const SyncOp& aOp)
-+{
+ {
+   AssertIsOnBackgroundThread();
+ 
    switch(aOp.mArgs().type()) {
      case SyncOpArgs::TSyncRegisterArgs:
      {
        // XXX Do registration.
        const SyncRegisterResponse response(true);
-       //const SyncOpError response(static_cast<uint32_t>(NS_ERROR_FAILURE));
-       Unused << SendResponse(aRequestId, response);
-       break;
-@@ -52,20 +131,37 @@ bool BackgroundSyncParent::RecvRequest(c
+@@ -52,20 +152,38 @@ bool BackgroundSyncParent::RecvRequest(c
        Unused << SendResponse(aRequestId, response);
        break;
      }
@@ -321,7 +338,8 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
 +  // If we haven't created a BackgroundSyncManagerId for this parent yet, we
 +  // queue the request.
 +  if (!mManagerId) {
-+    mPendingRequests.AppendElement(PendingRequest(aRequestId, aOp));
++    RefPtr<PendingRequest> pendingRequest = new PendingRequest(aRequestId, aOp);
++    mPendingRequests.AppendElement(pendingRequest);
 +    return true;
 +  }
 +
@@ -393,8 +411,8 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/Back
 +  void SetManagerId(BackgroundSyncManagerId* aManagerId);
 +
 +  RefPtr<BackgroundSyncManagerId> mManagerId;
-+  struct PendingRequest;
-+  nsTArray<PendingRequest> mPendingRequests;
++  class PendingRequest;
++  nsTArray<RefPtr<PendingRequest>> mPendingRequests;
  };
  
  } // namespace dom
@@ -472,7 +490,7 @@ diff --git a/ipc/glue/BackgroundChildImpl.h b/ipc/glue/BackgroundChildImpl.h
 diff --git a/ipc/glue/BackgroundParentImpl.cpp b/ipc/glue/BackgroundParentImpl.cpp
 --- a/ipc/glue/BackgroundParentImpl.cpp
 +++ b/ipc/glue/BackgroundParentImpl.cpp
-@@ -889,22 +889,23 @@ BackgroundParentImpl::DeallocPFileSystem
+@@ -889,32 +889,38 @@ BackgroundParentImpl::DeallocPFileSystem
    AssertIsOnBackgroundThread();
  
    RefPtr<FileSystemRequestParent> parent =
@@ -489,7 +507,9 @@ diff --git a/ipc/glue/BackgroundParentImpl.cpp b/ipc/glue/BackgroundParentImpl.c
    AssertIsOnBackgroundThread();
  
 -  return new BackgroundSyncParent();
-+  return new BackgroundSyncParent(aPrincipalInfo);
++  RefPtr<BackgroundSyncParent> agent =
++    new BackgroundSyncParent(aPrincipalInfo);
++  return agent.forget().take();
  }
  
  bool
@@ -498,6 +518,20 @@ diff --git a/ipc/glue/BackgroundParentImpl.cpp b/ipc/glue/BackgroundParentImpl.c
    AssertIsInMainProcess();
    AssertIsOnBackgroundThread();
    MOZ_ASSERT(aActor);
+ 
+-  delete static_cast<BackgroundSyncParent*>(aActor);
++  RefPtr<BackgroundSyncParent> parent =
++    dont_AddRef(static_cast<BackgroundSyncParent*>(aActor));
++  MOZ_ASSERT(parent);
++
+   return true;
+ }
+ 
+ } // namespace ipc
+ } // namespace mozilla
+ 
+ void
+ TestParent::ActorDestroy(ActorDestroyReason aWhy)
 diff --git a/ipc/glue/BackgroundParentImpl.h b/ipc/glue/BackgroundParentImpl.h
 --- a/ipc/glue/BackgroundParentImpl.h
 +++ b/ipc/glue/BackgroundParentImpl.h
