@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  ff363d92010b1802e090d0b38ca178312aacf3bf
+# Parent  d738ef5aadbe3a85b79a77c49c381a2ce367e08a
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: BackgroundSyncService. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/BackgroundSyncService.cpp
@@ -141,6 +141,7 @@ diff --git a/dom/backgroundsync/moz.build b/dom/backgroundsync/moz.build
      'BackgroundSyncChild.cpp',
      'BackgroundSyncParent.cpp',
 +    'BackgroundSyncService.cpp',
+     'OnlineStateObserver.cpp',
      'StorageManagerId.cpp'
  ]
  
@@ -148,4 +149,3 @@ diff --git a/dom/backgroundsync/moz.build b/dom/backgroundsync/moz.build
      'BackgroundSyncIPCTypes.ipdlh',
      'PBackgroundSync.ipdl'
  ]
- 
