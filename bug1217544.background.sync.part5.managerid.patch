@@ -1,19 +1,19 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  6a406ecf2835861d749a82351551a2c4c73cf9a4
+# Parent  3b4ac8cead7bf8c57bb45c99dc6bb23489212123
 Bug 1217544 - Implement one-off BackgroundSync API. Part 5: Ensure unique storage manager per principal. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
 --- a/dom/backgroundsync/BackgroundSync.cpp
 +++ b/dom/backgroundsync/BackgroundSync.cpp
-@@ -318,17 +318,18 @@ BackgroundSync::ActorFailed()
- 
- void
- BackgroundSync::ActorCreated(PBackgroundChild* aActor)
- {
+@@ -335,17 +335,18 @@ BackgroundSync::ActorCreated(PBackground
    MOZ_ASSERT(IsBackgroundSyncThread());
    MOZ_ASSERT(aActor);
    MOZ_ASSERT(!mActor);
+ 
+   if (mShuttingDown) {
+     return;
+   }
  
 -  PBackgroundSyncChild* actor = aActor->SendPBackgroundSyncConstructor();
 +  PBackgroundSyncChild* actor =
