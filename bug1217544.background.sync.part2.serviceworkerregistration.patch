@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  9fa7a125700b41fd5099b359ebc070e947043eb2
+# Parent  66ce8ad02c8782ed26e96c667a6e1f3f9eb1f0fb
 Bug 1217544 - Implement one-off BackgroundSync API. Part 2: ServiceWorkerRegistration. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
@@ -43,9 +43,8 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
  
    // If we are on the main thread, then check the pref directly.
    if (NS_IsMainThread()) {
--    Preferences::GetBool("dom.background.sync.enabled", false);
-+    Preferences::GetBool("dom.backgroundSync.enabled", false);
-     return false;
+-    return Preferences::GetBool("dom.background.sync.enabled", false);
++    return Preferences::GetBool("dom.backgroundSync.enabled", false);
    }
  
    // Otherwise check the pref via the worker private helper.
@@ -53,6 +52,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
    if (!workerPrivate) {
      return false;
    }
+ 
 diff --git a/dom/backgroundsync/BackgroundSync.h b/dom/backgroundsync/BackgroundSync.h
 --- a/dom/backgroundsync/BackgroundSync.h
 +++ b/dom/backgroundsync/BackgroundSync.h
@@ -225,7 +225,7 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
    : ServiceWorkerRegistrationBase(nullptr, aScope)
    , mWorkerPrivate(aWorkerPrivate)
  {
-@@ -1215,10 +1253,21 @@ ServiceWorkerRegistrationWorkerThread::G
+@@ -1216,10 +1254,21 @@ ServiceWorkerRegistrationWorkerThread::G
    }
  
    RefPtr<PushManager> ret = mPushManager;
