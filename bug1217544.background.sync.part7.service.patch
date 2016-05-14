@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  958ac7be8f55c19275f88c670b014ab356af6b77
+# Parent  98a6a60db4976a28a7d93d734ca8d5289f6bd6a4
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: BackgroundSyncService. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/BackgroundSyncParent.cpp
@@ -222,12 +222,23 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncService.cpp
-@@ -0,0 +1,95 @@
+@@ -0,0 +1,107 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 +* file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++/**
++ * This singleton object is kept alive by the BackgroundSyncParent and
++ * ServiceWorkerManagerParent instances.
++ *
++ * It proxies DB requests such as sync registrations and get tags coming from
++ * the DOM bindings and makes sure that the DB context is ready for them.
++ *
++ * It also observes online/offline state changes and triggers the appropriate
++ * `sync` events whenever is needed.
++ */
 +
 +#include "BackgroundSyncService.h"
 +
@@ -316,6 +327,7 @@ new file mode 100644
 +  // XXX If we are online we need to get the list of registered sync requests
 +  //     to trigger the corresponding 'sync' events.
 +}
++
 +} // namespace dom
 +} // namespace mozilla
 diff --git a/dom/backgroundsync/BackgroundSyncService.h b/dom/backgroundsync/BackgroundSyncService.h
