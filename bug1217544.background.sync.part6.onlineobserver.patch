@@ -85,6 +85,7 @@ new file mode 100644
 +OnlineStateObserver::RemoveListener(Listener* aListener)
 +{
 +  MOZ_ASSERT(aListener == mListener);
++  mShuttingDown = true;
 +  mListener = nullptr;
 +}
 +
@@ -126,13 +127,12 @@ new file mode 100644
 +  nsCOMPtr<nsIObserverService> os = services::GetObserverService();
 +  NS_ENSURE_STATE(os);
 +
-+  // The observer service holds us alive.
++  // The Listener implementor holds us alive.
 +  nsresult rv = os->AddObserver(this, NS_IOSERVICE_OFFLINE_STATUS_TOPIC,
-+                                /* holdsWeak */ false);
++                                /* holdsWeak */ true);
 +  NS_ENSURE_SUCCESS(rv, rv);
 +
-+  // The observer service holds us alive.
-+  rv = os->AddObserver(this, "xpcom-shutdown", /* holdsWeak */ false);
++  rv = os->AddObserver(this, "xpcom-shutdown", /* holdsWeak */ true);
 +  NS_ENSURE_SUCCESS(rv, rv);
 +
 +  bool offline = true;
