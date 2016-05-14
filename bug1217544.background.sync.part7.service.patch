@@ -37,7 +37,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
    explicit PendingRequest(const nsID& aRequestId,
                            const SyncOp& aOp)
      : mRequestId(aRequestId)
-@@ -38,40 +43,55 @@ public:
+@@ -38,88 +43,92 @@ public:
  private:
    ~PendingRequest() {}
  
@@ -82,27 +82,32 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
  {
    AssertIsOnBackgroundThread();
  
+-  switch(aOp.mArgs().type()) {
+-    case SyncOpArgs::TSyncRegisterArgs:
+-    {
+-      // XXX Do registration.
+-      const SyncRegisterResponse response(true);
+-      //const SyncOpError response(static_cast<uint32_t>(NS_ERROR_FAILURE));
+-      Unused << SendResponse(aRequestId, response);
+-      break;
+-    }
+-    case SyncOpArgs::TSyncGetTagsArgs:
+-    {
+-      //XXX Do GetTags.
+-      nsTArray<nsString> tags;
+-      const SyncGetTagsResponse response(tags);
+-      Unused << SendResponse(aRequestId, response);
+-      break;
+-    }
+-    default:
+-    {
+-      MOZ_CRASH("Unknown BackgroundSync request");
+-    }
 +  if (NS_WARN_IF(!mService)) {
 +    return false;
-+  }
-+
-   switch(aOp.mArgs().type()) {
-     case SyncOpArgs::TSyncRegisterArgs:
-     {
-       // XXX Do registration.
-       const SyncRegisterResponse response(true);
-       //const SyncOpError response(static_cast<uint32_t>(NS_ERROR_FAILURE));
-       Unused << SendResponse(aRequestId, response);
-       break;
-@@ -84,42 +104,52 @@ BackgroundSyncParent::ExecuteRequest(con
-       Unused << SendResponse(aRequestId, response);
-       break;
-     }
-     default:
-     {
-       MOZ_CRASH("Unknown BackgroundSync request");
-     }
    }
++
++  mService->Request(mId, aRequestId, aOp);
 +
 +  return true;
  }
@@ -222,7 +227,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncService.cpp
-@@ -0,0 +1,107 @@
+@@ -0,0 +1,117 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -310,6 +315,16 @@ new file mode 100644
 +  mBackgroundSyncActors.RemoveEntry(aParent);
 +}
 +
++void
++BackgroundSyncService::Request(const uint64_t aActorId,
++                               const nsID& aRequestId,
++                               const SyncOp& aOp)
++{
++  AssertIsOnBackgroundThread();
++
++  printf_stderr("BackgroundSyncService::Request\n");
++}
++
 +/**
 + * OnlineStateObserver::Listener implementation.
 + */
@@ -334,7 +349,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.h b/dom/backgroundsync/Bac
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncService.h
-@@ -0,0 +1,44 @@
+@@ -0,0 +1,48 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -358,6 +373,10 @@ new file mode 100644
 +
 +  void RegisterActor(BackgroundSyncParent* aParent);
 +  void UnregisterActor(BackgroundSyncParent* aParent);
++
++  void Request(const uint64_t aActorId,
++               const nsID& aRequestId,
++               const SyncOp& aOp);
 +
 +private:
 +  BackgroundSyncService();
