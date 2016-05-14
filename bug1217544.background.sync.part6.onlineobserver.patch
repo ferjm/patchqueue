@@ -1,13 +1,13 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  ff363d92010b1802e090d0b38ca178312aacf3bf
+# Parent  c36fd61a75404329fa682d3abaa334edf1e4f308
 Bug 1217544 - Implement one-off BackgroundSync API. Part 6: Online state observer. r=baku
 
 diff --git a/dom/backgroundsync/OnlineStateObserver.cpp b/dom/backgroundsync/OnlineStateObserver.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/OnlineStateObserver.cpp
-@@ -0,0 +1,129 @@
+@@ -0,0 +1,149 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -74,6 +74,7 @@ new file mode 100644
 +OnlineStateObserver::OnlineStateObserver(Listener* aListener)
 +  : mListener(aListener)
 +  , mInitiatingThread(NS_GetCurrentThread())
++  , mShuttingDown(false)
 +{
 +  AssertIsOnBackgroundThread();
 +  MOZ_ASSERT(mInitiatingThread);
@@ -92,6 +93,19 @@ new file mode 100644
 +                             const char16_t* aData)
 +{
 +  AssertIsOnMainThread();
++  MOZ_ASSERT(!strcmp(aTopic, NS_IOSERVICE_OFFLINE_STATUS_TOPIC) ||
++             !strcmp(aTopic, "xpcom-shutdown"));
++
++  // During xpcom-shutdown we do a nsIOService:SetOffline that
++  // triggers a notification that we should ignore cause the
++  // listener might already be gone.
++  if (!strcmp(aTopic, "xpcom-shutdown")) {
++    mShuttingDown = true;
++  }
++
++  if (mShuttingDown) {
++    return NS_OK;
++  }
 +
 +  OnlineState state = OFFLINE;
 +  if (nsDependentString(aData).EqualsLiteral(NS_IOSERVICE_ONLINE)) {
@@ -111,9 +125,15 @@ new file mode 100644
 +
 +  nsCOMPtr<nsIObserverService> os = services::GetObserverService();
 +  NS_ENSURE_STATE(os);
++
 +  // The observer service holds us alive.
-+  os->AddObserver(this, NS_IOSERVICE_OFFLINE_STATUS_TOPIC,
-+                  /* holdsWeak */ false);
++  nsresult rv = os->AddObserver(this, NS_IOSERVICE_OFFLINE_STATUS_TOPIC,
++                                /* holdsWeak */ false);
++  NS_ENSURE_SUCCESS(rv, rv);
++
++  // The observer service holds us alive.
++  rv = os->AddObserver(this, "xpcom-shutdown", /* holdsWeak */ false);
++  NS_ENSURE_SUCCESS(rv, rv);
 +
 +  bool offline = true;
 +  nsCOMPtr<nsIIOService> ioService = services::GetIOService();
@@ -141,7 +161,7 @@ diff --git a/dom/backgroundsync/OnlineStateObserver.h b/dom/backgroundsync/Onlin
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/OnlineStateObserver.h
-@@ -0,0 +1,59 @@
+@@ -0,0 +1,64 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -193,6 +213,11 @@ new file mode 100644
 +  // Weak reference cleared by RemoveListener().
 +  Listener* mListener;
 +  RefPtr<nsIThread> mInitiatingThread;
++
++  // On xpcom-shutdown we do a nsIOService:SetOffline that
++  // triggers a notification that we should ignore cause the
++  // listener might already be gone.
++  bool mShuttingDown;
 +};
 +
 +} // namespace dom
