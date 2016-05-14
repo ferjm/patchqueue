@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  c36fd61a75404329fa682d3abaa334edf1e4f308
+# Parent  c5917f348fa1c77cbd0875d5c6eb8e2075e0f45a
 Bug 1217544 - Implement one-off BackgroundSync API. Part 6: Online state observer. r=baku
 
 diff --git a/dom/backgroundsync/OnlineStateObserver.cpp b/dom/backgroundsync/OnlineStateObserver.cpp
@@ -246,8 +246,8 @@ new file mode 100644
 +  OnlineStateObserver(Listener* aListener);
 +  ~OnlineStateObserver();
 +
-+  // Weak reference cleared by RemoveListener().
-+  Listener* mListener;
++  // Weak reference cleared by Shutdown().
++  Listener* MOZ_NON_OWNING_REF mListener;
 +  RefPtr<nsIThread> mInitiatingThread;
 +
 +  // On xpcom-shutdown we do a nsIOService:SetOffline that
