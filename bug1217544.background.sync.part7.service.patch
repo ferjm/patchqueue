@@ -227,7 +227,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncService.cpp
-@@ -0,0 +1,117 @@
+@@ -0,0 +1,118 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -238,8 +238,9 @@ new file mode 100644
 + * This singleton object is kept alive by the BackgroundSyncParent and
 + * ServiceWorkerManagerParent instances.
 + *
-+ * It proxies DB requests such as sync registrations and get tags coming from
-+ * the DOM bindings and makes sure that the DB context is ready for them.
++ * It proxies storage requests such as sync registrations and get tags
++ * coming from the DOM objects through the IPC actors and makes sure that
++ * the storage context is ready for them.
 + *
 + * It also observes online/offline state changes and triggers the appropriate
 + * `sync` events whenever is needed.
