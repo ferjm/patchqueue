@@ -490,7 +490,7 @@ new file mode 100644
 +  // An interface to be implemented by code wishing to use the
 +  // StorageManagerIdFactory.
 +  // Note, the Listener implementation is responsible for calling
-+  // RemoveListener() on the PrincipalVerifier to clear the weak
++  // RemoveListener() on the StorageManagerIdFactory to clear the weak
 +  // reference.
 +  class Listener
 +  {
