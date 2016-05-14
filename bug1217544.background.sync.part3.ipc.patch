@@ -6,7 +6,7 @@ Bug 1217544 - Implement one-off BackgroundSync API. Part 3: IPC. r=baku
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
 --- a/dom/backgroundsync/BackgroundSync.cpp
 +++ b/dom/backgroundsync/BackgroundSync.cpp
-@@ -1,86 +1,299 @@
+@@ -1,86 +1,298 @@
  /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
  /* vim: set ts=8 sts=2 et sw=2 tw=80: */
  /* This Source Code Form is subject to the terms of the Mozilla Public
@@ -251,7 +251,6 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
  BackgroundSync::~BackgroundSync()
 -{}
 +{
-+  MOZ_ASSERT(IsBackgroundSyncThread());
 +  Shutdown();
 +  MOZ_ASSERT(!mWorkerFeature);
 +  MOZ_ASSERT(!mActor);
@@ -313,7 +312,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
  BackgroundSync::PrefEnabled(JSContext* aCx, JSObject* aObj)
  {
    using mozilla::dom::workers::WorkerPrivate;
-@@ -95,42 +308,137 @@ BackgroundSync::PrefEnabled(JSContext* a
+@@ -95,42 +307,137 @@ BackgroundSync::PrefEnabled(JSContext* a
    WorkerPrivate* workerPrivate = GetWorkerPrivateFromContext(aCx);
    if (!workerPrivate) {
      return false;
