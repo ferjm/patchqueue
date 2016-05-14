@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  4c5d3a85afe290ea105ec91a6181a885bbbd683e
+# Parent  958ac7be8f55c19275f88c670b014ab356af6b77
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: BackgroundSyncService. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/BackgroundSyncParent.cpp
@@ -254,7 +254,7 @@ new file mode 100644
 +  MOZ_ASSERT(sInstance == this);
 +  MOZ_ASSERT(mBackgroundSyncActors.Count() == 0);
 +
-+  mOnlineStateObserver->RemoveListener(this);
++  mOnlineStateObserver->Shutdown(this);
 +
 +  sInstance = nullptr;
 +}
@@ -276,7 +276,7 @@ new file mode 100644
 +void
 +BackgroundSyncService::Init()
 +{
-+  mOnlineStateObserver = OnlineStateObserver::Create(this);
++  mOnlineStateObserver = OnlineStateObserver::Init(this);
 +}
 +
 +void
