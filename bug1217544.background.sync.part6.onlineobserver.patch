@@ -7,7 +7,7 @@ diff --git a/dom/backgroundsync/OnlineStateObserver.cpp b/dom/backgroundsync/Onl
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/OnlineStateObserver.cpp
-@@ -0,0 +1,148 @@
+@@ -0,0 +1,185 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -21,6 +21,35 @@ new file mode 100644
 +
 +namespace mozilla {
 +namespace dom {
++
++/**
++ * ShutdownRunnable
++ */
++class ShutdownRunnable final : public Runnable
++{
++public:
++  explicit ShutdownRunnable(OnlineStateObserver* aObserver)
++    : mObserver(aObserver)
++  {}
++
++  NS_IMETHOD
++  Run() override
++  {
++    AssertIsOnMainThread();
++
++    nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
++    if (obs) {
++      obs->RemoveObserver(mObserver, NS_IOSERVICE_OFFLINE_STATUS_TOPIC);
++      obs->RemoveObserver(mObserver, "xpcom-shutdown");
++    }
++    return NS_OK;
++  }
++
++private:
++  ~ShutdownRunnable() {};
++
++  RefPtr<OnlineStateObserver> mObserver;
++};
 +
 +/**
 + * OnlineStateChangeNotification
@@ -60,7 +89,7 @@ new file mode 100644
 +
 +// static
 +already_AddRefed<OnlineStateObserver>
-+OnlineStateObserver::Create(Listener* aListener)
++OnlineStateObserver::Init(Listener* aListener)
 +{
 +  AssertIsOnBackgroundThread();
 +
@@ -81,12 +110,20 @@ new file mode 100644
 +  MOZ_ASSERT(mListener);
 +}
 +
++OnlineStateObserver::~OnlineStateObserver()
++{
++  MOZ_ASSERT(!mListener);
++}
++
 +void
-+OnlineStateObserver::RemoveListener(Listener* aListener)
++OnlineStateObserver::Shutdown(Listener* aListener)
 +{
 +  MOZ_ASSERT(aListener == mListener);
 +  mShuttingDown = true;
 +  mListener = nullptr;
++
++  // We need to remove the observers so we can be destroyed.
++  MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(new ShutdownRunnable(this)));
 +}
 +
 +NS_IMETHODIMP
@@ -160,7 +197,7 @@ diff --git a/dom/backgroundsync/OnlineStateObserver.h b/dom/backgroundsync/Onlin
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/OnlineStateObserver.h
-@@ -0,0 +1,64 @@
+@@ -0,0 +1,62 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -190,7 +227,7 @@ new file mode 100644
 +  // An interface to be implemented by code wishing to use the
 +  // OnlineStateObserver.
 +  // Note, the Listener implementation is responsible for calling
-+  // RemoveListener() on the OnlineStateObserver to clear the weak
++  // Shutdown() on the OnlineStateObserver to clear the weak
 +  // reference.
 +  class Listener
 +  {
@@ -199,15 +236,15 @@ new file mode 100644
 +  };
 +
 +  static already_AddRefed<OnlineStateObserver>
-+  Create(Listener* aListener);
++  Init(Listener* aListener);
 +
-+  // The Listener must call RemoveListener() when it no
++  // The Listener must call Shutdown() when it no
 +  // longer need to receive online state change notifications.
-+  void RemoveListener(Listener* aListener);
++  void Shutdown(Listener* aListener);
 +
 +private:
 +  OnlineStateObserver(Listener* aListener);
-+  ~OnlineStateObserver() {};
++  ~OnlineStateObserver();
 +
 +  // Weak reference cleared by RemoveListener().
 +  Listener* mListener;
@@ -223,8 +260,6 @@ new file mode 100644
 +} // namespace mozilla
 +
 +#endif // mozilla_dom_OnlineStateObserver_h
-+
-+
 diff --git a/dom/backgroundsync/moz.build b/dom/backgroundsync/moz.build
 --- a/dom/backgroundsync/moz.build
 +++ b/dom/backgroundsync/moz.build
