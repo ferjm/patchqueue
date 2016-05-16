@@ -1,12 +1,12 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  3b4ac8cead7bf8c57bb45c99dc6bb23489212123
-Bug 1217544 - Implement one-off BackgroundSync API. Part 5: Ensure unique storage manager per principal. r=baku
+# Parent  53ec980e00e03d6609707c8413b71deca4125745
+Bug 1217544 - Implement one-off BackgroundSync API. Part 5: StorageManager and StorageContext. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
 --- a/dom/backgroundsync/BackgroundSync.cpp
 +++ b/dom/backgroundsync/BackgroundSync.cpp
-@@ -335,17 +335,18 @@ BackgroundSync::ActorCreated(PBackground
+@@ -334,17 +334,18 @@ BackgroundSync::ActorCreated(PBackground
    MOZ_ASSERT(IsBackgroundSyncThread());
    MOZ_ASSERT(aActor);
    MOZ_ASSERT(!mActor);
@@ -253,6 +253,387 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/Back
  #endif // mozilla_dom_BackgroundSyncParent_h
 -
 -
+diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageManager.cpp
+new file mode 100644
+--- /dev/null
++++ b/dom/backgroundsync/StorageManager.cpp
+@@ -0,0 +1,309 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#include "StorageManager.h"
++
++#include "mozilla/AutoRestore.h"
++#include "mozilla/StaticMutex.h"
++#include "nsIThread.h"
++#include "nsThreadUtils.h"
++
++namespace mozilla {
++namespace dom {
++
++// ---------------------------------------------------------------------------
++
++// Singleton class to track Manager instances and ensure there is only
++// one for each unique StorageManagerId.
++class StorageManager::Factory
++{
++public:
++  friend class StaticAutoPtr<StorageManager::Factory>;
++
++  static nsresult
++  GetOrCreate(StorageManagerId* aManagerId,
++              StorageManager** aManagerOut)
++  {
++    AssertIsOnBackgroundThread();
++
++    // Ensure there is a factory instance. This forces the Get() call
++    // below to use the same factory.
++    nsresult rv = MaybeCreateInstance();
++    if (NS_WARN_IF(NS_FAILED(rv))) {
++      return rv;
++    }
++
++    RefPtr<StorageManager> ref = Get(aManagerId);
++    if (!ref) {
++      nsCOMPtr<nsIThread> ioThread;
++      rv = NS_NewNamedThread("BSyncIOThread",
++                             getter_AddRefs(ioThread));
++      if (NS_WARN_IF(NS_FAILED(rv))) {
++        return rv;
++      }
++
++      ref = new StorageManager(aManagerId, ioThread);
++
++      // There may be an old manager for this origin in the process of
++      // cleaning up.  We need to tell the new manager about this so
++      // that it won't actually start until the old manager is done.
++      RefPtr<StorageManager> oldManager = Get(aManagerId, Closing);
++      ref->Init(oldManager);
++
++      MOZ_ASSERT(!sFactory->mManagerList.Contains(ref));
++      sFactory->mManagerList.AppendElement(ref);
++    }
++
++    ref.forget(aManagerOut);
++
++    return NS_OK;
++  }
++
++  static already_AddRefed<StorageManager>
++  Get(StorageManagerId* aManagerId, State aState = Open)
++  {
++    AssertIsOnBackgroundThread();
++
++    nsresult rv = MaybeCreateInstance();
++    if (NS_WARN_IF(NS_FAILED(rv))) {
++      return nullptr;
++    }
++
++    // Iterate in reverse to find the most recent, matching Manager. This
++    // is important when looking for a Closing Manager.  If a new Manager
++    // chains to an old Manager we want it to be the most recent one.
++    ManagerList::BackwardIterator iter(sFactory->mManagerList);
++    while (iter.HasMore()) {
++      RefPtr<StorageManager> manager = iter.GetNext();
++      if (aState == manager->GetState() && *manager->mManagerId == *aManagerId) {
++        return manager.forget();
++      }
++    }
++
++    return nullptr;
++  }
++
++  static void
++  Remove(StorageManager* aManager)
++  {
++    AssertIsOnBackgroundThread();
++    MOZ_ASSERT(aManager);
++    MOZ_ASSERT(sFactory);
++
++    MOZ_ALWAYS_TRUE(sFactory->mManagerList.RemoveElement(aManager));
++
++    // Clean up the factory singleton if there are no more managers.
++    MaybeDestroyInstance();
++  }
++
++  static void
++  Abort(const nsACString& aOrigin)
++  {
++    AssertIsOnBackgroundThread();
++
++    if (!sFactory) {
++      return;
++    }
++
++    MOZ_ASSERT(!sFactory->mManagerList.IsEmpty());
++
++    {
++      ManagerList::ForwardIterator iter(sFactory->mManagerList);
++      while (iter.HasMore()) {
++        RefPtr<StorageManager> manager = iter.GetNext();
++        if (aOrigin.IsVoid() ||
++            manager->mManagerId->QuotaOrigin() == aOrigin) {
++          manager->Abort();
++        }
++      }
++    }
++  }
++
++  static void
++  ShutdownAll()
++  {
++    AssertIsOnBackgroundThread();
++
++    if (!sFactory) {
++      return;
++    }
++
++    MOZ_ASSERT(!sFactory->mManagerList.IsEmpty());
++
++    {
++      // Note that we are synchronously calling shutdown code here. If any
++      // of the shutdown code synchronously decides to delete the Factory
++      // we need to delay that delete until the end of this method.
++      AutoRestore<bool> restore(sFactory->mInSyncShutdown);
++      sFactory->mInSyncShutdown = true;
++
++      ManagerList::ForwardIterator iter(sFactory->mManagerList);
++      while (iter.HasMore()) {
++        RefPtr<StorageManager> manager = iter.GetNext();
++        manager->Shutdown();
++      }
++    }
++
++    MaybeDestroyInstance();
++  }
++
++  static bool
++  IsShutdownAllComplete()
++  {
++    AssertIsOnBackgroundThread();
++    return !sFactory;
++  }
++
++private:
++  Factory()
++    : mInSyncShutdown(false)
++  {
++    MOZ_COUNT_CTOR(StorageManager::Factory);
++  }
++
++  ~Factory()
++  {
++    MOZ_COUNT_DTOR(StorageManager::Factory);
++    MOZ_ASSERT(mManagerList.IsEmpty());
++    MOZ_ASSERT(!mInSyncShutdown);
++  }
++
++  static nsresult
++  MaybeCreateInstance()
++  {
++    AssertIsOnBackgroundThread();
++
++    if (!sFactory) {
++      // Be clear about what we are locking. sFactory is bg thread only, so
++      // we don't need to lock it here. Just protect sFactoryShutdown and
++      // sBackgroundThread.
++      {
++        StaticMutexAutoLock lock(sMutex);
++
++        if (sFactoryShutdown) {
++          return NS_ERROR_ILLEGAL_DURING_SHUTDOWN;
++        }
++      }
++
++      // We cannot use ClearOnShutdown() here because we're not on the main
++      // thread. Instead, we delete sFactory in Factory::Remove() after the
++      // last manager is removed.  ShutdownObserver ensures this happens
++      // before shutdown.
++      sFactory = new Factory();
++    }
++
++    // Never return sFactory to code outside Factory.  We need to delete it
++    // out from under ourselves just before we return from Remove().  This
++    // would be (even more) dangerous if other code had a pointer to the
++    // factory itself.
++
++    return NS_OK;
++  }
++
++  static void
++  MaybeDestroyInstance()
++  {
++    AssertIsOnBackgroundThread();
++    MOZ_ASSERT(sFactory);
++
++    // If the factory is still in use then we cannot delete yet. This
++    // could be due to managers still existing or because we are in the
++    // middle of shutting down. We need to be careful not to delete ourself
++    // synchronously during shutdown.
++    if (!sFactory->mManagerList.IsEmpty() || sFactory->mInSyncShutdown) {
++      return;
++    }
++
++    sFactory = nullptr;
++  }
++
++  // Singleton created on demand and deleted when last Manager is cleared
++  // in Remove(). PBackground thread only.
++  static StaticAutoPtr<Factory> sFactory;
++
++  // Protects following static attribute.
++  static StaticMutex sMutex;
++
++  // Indicate if shutdown has occurred to block re-creation of sFactory.
++  // Must hold sMutex to access.
++  static bool sFactoryShutdown;
++
++  // Weak references as we don't want to keep StorageManager objects alive
++  // forever.
++  // When a Manager is destroyed it calls Factory::Remove() to clear itself.
++  // PBackground thread only.
++  typedef nsTObserverArray<StorageManager*> ManagerList;
++  ManagerList mManagerList;
++
++  // This flag is set when we are looping through the list and calling
++  // Shutdown() on each Manager.  We need to be careful not to synchronously
++  // trigger the deletion of the factory while still executing this loop.
++  bool mInSyncShutdown;
++};
++
++// static
++StaticAutoPtr<StorageManager::Factory> StorageManager::Factory::sFactory;
++
++// static
++StaticMutex StorageManager::Factory::sMutex;
++
++// static
++bool StorageManager::Factory::sFactoryShutdown = false;
++
++// ---------------------------------------------------------------------------
++
++// static
++nsresult
++StorageManager::GetOrCreate(StorageManagerId* aManagerId,
++                            StorageManager** aManagerOut)
++{
++  AssertIsOnBackgroundThread();
++  return NS_OK;
++}
++
++StorageManager::StorageManager(StorageManagerId* aManagerId,
++                               nsIThread* aIOThread)
++  : mManagerId(aManagerId)
++  , mIOThread(aIOThread)
++  , mState(Open)
++{
++  MOZ_ASSERT(mManagerId);
++  MOZ_ASSERT(mIOThread);
++}
++
++StorageManager::~StorageManager()
++{
++  MOZ_ASSERT(mState == Closing);
++/* XXX
++  nsCOMPtr<nsIThread> ioThread;
++  mIOThread.swap(ioThread);
++
++  // Don't spin the event loop in the destructor waiting for the thread to
++  // shutdown. Defer this to the main thread, instead.
++  MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(
++        NewRunnableMethod(ioThread, &nsIThread::Shutdown)));*/
++}
++
++void
++StorageManager::Init(StorageManager* aOldManager)
++{
++  // XXX
++}
++
++void
++StorageManager::Abort()
++{
++  // XXX
++}
++
++void
++StorageManager::Shutdown()
++{
++  // XXX
++}
++
++} // namespace dom
++} // namespace mozilla
+diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageManager.h
+new file mode 100644
+--- /dev/null
++++ b/dom/backgroundsync/StorageManager.h
+@@ -0,0 +1,62 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
++ * You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#ifndef mozilla_dom_StorageManager_h
++#define mozilla_dom_StorageManager_h
++
++namespace mozilla {
++namespace dom {
++
++/**
++ * The StorageManager class is responsible for managing the storage of sync
++ * requests. The DOM objects and IPC actors are basically just plumbing to
++ * get the request to the right StorageManager object running in the parent
++ * process.
++ *
++ * There should be exactly one StorageManager object for each origin or app
++ * using the BackgroundSync API. This uniqueness is defined by the
++ * StorageManagerId equality operator. The uniqueness is enforced by the
++ * Manager GetOrCreate() factory method.
++ */
++
++class StorageManager final
++{
++public:
++  NS_INLINE_DECL_REFCOUNTING(StorageManager)
++
++  static nsresult GetOrCreate(StorageManagerId* aManagerId,
++                              StorageManager** aManagerOut);
++
++  enum State
++  {
++    Open,
++    Closing
++  };
++
++  State GetState() const
++  {
++    return mState;
++  }
++
++private:
++  class Factory;
++
++  StorageManager(StorageManagerId* aManagerId, nsIThread* aIOThread);
++  ~StorageManager();
++
++  void Init(StorageManager* aOldManager);
++  void Abort();
++  void Shutdown();
++
++  RefPtr<StorageManagerId> mManagerId;
++  nsCOMPtr<nsIThread> mIOThread;
++  State mState;
++};
++
++} // namespace dom
++} // namespace mozilla
++
++#endif // mozilla_dom_StorageManager_h
 diff --git a/dom/backgroundsync/StorageManagerId.cpp b/dom/backgroundsync/StorageManagerId.cpp
 new file mode 100644
 --- /dev/null
@@ -531,7 +912,7 @@ new file mode 100644
 diff --git a/dom/backgroundsync/moz.build b/dom/backgroundsync/moz.build
 --- a/dom/backgroundsync/moz.build
 +++ b/dom/backgroundsync/moz.build
-@@ -5,17 +5,18 @@
+@@ -5,17 +5,19 @@
  
  EXPORTS.mozilla.dom += [
      'BackgroundSync.h'
@@ -542,6 +923,7 @@ diff --git a/dom/backgroundsync/moz.build b/dom/backgroundsync/moz.build
      'BackgroundSyncChild.cpp',
 -    'BackgroundSyncParent.cpp'
 +    'BackgroundSyncParent.cpp',
++    'StorageManager.cpp',
 +    'StorageManagerId.cpp'
  ]
  
