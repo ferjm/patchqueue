@@ -253,6 +253,376 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/Back
  #endif // mozilla_dom_BackgroundSyncParent_h
 -
 -
+diff --git a/dom/backgroundsync/StorageAction.cpp b/dom/backgroundsync/StorageAction.cpp
+new file mode 100644
+--- /dev/null
++++ b/dom/backgroundsync/StorageAction.cpp
+@@ -0,0 +1,38 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
++ * You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#include "StorageAction.h"
++
++namespace mozilla {
++namespace dom {
++
++void
++StorageAction::CancelOnInitiatingThread()
++{
++  NS_ASSERT_OWNINGTHREAD(StorageAction);
++  // It is possible for cancellation to be duplicated. For example, an
++  // individual BackgroundSync could have its StorageActions canceled
++  // and then shutdown could trigger a second action.
++  mCanceled = true;
++}
++
++StorageAction::StorageAction()
++  : mCanceled(false)
++{
++}
++
++StorageAction::~StorageAction()
++{
++}
++
++bool
++StorageAction::IsCanceled() const
++{
++  return mCanceled;
++}
++
++} // namespace dom
++} // namespace mozilla
+diff --git a/dom/backgroundsync/StorageAction.h b/dom/backgroundsync/StorageAction.h
+new file mode 100644
+--- /dev/null
++++ b/dom/backgroundsync/StorageAction.h
+@@ -0,0 +1,104 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
++ * You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#ifndef mozilla_dom_StorageAction_h
++#define mozilla_dom_StorageAction_h
++
++#include "mozilla/Atomics.h"
++#include "nsISupportsImpl.h"
++
++class mozIStorageConnection;
++
++namespace mozilla {
++namespace dom {
++
++class StorageAction
++{
++public:
++  NS_INLINE_DECL_REFCOUNTING(StorageAction)
++
++  class Resolver
++  {
++  public:
++    // Note: StorageAction must drop Resolver ref after calling Resolve()!
++    // Note: Must be called on the same thread used to execute
++    //       StorageAction::RunOnTarget().
++    virtual void Resolve(nsresult aRv) = 0;
++
++    NS_IMETHOD_(MozExternalRefCountType)
++    AddRef(void) = 0;
++
++    NS_IMETHOD_(MozExternalRefCountType)
++    Release(void) = 0;
++  };
++
++  // Class containing data that can be opportunistically shared between
++  // multiple StorageActions running on the same thread/StorageContext.
++  class Data
++  {
++  public:
++    virtual mozIStorageConnection*
++    GetConnection() const = 0;
++
++    virtual void
++    SetConnection(mozIStorageConnection* aConn) = 0;
++  };
++
++  // Execute operations on the target thread.  Once complete call
++  // Resolver::Resolve(). This can be done sync or async.
++  // Note: StorageAction should hold Resolver ref until its ready to call
++  //        Resolve().
++  // Note: The "target" thread is determined when the StorageAction is scheduled
++  //       on StorageContext. The StorageAction should not assume any particular
++  //       thread is used.
++  virtual void RunOnTarget(Resolver* aResolver, const QuotaInfo& aQuotaInfo,
++                           Data* aOptionalData) = 0;
++
++  // Called on initiating thread when the StorageAction is canceled.
++  // The StorageAction is responsible for calling Resolver::Resolve() as normal;
++  // either with a normal error code or NS_ERROR_ABORT. If
++  // CancelOnInitiatingThread() is called after Resolve() has already occurred,
++  // then the cancel can be ignored.
++  //
++  // Cancellation is a best effort to stop processing as soon as possible, but
++  // does not guarantee the StorageAction will not run.
++  //
++  // CancelOnInitiatingThread() may be called more than once. Subsequent
++  // calls should have no effect.
++  //
++  // Default implementation sets an internal cancellation flag that can be
++  // queried with IsCanceled().
++  virtual void CancelOnInitiatingThread();
++
++  // Executed on the initiating thread and is passed the nsresult given to
++  // Resolver::Resolve().
++  virtual void CompleteOnInitiatingThread(nsresult aRv) { }
++
++  // Executed on the initiating thread. If this StorageAction will operate on
++  // the given storage ID then override this to return true.
++  virtual bool MatchesStorageId(StorageId aId) const {
++    return false;
++  }
++
++protected:
++  StorageAction();
++
++  // virtual because deleted through base class pointer
++  virtual ~StorageAction();
++
++  // Check if this StorageAction has been canceled.
++  // May be called from any thread, but typically used from the target thread.
++  bool IsCanceled() const;
++
++private:
++  // Accessible from any thread.
++  Atomic<bool> mCanceled;
++};
++
++} // namespace dom
++} // namespace mozilla
++
++#endif // mozilla_dom_StorageAction_h
+diff --git a/dom/backgroundsync/StorageContext.h b/dom/backgroundsync/StorageContext.h
+new file mode 100644
+--- /dev/null
++++ b/dom/backgroundsync/StorageContext.h
+@@ -0,0 +1,213 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
++ * You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#ifndef mozilla_dom_StorageContext_h
++#define mozilla_dom_StorageContext_h
++
++namespace mozilla {
++namespace dom {
++
++/**
++ * The StorageContext class is RAII-style class for managing IO operations
++ * within Background Sync storage.
++ *
++ * When a StorageContext is created it performs the complicated steps necessary
++ * to initialize the QuotaManager. StorageAction objects dispatched on the
++ * Context are delayed until this initialization is complete. They are then
++ * allow to execute on any specified thread. Once all references to the
++ * StorageContext are gone, then the steps necessary to release the QuotaManager
++ * are performed. After initialization the StorageContext holds a self reference,
++ * so it will stay alive until one of three conditions occur:
++ *
++ * 1) The StorageManager will call StorageContext::AllowToClose() when all of
++ *    the actors have removed themselves as listener. This means an idle
++ *    context with no active DOM objects will close gracefully.
++ * 2) The QuotaManager aborts all operations so it can delete the files.
++ *    In this case the QuotaManager calls Client::AbortOperations() which
++ *    in turn cancels all existing Action objects and then marks the
++ *    StorageManager as invalid.
++ * 3) Browser shutdown occurs and the StorageManager calls
++ *    StorageContext::CancelAll()
++ *
++ * In either case, though, the StorageAction objects must be destroyed first to
++ * allow the StorageContext to be destroyed.
++ *
++ * While the StorageContext performs operations asynchronously on threads, all
++ * of methods in its public interface must be called on the same thread
++ * originally used to create the Context.
++ */
++
++class StorageContext final
++{
++public:
++  NS_INLINE_DECL_REFCOUNTING(StorageContext)
++
++  // Define a class allowing other threads to hold the StorageContext alive.
++  // This also allows these other threads to safely close or cancel the
++  // StorageContext.
++  class ThreadsafeHandle final
++  {
++    friend class StorageContext;
++
++  public:
++    NS_INLINE_DECL_THREADSAFE_REFCOUNTING(ThreadsafeHandle)
++
++    void AllowToClose();
++    void InvalidateAndAllowToClose();
++
++  private:
++    explicit ThreadsafeHandle(StorageContext* aContext);
++    ~ThreadsafeHandle();
++
++    // Disallow copying.
++    ThreadsafeHandle(const ThreadsafeHandle&) = delete;
++    ThreadsafeHandle& operator=(const ThreadsafeHandle&) = delete;
++
++    void AllowToCloseOnOwningThread();
++    void InvalidateAndAllowToCloseOnOwningThread();
++
++    void StorageContextDestroyed(StorageContext* aContext);
++
++    // Cleared to allow the StorageContext to close.  Only safe to access on
++    // owning thread.
++    RefPtr<StorageContext> mStrongRef;
++
++    // Used to support cancelation even while the StorageContext is already
++    // allowed to close.  Cleared by ~StorageContext() calling
++    // StorageContextDestroyed().  Only safe to access on owning thread.
++    StorageContext* mWeakRef;
++
++    nsCOMPtr<nsIThread> mOwningThread;
++  };
++
++  // Different objects hold references to the StorageContext while some work is
++  // being performed asynchronously. These objects must implement the Activity
++  // interface and register themselves with the AddActivity().  When they are
++  // destroyed they must call RemoveActivity(). This allows the StorageContext
++  // to cancel any outstanding Activity work when the Context is cancelled.
++  class Activity
++  {
++  public:
++    virtual void Cancel() = 0;
++    virtual bool MatchesStorageId(StorageId aStorageId) const = 0;
++  };
++
++  // Create a Context attached to the given StorageManager.
++  // The given StorageAction will run on the QuotaManager IO thread.
++  // Note, this StorageAction must be execute synchronously.
++  static already_AddRefed<StorageContext>
++  Create(StorageManager* aManager, nsIThread* aTarget,
++         StorageAction* aInitAction, StorageContext* aOldContext);
++
++  // Execute given action on the target once the quota manager has been
++  // initialized.
++  //
++  // Only callable from the thread that created the Context.
++  void Dispatch(StorageAction* aAction);
++
++  // Cancel any StorageActions running or waiting to run.
++  // This should allow the StorageContext to be released and
++  // Listener::RemoveContext() will be called when complete.
++  //
++  // Only callable from the thread that created the Context.
++  void CancelAll();
++
++  // True if CancelAll() has been called.
++  bool IsCanceled() const;
++
++  // Like CancelAll(), but also marks the Manager as "invalid".
++  void Invalidate();
++
++  // Remove any self references and allow the StorageContext to be released
++  // when there are no more StorageActions to process.
++  void AllowToClose();
++
++  // Cancel any StorageActions running or waiting to run that operate on the
++  // given storage ID.
++  //
++  // Only callable from the thread that created the Context.
++  void CancelForStorageId(StorageId aId);
++
++  void AddActivity(Activity* aActivity);
++  void RemoveActivity(Activity* aActivity);
++
++  const QuotaInfo&
++  GetQuotaInfo() const
++  {
++    return mQuotaInfo;
++  }
++
++  // Tell the StorageContext that some state information has been orphaned in
++  // the data store and won't be cleaned up. The StoargeContext will leave the
++  // marker in place to trigger cleanup the next times its opened.
++  void NoteOrphanedData();
++
++private:
++  class Data;
++  class QuotaInitRunnable;
++  class ActionRunnable;
++
++  enum State
++  {
++    STATE_CONTEXT_PREINIT,
++    STATE_CONTEXT_INIT,
++    STATE_CONTEXT_READY,
++    STATE_CONTEXT_CANCELED
++  };
++
++  struct PendingStorageAction
++  {
++    nsCOMPtr<nsIEventTarget> mTarget;
++    RefPtr<StorageAction> mAction;
++  };
++
++  StorageContext(StorageManager* aManager, nsIThread* aTarget,
++                 StorageAction* aInitAction);
++  ~StorageContext();
++  void Init(StorageContext* aOldContext);
++  void Start();
++  void DispatchAction(StorageAction* aAction, bool aDoomData = false);
++  void OnQuotaInit(nsresult aRv, const QuotaInfo& aQuotaInfo,
++                   already_AddRefed<DirectoryLock> aDirectoryLock);
++
++
++  already_AddRefed<ThreadsafeHandle>
++  CreateThreadsafeHandle();
++
++  void
++  SetNextContext(Context* aNextContext);
++
++  void
++  DoomTargetData();
++
++  RefPtr<StorageManager> mManager;
++  nsCOMPtr<nsIThread> mTarget;
++  RefPtr<Data> mData;
++  State mState;
++  bool mOrphanedData;
++  QuotaInfo mQuotaInfo;
++  RefPtr<QuotaInitRunnable> mInitRunnable;
++  RefPtr<StorageAction> mInitAction;
++  nsTArray<PendingStorageAction> mPendingActions;
++
++  // Weak refs since activites must remove themselves from this list before
++  // being destroyed by calling RemoveActivity().
++  typedef nsTObserverArray<Activity*> ActivityList;
++  ActivityList mActivityList;
++
++  // The ThreadsafeHandle may have a strong ref back to us. This creates
++  // a ref-cycle that keeps the StorageContext alive.  The ref-cycle is broken
++  // when ThreadsafeHandle::AllowToClose() is called.
++  RefPtr<ThreadsafeHandle> mThreadsafeHandle;
++
++  RefPtr<DirectoryLock> mDirectoryLock;
++  RefPtr<StorageContext> mNextContext;
++};
++
++} // namespace dom
++} // namespace mozilla
++
++#endif // mozilla_dom_StorageContext_h
 diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageManager.cpp
 new file mode 100644
 --- /dev/null
@@ -912,7 +1282,7 @@ new file mode 100644
 diff --git a/dom/backgroundsync/moz.build b/dom/backgroundsync/moz.build
 --- a/dom/backgroundsync/moz.build
 +++ b/dom/backgroundsync/moz.build
-@@ -5,17 +5,19 @@
+@@ -5,17 +5,20 @@
  
  EXPORTS.mozilla.dom += [
      'BackgroundSync.h'
@@ -923,6 +1293,7 @@ diff --git a/dom/backgroundsync/moz.build b/dom/backgroundsync/moz.build
      'BackgroundSyncChild.cpp',
 -    'BackgroundSyncParent.cpp'
 +    'BackgroundSyncParent.cpp',
++    'StorageAction.cpp',
 +    'StorageManager.cpp',
 +    'StorageManagerId.cpp'
  ]
