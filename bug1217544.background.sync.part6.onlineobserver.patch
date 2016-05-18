@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  66c89083d53f7097ef00576a76a7b5cfa1fcd4d6
+# Parent  65234d481438c7170d537782dd7ac8332d1f9c6e
 Bug 1217544 - Implement one-off BackgroundSync API. Part 6: Online state observer. r=baku
 
 diff --git a/dom/backgroundsync/OnlineStateObserver.cpp b/dom/backgroundsync/OnlineStateObserver.cpp
@@ -263,7 +263,7 @@ new file mode 100644
 diff --git a/dom/backgroundsync/moz.build b/dom/backgroundsync/moz.build
 --- a/dom/backgroundsync/moz.build
 +++ b/dom/backgroundsync/moz.build
-@@ -6,25 +6,27 @@
+@@ -6,26 +6,28 @@
  EXPORTS.mozilla.dom += [
      'BackgroundSync.h'
  ]
@@ -274,6 +274,7 @@ diff --git a/dom/backgroundsync/moz.build b/dom/backgroundsync/moz.build
      'BackgroundSyncParent.cpp',
 +    'OnlineStateObserver.cpp',
      'StorageAction.cpp',
+     'StorageContext.cpp',
      'StorageManager.cpp',
      'StorageManagerId.cpp'
  ]
