@@ -1818,13 +1818,14 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/StorageManager.cpp
-@@ -0,0 +1,325 @@
+@@ -0,0 +1,373 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 +
++#include "StorageContext.h"
 +#include "StorageManager.h"
 +
 +#include "mozilla/AutoRestore.h"
@@ -2099,7 +2100,7 @@ new file mode 100644
 +
 +StorageManager::~StorageManager()
 +{
-+  NS_ASSERT_OWNINGTHREAD(Manager);
++  NS_ASSERT_OWNINGTHREAD(StorageManager);
 +  MOZ_ASSERT(mState == Closing);
 +  MOZ_ASSERT(!mContext);
 +
@@ -2113,31 +2114,78 @@ new file mode 100644
 +}
 +
 +void
-+StorageManager::RemoveStorageContext(StorageContext* aContext)
-+{
-+  // XXX
-+}
-+
-+void
-+StorageManager::NoteClosing()
-+{
-+  // XXX
-+}
-+
-+void
 +StorageManager::Init(StorageManager* aOldManager)
 +{
-+  // XXX
++  NS_ASSERT_OWNINGTHREAD(StorageManager);
++
++  RefPtr<StorageContext> oldContext;
++  if (aOldManager) {
++    oldContext = aOldManager->mContext;
++  }
++
++  // Create the context immediately. Since there can at most be one
++  // StorageContext per StorageManager, this lets us cleanly call
++  // Factory::Remove() once the StorageContext goes away.
++  RefPtr<StorageAction> setupAction = new SetupAction();
++  RefPtr<StorageContext> ref = StorageContext::Create(this, mIOThread,
++                                                      setupAction, oldContext);
++  mContext = ref;
 +}
 +
 +void
 +StorageManager::Abort()
 +{
-+  // XXX
++  NS_ASSERT_OWNINGTHREAD(StorageManager);
++  MOZ_ASSERT(mContext);
++
++  // Note that we are closing to prevent any new requests from coming in and
++  // creating a new StorageContext. We must ensure all Contexts and IO
++  // operations are complete before shutdown proceeds.
++  NoteClosing();
++
++  // Cancel and only note that we are done after the context is cleaned up.
++  RefPtr<StorageContext> context = mContext;
++  context->CancelAll();
 +}
 +
 +void
 +StorageManager::Shutdown()
++{
++  NS_ASSERT_OWNINGTHREAD(StorageManager);
++
++  // Ignore duplicate attempts to shutdown. This can occur when we start a
++  // browser initiated shutdown and then run ~StorageManager() which also
++  // calls Shutdown().
++  if (mShuttingDown) {
++    return;
++  }
++
++  mShuttingDown = true;
++
++  // Note that we are closing to prevent any new requests from coming in and
++  // creating a new StorageContext. We must ensure all Contexts and IO
++  // operations are complete before shutdown proceeds.
++  NoteClosing();
++
++  // If there is a context, then cancel and only note that we are done after
++  // its cleaned up.
++  if (mContext) {
++    RefPtr<StorageContext> context = mContext;
++    context->CancelAll();
++  }
++}
++
++void
++StorageManager::NoteClosing()
++{
++  NS_ASSERT_OWNINGTHREAD(StorageManager);
++
++  // This can be called more than once legitimately through different paths.
++  mState = Closing;
++}
++
++void
++StorageManager::RemoveStorageContext(StorageContext* aContext)
 +{
 +  // XXX
 +}
