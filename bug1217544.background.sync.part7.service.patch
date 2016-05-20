@@ -107,7 +107,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
 +    return false;
    }
 +
-+  mService->Request(mId, aRequestId, aOp);
++  mService->Request(mId, mStorageManagerId, aRequestId, aOp);
 +
 +  return true;
  }
@@ -227,7 +227,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncService.cpp
-@@ -0,0 +1,118 @@
+@@ -0,0 +1,130 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -247,6 +247,7 @@ new file mode 100644
 + */
 +
 +#include "BackgroundSyncService.h"
++#include "StorageManager.h"
 +
 +namespace mozilla {
 +namespace dom {
@@ -318,12 +319,23 @@ new file mode 100644
 +
 +void
 +BackgroundSyncService::Request(const uint64_t aActorId,
++                               StorageManagerId* aManagerId,
 +                               const nsID& aRequestId,
 +                               const SyncOp& aOp)
 +{
 +  AssertIsOnBackgroundThread();
 +
 +  printf_stderr("BackgroundSyncService::Request\n");
++
++  RefPtr<StorageManager> manager;
++  nsresult rv = StorageManager::GetOrCreate(aManagerId,
++                                            getter_AddRefs(manager));
++  if (NS_WARN_IF(NS_FAILED(rv))) {
++    // XXX Notify error to actor.
++    return;
++  }
++
++  printf_stderr("YAY\n");
 +}
 +
 +/**
@@ -350,7 +362,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.h b/dom/backgroundsync/Bac
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncService.h
-@@ -0,0 +1,48 @@
+@@ -0,0 +1,49 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -376,6 +388,7 @@ new file mode 100644
 +  void UnregisterActor(BackgroundSyncParent* aParent);
 +
 +  void Request(const uint64_t aActorId,
++               StorageManagerId* aManagerId,
 +               const nsID& aRequestId,
 +               const SyncOp& aOp);
 +
@@ -399,6 +412,51 @@ new file mode 100644
 +} // namespace mozilla
 +
 +#endif // mozilla_dom_SyncService_h
+diff --git a/dom/backgroundsync/StorageContext.h b/dom/backgroundsync/StorageContext.h
+--- a/dom/backgroundsync/StorageContext.h
++++ b/dom/backgroundsync/StorageContext.h
+@@ -2,16 +2,19 @@
+ /* vim: set ts=8 sts=2 et sw=2 tw=80: */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+  * You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #ifndef mozilla_dom_StorageContext_h
+ #define mozilla_dom_StorageContext_h
+ 
++#include "BackgroundSyncTypes.h"
++#include "StorageAction.h"
++
+ namespace mozilla {
+ namespace dom {
+ 
+ namespace quota {
+   class DirectoryLock;
+ } // namespace quota
+ 
+ class StorageManager;
+diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageManager.h
+--- a/dom/backgroundsync/StorageManager.h
++++ b/dom/backgroundsync/StorageManager.h
+@@ -2,16 +2,18 @@
+ /* vim: set ts=8 sts=2 et sw=2 tw=80: */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+  * You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #ifndef mozilla_dom_StorageManager_h
+ #define mozilla_dom_StorageManager_h
+ 
++#include "StorageContext.h"
++
+ namespace mozilla {
+ namespace dom {
+ 
+ /**
+  * The StorageManager class is responsible for managing the storage of sync
+  * requests. The DOM objects and IPC actors are basically just plumbing to
+  * get the request to the right StorageManager object running in the parent
+  * process.
 diff --git a/dom/backgroundsync/moz.build b/dom/backgroundsync/moz.build
 --- a/dom/backgroundsync/moz.build
 +++ b/dom/backgroundsync/moz.build
