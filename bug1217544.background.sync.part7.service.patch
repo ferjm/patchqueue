@@ -412,6 +412,28 @@ new file mode 100644
 +} // namespace mozilla
 +
 +#endif // mozilla_dom_SyncService_h
+diff --git a/dom/backgroundsync/DBAction.cpp b/dom/backgroundsync/DBAction.cpp
+--- a/dom/backgroundsync/DBAction.cpp
++++ b/dom/backgroundsync/DBAction.cpp
+@@ -48,17 +48,17 @@ DBAction::RunOnTarget(Resolver* aResolve
+ 
+   nsCOMPtr<nsIFile> dbDir;
+   nsresult rv = aQuotaInfo.mDir->Clone(getter_AddRefs(dbDir));
+   if (NS_WARN_IF(NS_FAILED(rv))) {
+     aResolver->Resolve(rv);
+     return;
+   }
+ 
+-  rv = dbDir->Append(NS_LITERAL_STRING("cache"));
++  rv = dbDir->Append(NS_LITERAL_STRING("backgroundsync"));
+   if (NS_WARN_IF(NS_FAILED(rv))) {
+     aResolver->Resolve(rv);
+     return;
+   }
+ 
+   nsCOMPtr<mozIStorageConnection> conn;
+ 
+   // Attempt to reuse the connection opened by a previous Action.
 diff --git a/dom/backgroundsync/StorageContext.h b/dom/backgroundsync/StorageContext.h
 --- a/dom/backgroundsync/StorageContext.h
 +++ b/dom/backgroundsync/StorageContext.h
