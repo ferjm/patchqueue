@@ -257,7 +257,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncTypes.h b/dom/backgroundsync/Backg
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncTypes.h
-@@ -0,0 +1,33 @@
+@@ -0,0 +1,30 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -274,9 +274,6 @@ new file mode 100644
 +
 +namespace mozilla {
 +namespace dom {
-+
-+typedef int64_t StorageId;
-+static const StorageId INVALID_STORAGE_ID = -1;
 +
 +struct QuotaInfo
 +{
@@ -381,7 +378,7 @@ new file mode 100644
 +      // storage is open, use our special wrapped connection class.  This
 +      // will let us perform certain operations once the storage origin
 +      // is closed.
-+      nsCOMPtr<mozIStorageConnection> wrapped = new Connection(conn);
++      nsCOMPtr<mozIStorageConnection> wrapped = new DBConnection(conn);
 +      aOptionalData->SetConnection(wrapped);
 +    }
 +  }
@@ -515,7 +512,7 @@ new file mode 100644
 +  MOZ_ASSERT(aDBDir);
 +  MOZ_ASSERT(aConn);
 +
-+  nsresult rv = RunSyncWithDBOnTarget(aQuotaInfo, aDBDir, aConn);
++  nsresult rv = RunSyncOnTarget(aQuotaInfo, aConn);
 +  aResolver->Resolve(rv);
 +}
 +
@@ -591,8 +588,8 @@ new file mode 100644
 +  virtual ~SyncDBAction();
 +
 +  virtual nsresult
-+  RunSyncWithDBOnTarget(const QuotaInfo& aQuotaInfo, nsIFile* aDBDir,
-+                        mozIStorageConnection* aConn) = 0;
++  RunSyncOnTarget(const QuotaInfo& aQuotaInfo,
++                  mozIStorageConnection* aConn) = 0;
 +
 +private:
 +  virtual void
@@ -604,6 +601,761 @@ new file mode 100644
 +} // namespace mozilla
 +
 +#endif // mozilla_dom_DBAction_h
+diff --git a/dom/backgroundsync/DBConnection.cpp b/dom/backgroundsync/DBConnection.cpp
+new file mode 100644
+--- /dev/null
++++ b/dom/backgroundsync/DBConnection.cpp
+@@ -0,0 +1,285 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#include "DBConnection.h"
++#include "DBSchema.h"
++
++#include "mozStorageHelper.h"
++
++namespace mozilla {
++namespace dom {
++
++using quota::QuotaObject;
++
++NS_IMPL_ISUPPORTS(DBConnection, mozIStorageAsyncConnection,
++                  mozIStorageConnection);
++
++DBConnection::DBConnection(mozIStorageConnection* aBase)
++  : mBase(aBase)
++  , mClosed(false)
++{
++  MOZ_ASSERT(mBase);
++}
++
++DBConnection::~DBConnection()
++{
++  NS_ASSERT_OWNINGTHREAD(DBConnection);
++  MOZ_ALWAYS_SUCCEEDS(Close());
++}
++
++NS_IMETHODIMP
++DBConnection::Close()
++{
++  NS_ASSERT_OWNINGTHREAD(DBConnection);
++
++  if (mClosed) {
++    return NS_OK;
++  }
++  mClosed = true;
++
++  // If we are closing here, then we must not have a transaction
++  // open anywhere else. This should be guaranteed to succeed.
++  MOZ_ALWAYS_SUCCEEDS(db::IncrementalVacuum(this));
++
++  return mBase->Close();
++}
++
++// The following methods are all boilerplate that either forward to the
++// base connection or block the method. All the async execution methods
++// are blocked because we do not use them and they would require more
++// work to wrap properly.
++
++// mozIStorageAsyncConnection methods
++
++NS_IMETHODIMP
++DBConnection::AsyncClose(mozIStorageCompletionCallback*)
++{
++  // async methods are not supported.
++  return NS_ERROR_NOT_IMPLEMENTED;
++}
++
++NS_IMETHODIMP
++DBConnection::AsyncClone(bool, mozIStorageCompletionCallback*)
++{
++  // async methods are not supported.
++  return NS_ERROR_NOT_IMPLEMENTED;
++}
++
++NS_IMETHODIMP
++DBConnection::GetDatabaseFile(nsIFile** aFileOut)
++{
++  return mBase->GetDatabaseFile(aFileOut);
++}
++
++NS_IMETHODIMP
++DBConnection::CreateAsyncStatement(const nsACString&, mozIStorageAsyncStatement**)
++{
++  // async methods are not supported.
++  return NS_ERROR_NOT_IMPLEMENTED;
++}
++
++NS_IMETHODIMP
++DBConnection::ExecuteAsync(mozIStorageBaseStatement**, uint32_t,
++                           mozIStorageStatementCallback*,
++                           mozIStoragePendingStatement**)
++{
++  // async methods are not supported.
++  return NS_ERROR_NOT_IMPLEMENTED;
++}
++
++NS_IMETHODIMP
++DBConnection::ExecuteSimpleSQLAsync(const nsACString&,
++                                    mozIStorageStatementCallback*,
++                                    mozIStoragePendingStatement**)
++{
++  // async methods are not supported.
++  return NS_ERROR_NOT_IMPLEMENTED;
++}
++
++NS_IMETHODIMP
++DBConnection::CreateFunction(const nsACString& aFunctionName,
++                             int32_t aNumArguments,
++                             mozIStorageFunction* aFunction)
++{
++  // async methods are not supported.
++  return NS_ERROR_NOT_IMPLEMENTED;
++}
++
++NS_IMETHODIMP
++DBConnection::CreateAggregateFunction(const nsACString& aFunctionName,
++                                      int32_t aNumArguments,
++                                      mozIStorageAggregateFunction* aFunction)
++{
++  return mBase->CreateAggregateFunction(aFunctionName, aNumArguments,
++                                        aFunction);
++}
++
++NS_IMETHODIMP
++DBConnection::RemoveFunction(const nsACString& aFunctionName)
++{
++  return mBase->RemoveFunction(aFunctionName);
++}
++
++NS_IMETHODIMP
++DBConnection::SetProgressHandler(int32_t aGranularity,
++                                 mozIStorageProgressHandler* aHandler,
++                                 mozIStorageProgressHandler** aHandlerOut)
++{
++  return mBase->SetProgressHandler(aGranularity, aHandler, aHandlerOut);
++}
++
++NS_IMETHODIMP
++DBConnection::RemoveProgressHandler(mozIStorageProgressHandler** aHandlerOut)
++{
++  return mBase->RemoveProgressHandler(aHandlerOut);
++}
++
++// mozIStorageConnection methods
++
++NS_IMETHODIMP
++DBConnection::Clone(bool aReadOnly, mozIStorageConnection** aConnectionOut)
++{
++  nsCOMPtr<mozIStorageConnection> conn;
++  nsresult rv = mBase->Clone(aReadOnly, getter_AddRefs(conn));
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  nsCOMPtr<mozIStorageConnection> wrapped = new DBConnection(conn);
++  wrapped.forget(aConnectionOut);
++
++  return rv;
++}
++
++NS_IMETHODIMP
++DBConnection::GetDefaultPageSize(int32_t* aSizeOut)
++{
++  return mBase->GetDefaultPageSize(aSizeOut);
++}
++
++NS_IMETHODIMP
++DBConnection::GetConnectionReady(bool* aReadyOut)
++{
++  return mBase->GetConnectionReady(aReadyOut);
++}
++
++NS_IMETHODIMP
++DBConnection::GetLastInsertRowID(int64_t* aRowIdOut)
++{
++  return mBase->GetLastInsertRowID(aRowIdOut);
++}
++
++NS_IMETHODIMP
++DBConnection::GetAffectedRows(int32_t* aCountOut)
++{
++  return mBase->GetAffectedRows(aCountOut);
++}
++
++NS_IMETHODIMP
++DBConnection::GetLastError(int32_t* aErrorOut)
++{
++  return mBase->GetLastError(aErrorOut);
++}
++
++NS_IMETHODIMP
++DBConnection::GetLastErrorString(nsACString& aErrorOut)
++{
++  return mBase->GetLastErrorString(aErrorOut);
++}
++
++NS_IMETHODIMP
++DBConnection::GetSchemaVersion(int32_t* aVersionOut)
++{
++  return mBase->GetSchemaVersion(aVersionOut);
++}
++
++NS_IMETHODIMP
++DBConnection::SetSchemaVersion(int32_t aVersion)
++{
++  return mBase->SetSchemaVersion(aVersion);
++}
++
++NS_IMETHODIMP
++DBConnection::CreateStatement(const nsACString& aQuery,
++                              mozIStorageStatement** aStatementOut)
++{
++  return mBase->CreateStatement(aQuery, aStatementOut);
++}
++
++NS_IMETHODIMP
++DBConnection::ExecuteSimpleSQL(const nsACString& aQuery)
++{
++  return mBase->ExecuteSimpleSQL(aQuery);
++}
++
++NS_IMETHODIMP
++DBConnection::TableExists(const nsACString& aTableName, bool* aExistsOut)
++{
++  return mBase->TableExists(aTableName, aExistsOut);
++}
++
++NS_IMETHODIMP
++DBConnection::IndexExists(const nsACString& aIndexName, bool* aExistsOut)
++{
++  return mBase->IndexExists(aIndexName, aExistsOut);
++}
++
++NS_IMETHODIMP
++DBConnection::GetTransactionInProgress(bool* aResultOut)
++{
++  return mBase->GetTransactionInProgress(aResultOut);
++}
++
++NS_IMETHODIMP
++DBConnection::BeginTransaction()
++{
++  return mBase->BeginTransaction();
++}
++
++NS_IMETHODIMP
++DBConnection::BeginTransactionAs(int32_t aType)
++{
++  return mBase->BeginTransactionAs(aType);
++}
++
++NS_IMETHODIMP
++DBConnection::CommitTransaction()
++{
++  return mBase->CommitTransaction();
++}
++
++NS_IMETHODIMP
++DBConnection::RollbackTransaction()
++{
++  return mBase->RollbackTransaction();
++}
++
++NS_IMETHODIMP
++DBConnection::CreateTable(const char* aTable, const char* aSchema)
++{
++  return mBase->CreateTable(aTable, aSchema);
++}
++
++NS_IMETHODIMP
++DBConnection::SetGrowthIncrement(int32_t aIncrement,
++                                 const nsACString& aDatabase)
++{
++  return mBase->SetGrowthIncrement(aIncrement, aDatabase);
++}
++
++NS_IMETHODIMP
++DBConnection::EnableModule(const nsACString& aModule)
++{
++  return mBase->EnableModule(aModule);
++}
++
++NS_IMETHODIMP
++DBConnection::GetQuotaObjects(QuotaObject** aDatabaseQuotaObject,
++                              QuotaObject** aJournalQuotaObject)
++{
++  return mBase->GetQuotaObjects(aDatabaseQuotaObject, aJournalQuotaObject);
++}
++
++} // namespace dom
++} // namespace mozilla
+diff --git a/dom/backgroundsync/DBConnection.h b/dom/backgroundsync/DBConnection.h
+new file mode 100644
+--- /dev/null
++++ b/dom/backgroundsync/DBConnection.h
+@@ -0,0 +1,34 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#ifndef mozilla_dom_Connection_h
++#define mozilla_dom_Connection_h
++
++#include "mozIStorageConnection.h"
++
++namespace mozilla {
++namespace dom {
++
++class DBConnection final : public mozIStorageConnection
++{
++public:
++  explicit DBConnection(mozIStorageConnection* aBase);
++
++private:
++  ~DBConnection();
++
++  nsCOMPtr<mozIStorageConnection> mBase;
++  bool mClosed;
++
++  NS_DECL_ISUPPORTS
++  NS_DECL_MOZISTORAGEASYNCCONNECTION
++  NS_DECL_MOZISTORAGECONNECTION
++};
++
++} // namespace dom
++} // namespace mozilla
++
++#endif // mozilla_dom_Connection_h
+diff --git a/dom/backgroundsync/DBSchema.cpp b/dom/backgroundsync/DBSchema.cpp
+new file mode 100644
+--- /dev/null
++++ b/dom/backgroundsync/DBSchema.cpp
+@@ -0,0 +1,377 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#include "DBSchema.h"
++
++#include "ipc/IPCMessageUtils.h"
++#include "mozIStorageConnection.h"
++#include "mozIStorageStatement.h"
++#include "mozStorageHelper.h"
++
++namespace mozilla {
++namespace dom {
++namespace db {
++
++const int32_t kFirstShippedSchemaVersion = 1;
++
++namespace {
++
++// Update this whenever the DB schema is changed.
++const int32_t kLatestSchemaVersion = 1;
++
++// ---------
++const char* const kTableRegistrations =
++  "CREATE TABLE registrations ("
++    "id TEXT NOT NULL PRIMARY KEY, " // Concatenation of scope + tag
++    "originSuffix TEXT NOT NULL, "
++    "scope TEXT NOT NULL, "
++    "tag TEXT NOT NULL, "
++    "state INTEGER NOT NULL, "
++    "lastChance INTEGER NOT NULL, "
++  ")";
++
++// ---------
++// End schema definition
++// ---------
++
++const int32_t kMaxEntriesPerStatement = 255;
++
++const uint32_t kPageSize = 4 * 1024;
++
++// Grow the database in chunks to reduce fragmentation
++const uint32_t kGrowthSize = 32 * 1024;
++const uint32_t kGrowthPages = kGrowthSize / kPageSize;
++static_assert(kGrowthSize % kPageSize == 0,
++              "Growth size must be multiple of page size");
++
++// Only release free pages when we have more than this limit
++const int32_t kMaxFreePages = kGrowthPages;
++
++// Limit WAL journal to a reasonable size
++const uint32_t kWalAutoCheckpointSize = 512 * 1024;
++const uint32_t kWalAutoCheckpointPages = kWalAutoCheckpointSize / kPageSize;
++static_assert(kWalAutoCheckpointSize % kPageSize == 0,
++              "WAL checkpoint size must be multiple of page size");
++
++} // namespace
++
++namespace {
++
++nsresult Validate(mozIStorageConnection* aConn);
++nsresult Migrate(mozIStorageConnection* aConn);
++
++} // namespace
++
++nsresult
++CreateOrMigrateSchema(mozIStorageConnection* aConn)
++{
++  MOZ_ASSERT(!NS_IsMainThread());
++  MOZ_ASSERT(aConn);
++
++  int32_t schemaVersion;
++  nsresult rv = aConn->GetSchemaVersion(&schemaVersion);
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  if (schemaVersion == kLatestSchemaVersion) {
++    // We already have the correct schema version. Validate it matches
++    // our expected schema and then proceed.
++    rv = Validate(aConn);
++    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++    return rv;
++  }
++
++  mozStorageTransaction trans(aConn, false,
++                              mozIStorageConnection::TRANSACTION_IMMEDIATE);
++  bool needVacuum = false;
++
++  if (schemaVersion) {
++    // A schema exists, but its not the current version. Attempt to
++    // migrate it to our new schema.
++    rv = Migrate(aConn);
++    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++    // Migrations happen infrequently and reflect a change in DB structure.
++    // This is a good time to rebuild the database.  It also helps catch
++    // if a new migration is incorrect by fast failing on the corruption.
++    needVacuum = true;
++  } else {
++    // There is no schema installed.  Create the database from scratch.
++    rv = aConn->ExecuteSimpleSQL(nsDependentCString(kTableRegistrations));
++    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++    rv = aConn->SetSchemaVersion(kLatestSchemaVersion);
++    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++    rv = aConn->GetSchemaVersion(&schemaVersion);
++    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++  }
++
++  rv = Validate(aConn);
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  rv = trans.Commit();
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  if (needVacuum) {
++    // Unfortunately, this must be performed outside of the transaction.
++    aConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING("VACUUM"));
++    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++  }
++
++  return rv;
++}
++
++nsresult
++InitializeConnection(mozIStorageConnection* aConn)
++{
++  MOZ_ASSERT(!NS_IsMainThread());
++  MOZ_ASSERT(aConn);
++
++  // This function needs to perform per-connection initialization tasks that
++  // need to happen regardless of the schema.
++
++  nsPrintfCString pragmas(
++    // Use a smaller page size to improve perf/footprint; default is too large
++    "PRAGMA page_size = %u; "
++    // Enable auto_vacuum; this must happen after page_size and before WAL
++    "PRAGMA auto_vacuum = INCREMENTAL; "
++    "PRAGMA foreign_keys = ON; ",
++    kPageSize
++  );
++
++  // Note, the default encoding of UTF-8 is preferred.  mozStorage does all
++  // the work necessary to convert UTF-16 nsString values for us.  We don't
++  // need ordering and the binary equality operations are correct.  So, do
++  // NOT set PRAGMA encoding to UTF-16.
++
++  nsresult rv = aConn->ExecuteSimpleSQL(pragmas);
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  // Limit fragmentation by growing the database by many pages at once.
++  rv = aConn->SetGrowthIncrement(kGrowthSize, EmptyCString());
++  if (rv == NS_ERROR_FILE_TOO_BIG) {
++    NS_WARNING("Not enough disk space to set sqlite growth increment.");
++    rv = NS_OK;
++  }
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  // Enable WAL journaling. This must be performed in a separate transaction
++  // after changing the page_size and enabling auto_vacuum.
++  nsPrintfCString wal(
++    // WAL journal can grow to given number of *pages*
++    "PRAGMA wal_autocheckpoint = %u; "
++    // Always truncate the journal back to given number of *bytes*
++    "PRAGMA journal_size_limit = %u; "
++    // WAL must be enabled at the end to allow page size to be changed, etc.
++    "PRAGMA journal_mode = WAL; ",
++    kWalAutoCheckpointPages,
++    kWalAutoCheckpointSize
++  );
++
++  rv = aConn->ExecuteSimpleSQL(wal);
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  // Verify that we successfully set the vacuum mode to incremental.  It
++  // is very easy to put the database in a state where the auto_vacuum
++  // pragma above fails silently.
++#ifdef DEBUG
++  nsCOMPtr<mozIStorageStatement> state;
++  rv = aConn->CreateStatement(NS_LITERAL_CSTRING(
++    "PRAGMA auto_vacuum;"
++  ), getter_AddRefs(state));
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  bool hasMoreData = false;
++  rv = state->ExecuteStep(&hasMoreData);
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  int32_t mode;
++  rv = state->GetInt32(0, &mode);
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  // integer value 2 is incremental mode
++  if (NS_WARN_IF(mode != 2)) { return NS_ERROR_UNEXPECTED; }
++#endif
++
++  return NS_OK;
++}
++
++nsresult
++IncrementalVacuum(mozIStorageConnection* aConn)
++{
++  // Determine how much free space is in the database.
++  nsCOMPtr<mozIStorageStatement> state;
++  nsresult rv = aConn->CreateStatement(NS_LITERAL_CSTRING(
++    "PRAGMA freelist_count;"
++  ), getter_AddRefs(state));
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  bool hasMoreData = false;
++  rv = state->ExecuteStep(&hasMoreData);
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  int32_t freePages = 0;
++  rv = state->GetInt32(0, &freePages);
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  // We have a relatively small page size, so we want to be careful to avoid
++  // fragmentation.  We already use a growth incremental which will cause
++  // sqlite to allocate and release multiple pages at the same time.  We can
++  // further reduce fragmentation by making our allocated chunks a bit
++  // "sticky".  This is done by creating some hysteresis where we allocate
++  // pages/chunks as soon as we need them, but we only release pages/chunks
++  // when we have a large amount of free space.  This helps with the case
++  // where a page is adding and remove resources causing it to dip back and
++  // forth across a chunk boundary.
++  //
++  // So only proceed with releasing pages if we have more than our constant
++  // threshold.
++  if (freePages <= kMaxFreePages) {
++    return NS_OK;
++  }
++
++  // Release the excess pages back to the sqlite VFS.  This may also release
++  // chunks of multiple pages back to the OS.
++  int32_t pagesToRelease = freePages - kMaxFreePages;
++
++  rv = aConn->ExecuteSimpleSQL(nsPrintfCString(
++    "PRAGMA incremental_vacuum(%d);", pagesToRelease
++  ));
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  // Verify that our incremental vacuum actually did something
++#ifdef DEBUG
++  rv = aConn->CreateStatement(NS_LITERAL_CSTRING(
++    "PRAGMA freelist_count;"
++  ), getter_AddRefs(state));
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  hasMoreData = false;
++  rv = state->ExecuteStep(&hasMoreData);
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  freePages = 0;
++  rv = state->GetInt32(0, &freePages);
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  MOZ_ASSERT(freePages <= kMaxFreePages);
++#endif
++
++  return NS_OK;
++}
++
++namespace {
++
++#ifdef DEBUG
++struct Expect
++{
++  // Expect exact SQL
++  Expect(const char* aName, const char* aType, const char* aSql)
++    : mName(aName)
++    , mType(aType)
++    , mSql(aSql)
++    , mIgnoreSql(false)
++  { }
++
++  // Ignore SQL
++  Expect(const char* aName, const char* aType)
++    : mName(aName)
++    , mType(aType)
++    , mIgnoreSql(true)
++  { }
++
++  const nsCString mName;
++  const nsCString mType;
++  const nsCString mSql;
++  const bool mIgnoreSql;
++};
++#endif
++
++nsresult
++Validate(mozIStorageConnection* aConn)
++{
++  int32_t schemaVersion;
++  nsresult rv = aConn->GetSchemaVersion(&schemaVersion);
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  if (NS_WARN_IF(schemaVersion != kLatestSchemaVersion)) {
++    return NS_ERROR_FAILURE;
++  }
++
++#ifdef DEBUG
++  // This is the schema we expect the database at the latest version to
++  // contain.  Update this list if you add a new table or index.
++  Expect expect[] = {
++    Expect("registrations", "table", kTableRegistrations),
++    Expect("sqlite_sequence", "table"), // auto-gen by sqlite
++    Expect("sqlite_autoindex_storage_1", "index"), // auto-gen by sqlite
++  };
++  const uint32_t expectLength = sizeof(expect) / sizeof(Expect);
++
++  // Read the schema from the sqlite_master table and compare.
++  nsCOMPtr<mozIStorageStatement> state;
++  rv = aConn->CreateStatement(NS_LITERAL_CSTRING(
++    "SELECT name, type, sql FROM sqlite_master;"
++  ), getter_AddRefs(state));
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  bool hasMoreData = false;
++  while (NS_SUCCEEDED(state->ExecuteStep(&hasMoreData)) && hasMoreData) {
++    nsAutoCString name;
++    rv = state->GetUTF8String(0, name);
++    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++    nsAutoCString type;
++    rv = state->GetUTF8String(1, type);
++    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++    nsAutoCString sql;
++    rv = state->GetUTF8String(2, sql);
++    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++    bool foundMatch = false;
++    for (uint32_t i = 0; i < expectLength; ++i) {
++      if (name == expect[i].mName) {
++        if (type != expect[i].mType) {
++          NS_WARNING(nsPrintfCString("Unexpected type for schema entry %s",
++                     name.get()).get());
++          return NS_ERROR_FAILURE;
++        }
++
++        if (!expect[i].mIgnoreSql && sql != expect[i].mSql) {
++          NS_WARNING(nsPrintfCString("Unexpected SQL for schema entry %s",
++                     name.get()).get());
++          return NS_ERROR_FAILURE;
++        }
++
++        foundMatch = true;
++        break;
++      }
++    }
++
++    if (NS_WARN_IF(!foundMatch)) {
++      NS_WARNING(nsPrintfCString("Unexpected schema entry %s in BSync database",
++                 name.get()).get());
++      return NS_ERROR_FAILURE;
++    }
++  }
++#endif
++
++  return rv;
++}
++
++nsresult
++Migrate(mozIStorageConnection* aConn)
++{
++  return NS_ERROR_NOT_IMPLEMENTED;
++}
++
++} // anonymous namespace
++
++} // namespace db
++} // namespace dom
++} // namespace mozilla
+diff --git a/dom/backgroundsync/DBSchema.h b/dom/backgroundsync/DBSchema.h
+new file mode 100644
+--- /dev/null
++++ b/dom/backgroundsync/DBSchema.h
+@@ -0,0 +1,39 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#ifndef mozilla_dom_DBSchema_h
++#define mozilla_dom_DBSchema_h
++
++class mozIStorageConnection;
++struct nsID;
++
++namespace mozilla {
++namespace dom {
++
++namespace db {
++
++// Note, this cannot be executed within a transaction.
++nsresult
++CreateOrMigrateSchema(mozIStorageConnection* aConn);
++
++// Note, this cannot be executed within a transaction.
++nsresult
++InitializeConnection(mozIStorageConnection* aConn);
++
++// Note, this works best when its NOT executed within a transaction.
++nsresult
++IncrementalVacuum(mozIStorageConnection* aConn);
++
++// We will wipe out databases with a schema versions less than this.  Newer
++// versions will be migrated on open to the latest schema version.
++extern const int32_t kFirstShippedSchemaVersion;
++
++} // namespace db
++
++} // namespace dom
++} // namespace mozilla
++
++#endif // mozilla_dom_DBSchema_h
 diff --git a/dom/backgroundsync/StorageAction.cpp b/dom/backgroundsync/StorageAction.cpp
 new file mode 100644
 --- /dev/null
@@ -651,7 +1403,7 @@ diff --git a/dom/backgroundsync/StorageAction.h b/dom/backgroundsync/StorageActi
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/StorageAction.h
-@@ -0,0 +1,106 @@
+@@ -0,0 +1,100 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -733,12 +1485,6 @@ new file mode 100644
 +  // Resolver::Resolve().
 +  virtual void CompleteOnInitiatingThread(nsresult aRv) { }
 +
-+  // Executed on the initiating thread. If this StorageAction will operate on
-+  // the given storage ID then override this to return true.
-+  virtual bool MatchesStorageId(StorageId aId) const {
-+    return false;
-+  }
-+
 +protected:
 +  StorageAction();
 +
@@ -762,7 +1508,7 @@ diff --git a/dom/backgroundsync/StorageContext.cpp b/dom/backgroundsync/StorageC
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/StorageContext.cpp
-@@ -0,0 +1,1140 @@
+@@ -0,0 +1,1111 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -1301,13 +2047,6 @@ new file mode 100644
 +    return rv;
 +  }
 +
-+  virtual bool
-+  MatchesStorageId(StorageId aId) const override
-+  {
-+    NS_ASSERT_OWNINGTHREAD(ActionRunnable);
-+    return mAction->MatchesStorageId(aId);
-+  }
-+
 +  virtual void
 +  Cancel() override
 +  {
@@ -1687,28 +2426,6 @@ new file mode 100644
 +  }
 +}
 +
-+void
-+StorageContext::CancelForStorageId(StorageId aId)
-+{
-+  NS_ASSERT_OWNINGTHREAD(StorageContext);
-+
-+  // Remove matching pending actions
-+  for (int32_t i = mPendingActions.Length() - 1; i >= 0; --i) {
-+    if (mPendingActions[i].mAction->MatchesStorageId(aId)) {
-+      mPendingActions.RemoveElementAt(i);
-+    }
-+  }
-+
-+  // Cancel activities and let them remove themselves
-+  ActivityList::ForwardIterator iter(mActivityList);
-+  while (iter.HasMore()) {
-+    Activity* activity = iter.GetNext();
-+    if (activity->MatchesStorageId(aId)) {
-+      activity->Cancel();
-+    }
-+  }
-+}
-+
 +StorageContext::~StorageContext()
 +{
 +  NS_ASSERT_OWNINGTHREAD(StorageContext);
@@ -1907,7 +2624,7 @@ diff --git a/dom/backgroundsync/StorageContext.h b/dom/backgroundsync/StorageCon
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/StorageContext.h
-@@ -0,0 +1,219 @@
+@@ -0,0 +1,212 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -1943,7 +2660,7 @@ new file mode 100644
 + *    context with no active DOM objects will close gracefully.
 + * 2) The QuotaManager aborts all operations so it can delete the files.
 + *    In this case the QuotaManager calls Client::AbortOperations() which
-+ *    in turn cancels all existing Action objects and then marks the
++ *    in turn cancels all existing StorageAction objects and then marks the
 + *    StorageManager as invalid.
 + * 3) Browser shutdown occurs and the StorageManager calls
 + *    StorageContext::CancelAll()
@@ -2008,7 +2725,6 @@ new file mode 100644
 +  {
 +  public:
 +    virtual void Cancel() = 0;
-+    virtual bool MatchesStorageId(StorageId aStorageId) const = 0;
 +  };
 +
 +  // Create a Context attached to the given StorageManager.
@@ -2040,12 +2756,6 @@ new file mode 100644
 +  // Remove any self references and allow the StorageContext to be released
 +  // when there are no more StorageActions to process.
 +  void AllowToClose();
-+
-+  // Cancel any StorageActions running or waiting to run that operate on the
-+  // given storage ID.
-+  //
-+  // Only callable from the thread that created the Context.
-+  void CancelForStorageId(StorageId aId);
 +
 +  void AddActivity(Activity* aActivity);
 +  void RemoveActivity(Activity* aActivity);
@@ -2131,13 +2841,14 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/StorageManager.cpp
-@@ -0,0 +1,373 @@
+@@ -0,0 +1,399 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 +
++#include "DBAction.h"
 +#include "StorageContext.h"
 +#include "StorageManager.h"
 +
@@ -2148,6 +2859,31 @@ new file mode 100644
 +
 +namespace mozilla {
 +namespace dom {
++
++namespace {
++
++// An StorageAction that is executed when a StorageContext is first created.
++// It ensures that the database is setup properly.
++// This lets other actions not worry about these details.
++class SetupAction final : public SyncDBAction
++{
++public:
++  SetupAction()
++    : SyncDBAction(DBAction::Create)
++  { }
++
++  virtual nsresult
++  RunSyncOnTarget(const QuotaInfo& aQuotaInfo,
++                  mozIStorageConnection* aConn) override
++  {
++    // Executes in its own transaction.
++    nsresult rv = db::CreateOrMigrateSchema(aConn);
++    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++    return rv;
++  }
++};
++} // anonymous namespace
 +
 +// ---------------------------------------------------------------------------
 +
@@ -2870,7 +3606,7 @@ new file mode 100644
 diff --git a/dom/backgroundsync/moz.build b/dom/backgroundsync/moz.build
 --- a/dom/backgroundsync/moz.build
 +++ b/dom/backgroundsync/moz.build
-@@ -5,17 +5,21 @@
+@@ -5,17 +5,24 @@
  
  EXPORTS.mozilla.dom += [
      'BackgroundSync.h'
@@ -2881,6 +3617,9 @@ diff --git a/dom/backgroundsync/moz.build b/dom/backgroundsync/moz.build
      'BackgroundSyncChild.cpp',
 -    'BackgroundSyncParent.cpp'
 +    'BackgroundSyncParent.cpp',
++    'DBAction.cpp',
++    'DBConnection.cpp',
++    'DBSchema.cpp',
 +    'StorageAction.cpp',
 +    'StorageContext.cpp',
 +    'StorageManager.cpp',
