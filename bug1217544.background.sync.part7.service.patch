@@ -227,7 +227,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncService.cpp
-@@ -0,0 +1,130 @@
+@@ -0,0 +1,179 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -255,6 +255,55 @@ new file mode 100644
 +namespace {
 +  BackgroundSyncService* sInstance = nullptr;
 +} // namespace
++
++// ----------------------------------------------------------------------------
++
++struct BackgroundSyncService::StorageManagerRef final
++{
++  explicit StorageManagerRef(const uint64_t aActorId,
++                             StorageManager* aStorageManager)
++    : mActorId(aActorId)
++    , mStorageManager(aStorageManager)
++  {}
++
++  uint64_t mActorId;
++  RefPtr<StorageManager> mStorageManager;
++};
++
++void
++BackgroundSyncService::AddStorageManagerRef(const nsID& aRequestId,
++                                            const uint64_t aActorId,
++                                            StorageManager* aStorageManager)
++{
++  StorageManagerRef* ref = new StorageManagerRef(aActorId, aStorageManager);
++  mStorageManagers.Put(aRequestId, ref);
++}
++
++void
++BackgroundSyncService::ReleaseStorageManagerRef(const nsID& aRequestId)
++{
++  nsAutoPtr<StorageManagerRef> doomed;
++  mStorageManagers.RemoveAndForget(aRequestId, doomed);
++}
++
++void
++BackgroundSyncService::ReleaseStorageManagerRef(const uint64_t aActorId)
++{
++  for (auto iter = mStorageManagers.Iter(); !iter.Done(); iter.Next()) {
++    StorageManagerRef* ref;
++    mStorageManagers.Get(iter.Key(), &ref);
++    if (NS_WARN_IF(!ref)) {
++      continue;
++    }
++    if (ref->mActorId == aActorId) {
++      ref->mStorageManager = nullptr;
++      nsAutoPtr<StorageManagerRef> doomed;
++      mStorageManagers.RemoveAndForget(iter.Key(), doomed);
++    }
++  }
++}
++
++// ----------------------------------------------------------------------------
 +
 +BackgroundSyncService::BackgroundSyncService()
 +  : mOnlineState(OnlineStateObserver::UNKNOWN)
@@ -362,7 +411,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.h b/dom/backgroundsync/Bac
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncService.h
-@@ -0,0 +1,49 @@
+@@ -0,0 +1,59 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -376,6 +425,8 @@ new file mode 100644
 +
 +namespace mozilla {
 +namespace dom {
++
++class StorageManager;
 +
 +class BackgroundSyncService final : public OnlineStateObserver::Listener
 +{
@@ -398,6 +449,12 @@ new file mode 100644
 +
 +  void Init();
 +
++  void AddStorageManagerRef(const nsID& aRequestId,
++                            const uint64_t aActorId,
++                            StorageManager* aStorageManager);
++  void ReleaseStorageManagerRef(const nsID& aRequestId);
++  void ReleaseStorageManagerRef(const uint64_t aActorId);
++
 +  // OnlineStateObserver::Listener method
 +  virtual void
 +  OnOnlineStateChanged(OnlineStateObserver::OnlineState aState) override;
@@ -406,6 +463,8 @@ new file mode 100644
 +  OnlineStateObserver::OnlineState mOnlineState;
 +
 +  nsTHashtable<nsRefPtrHashKey<BackgroundSyncParent>> mBackgroundSyncActors;
++  struct StorageManagerRef;
++  nsClassHashtable<nsIDHashKey, StorageManagerRef> mStorageManagers;
 +};
 +
 +} // namespace dom
@@ -520,7 +579,26 @@ diff --git a/dom/backgroundsync/StorageContext.h b/dom/backgroundsync/StorageCon
 diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageManager.cpp
 --- a/dom/backgroundsync/StorageManager.cpp
 +++ b/dom/backgroundsync/StorageManager.cpp
-@@ -387,13 +387,27 @@ StorageManager::NoteClosing()
+@@ -38,17 +38,17 @@ public:
+ 
+     return rv;
+   }
+ };
+ } // anonymous namespace
+ 
+ // ---------------------------------------------------------------------------
+ 
+-// Singleton class to track Manager instances and ensure there is only
++// Singleton class to track StorageManager instances and ensure there is only
+ // one for each unique StorageManagerId.
+ class StorageManager::Factory
+ {
+ public:
+   friend class StaticAutoPtr<StorageManager::Factory>;
+ 
+   static nsresult
+   GetOrCreate(StorageManagerId* aManagerId,
+@@ -387,13 +387,43 @@ StorageManager::NoteClosing()
  
    // This can be called more than once legitimately through different paths.
    mState = Closing;
@@ -545,6 +623,22 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
 +  // Factory list. We don't need to block shutdown by stayin in the list
 +  // any more.
 +  Factory::Remove(this);
++}
++
++void
++StorageManager::MaybeAllowContextToClose()
++{
++  NS_ASSERT_OWNINGTHREAD(StorageManager);
++  // If we have an active context, but we have no more users of the
++  // StorageManager, then let it shut itself down. We must wait for all
++  // possible users of state information to complete before doing this.
++  RefPtr<StorageContext> context = mContext;
++  if (context) { //XXX && mListeners.isEmpty()) {
++    // Mark the StorageManager as invalid so that it won't get used again.
++    NoteClosing();
++
++    context->AllowToClose();
++  }
  }
  
  } // namespace dom
@@ -552,7 +646,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
 diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageManager.h
 --- a/dom/backgroundsync/StorageManager.h
 +++ b/dom/backgroundsync/StorageManager.h
-@@ -2,16 +2,18 @@
+@@ -2,29 +2,35 @@
  /* vim: set ts=8 sts=2 et sw=2 tw=80: */
  /* This Source Code Form is subject to the terms of the Mozilla Public
   * License, v. 2.0. If a copy of the MPL was not distributed with this file,
@@ -571,6 +665,42 @@ diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageMan
   * requests. The DOM objects and IPC actors are basically just plumbing to
   * get the request to the right StorageManager object running in the parent
   * process.
+  *
+  * There should be exactly one StorageManager object for each origin or app
+  * using the BackgroundSync API. This uniqueness is defined by the
+  * StorageManagerId equality operator. The uniqueness is enforced by the
+  * Manager GetOrCreate() factory method.
++ *
++ * The StorageManager instances are kept alive by the BackgroundSyncService,
++ * which keeps a reference to the StorageManager dealing with a storage request
++ * until that request is completed or the actor requesting it is destroyed.
+  */
+ 
+ class StorageManager final
+ {
+ public:
+   NS_INLINE_DECL_REFCOUNTING(StorageManager)
+ 
+   static nsresult GetOrCreate(StorageManagerId* aManagerId,
+@@ -60,16 +66,18 @@ private:
+ 
+   StorageManager(StorageManagerId* aManagerId, nsIThread* aIOThread);
+   ~StorageManager();
+ 
+   void Init(StorageManager* aOldManager);
+   void Abort();
+   void Shutdown();
+ 
++  void MaybeAllowContextToClose();
++
+   RefPtr<StorageManagerId> mManagerId;
+   nsCOMPtr<nsIThread> mIOThread;
+ 
+   // Weak reference cleared by RemoveStorageContext() in StorageContext
+   // destructor.
+   StorageContext* MOZ_NON_OWNING_REF mContext;
+ 
+   bool mShuttingDown;
 diff --git a/dom/backgroundsync/moz.build b/dom/backgroundsync/moz.build
 --- a/dom/backgroundsync/moz.build
 +++ b/dom/backgroundsync/moz.build
