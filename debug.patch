@@ -1,0 +1,401 @@
+# HG changeset patch
+# User Fernando Jimenez <ferjmoreno@gmail.com>
+# Parent  a5e3757e90b7c223da7bc81a49f1a73de136e9ef
+
+diff --git a/dom/backgroundsync/StorageContext.cpp b/dom/backgroundsync/StorageContext.cpp
+--- a/dom/backgroundsync/StorageContext.cpp
++++ b/dom/backgroundsync/StorageContext.cpp
+@@ -112,40 +112,43 @@ public:
+     , mData(aData)
+     , mTarget(aTarget)
+     , mInitAction(aInitAction)
+     , mInitiatingThread(NS_GetCurrentThread())
+     , mResult(NS_OK)
+     , mState(STATE_INIT)
+     , mCanceled(false)
+   {
++    printf_stderr("QuotaInitRunnable\n");
+     MOZ_ASSERT(mContext);
+     MOZ_ASSERT(mManager);
+     MOZ_ASSERT(mData);
+     MOZ_ASSERT(mTarget);
+     MOZ_ASSERT(mInitiatingThread);
+     MOZ_ASSERT(mInitAction);
+   }
+ 
+   nsresult Dispatch()
+   {
++    printf_stderr("QuotaInitRunnable::Dispatch\n");
+     NS_ASSERT_OWNINGTHREAD(QuotaInitRunnable);
+     MOZ_ASSERT(mState == STATE_INIT);
+ 
+     mState = STATE_GET_INFO;
+     nsresult rv = NS_DispatchToMainThread(this, nsIThread::DISPATCH_NORMAL);
+     if (NS_WARN_IF(NS_FAILED(rv))) {
+       mState = STATE_COMPLETE;
+       Clear();
+     }
+     return rv;
+   }
+ 
+   void Cancel()
+   {
++    printf_stderr("QuotaInitRunnable::Cancel\n");
+     NS_ASSERT_OWNINGTHREAD(QuotaInitRunnable);
+     MOZ_ASSERT(!mCanceled);
+     mCanceled = true;
+     mInitAction->CancelOnInitiatingThread();
+   }
+ 
+   void OpenDirectory();
+ 
+@@ -163,16 +166,17 @@ private:
+     SyncResolver()
+       : mResolved(false)
+       , mResult(NS_OK)
+     { }
+ 
+     virtual void
+     Resolve(nsresult aRv) override
+     {
++      printf_stderr("SyncResolver::Resolve\n");
+       MOZ_ASSERT(!mResolved);
+       mResolved = true;
+       mResult = aRv;
+     };
+ 
+     bool Resolved() const { return mResolved; }
+     nsresult Result() const { return mResult; }
+ 
+@@ -183,16 +187,17 @@ private:
+     nsresult mResult;
+ 
+     NS_INLINE_DECL_REFCOUNTING(StorageContext::QuotaInitRunnable::SyncResolver,
+                                override)
+   };
+ 
+   ~QuotaInitRunnable()
+   {
++    printf_stderr("QuotaInitRunnable::~QuotaInitRunnable\n");
+     MOZ_ASSERT(mState == STATE_COMPLETE);
+     MOZ_ASSERT(!mContext);
+     MOZ_ASSERT(!mInitAction);
+   }
+ 
+   enum State
+   {
+     STATE_INIT,
+@@ -204,28 +209,30 @@ private:
+     STATE_RUN_ON_TARGET,
+     STATE_RUNNING,
+     STATE_COMPLETING,
+     STATE_COMPLETE
+   };
+ 
+   void Complete(nsresult aResult)
+   {
++    printf_stderr("QuotaInitRunnable::Complete\n");
+     MOZ_ASSERT(mState == STATE_RUNNING || NS_FAILED(aResult));
+ 
+     MOZ_ASSERT(NS_SUCCEEDED(mResult));
+     mResult = aResult;
+ 
+     mState = STATE_COMPLETING;
+     MOZ_ALWAYS_SUCCEEDS(
+       mInitiatingThread->Dispatch(this, nsIThread::DISPATCH_NORMAL));
+   }
+ 
+   void Clear()
+   {
++    printf_stderr("QuotaInitRunnable::Clear\n");
+     NS_ASSERT_OWNINGTHREAD(QuotaInitRunnable);
+     MOZ_ASSERT(mContext);
+     mContext = nullptr;
+     mManager = nullptr;
+     mInitAction = nullptr;
+   }
+ 
+   RefPtr<StorageContext> mContext;
+@@ -362,16 +369,17 @@ StorageContext::QuotaInitRunnable::Run()
+   // state cases for thread assertions.
+ 
+   RefPtr<SyncResolver> resolver = new SyncResolver();
+ 
+   switch(mState) {
+     // -----------------------------------
+     case STATE_GET_INFO:
+     {
++    printf_stderr("QuotaInitRunnable::Run() GET_INFO \n");
+       MOZ_ASSERT(NS_IsMainThread());
+ 
+       if (mCanceled) {
+         resolver->Resolve(NS_ERROR_ABORT);
+         break;
+       }
+ 
+       RefPtr<StorageManagerId> managerId = mManager->GetManagerId();
+@@ -388,16 +396,17 @@ StorageContext::QuotaInitRunnable::Run()
+       mState = STATE_CREATE_QUOTA_MANAGER;
+       MOZ_ALWAYS_SUCCEEDS(
+         mInitiatingThread->Dispatch(this, nsIThread::DISPATCH_NORMAL));
+       break;
+     }
+     // ----------------------------------
+     case STATE_CREATE_QUOTA_MANAGER:
+     {
++      printf_stderr("QuotaInitRunnable::Run() CREATE_QUOTE_MANAGER\n");
+       NS_ASSERT_OWNINGTHREAD(QuotaInitRunnable);
+ 
+       if (mCanceled || QuotaManager::IsShuttingDown()) {
+         resolver->Resolve(NS_ERROR_ABORT);
+         break;
+       }
+ 
+       if (QuotaManager::Get()) {
+@@ -407,29 +416,31 @@ StorageContext::QuotaInitRunnable::Run()
+ 
+       mState = STATE_OPEN_DIRECTORY;
+       QuotaManager::GetOrCreate(this);
+       break;
+     }
+     // ----------------------------------
+     case STATE_OPEN_DIRECTORY:
+     {
++    printf_stderr("QuotaInitRunnable::Run() OPEN_DIRECTORY\n");
+       NS_ASSERT_OWNINGTHREAD(QuotaInitRunnable);
+ 
+       if (NS_WARN_IF(!QuotaManager::Get())) {
+         resolver->Resolve(NS_ERROR_FAILURE);
+         break;
+       }
+ 
+       OpenDirectory();
+       break;
+     }
+     // ----------------------------------
+     case STATE_ENSURE_ORIGIN_INITIALIZED:
+     {
++      printf_stderr("QuotaInitRunnable::Run() ORIGIN_INITIALIZED\n");
+       AssertIsOnIOThread();
+ 
+       if (mCanceled) {
+         resolver->Resolve(NS_ERROR_ABORT);
+         break;
+       }
+ 
+       QuotaManager* qm = QuotaManager::Get();
+@@ -448,32 +459,34 @@ StorageContext::QuotaInitRunnable::Run()
+ 
+       MOZ_ALWAYS_SUCCEEDS(
+         mTarget->Dispatch(this, nsIThread::DISPATCH_NORMAL));
+       break;
+     }
+     // -------------------
+     case STATE_RUN_ON_TARGET:
+     {
++      printf_stderr("QuotaInitRunnable::Run() RUN_ON_TARGET\n");
+       MOZ_ASSERT(NS_GetCurrentThread() == mTarget);
+ 
+       mState = STATE_RUNNING;
+ 
+       // Execute the provided initialization StorageAction. The
+       // StorageAction must Resolve() before returning.
+       mInitAction->RunOnTarget(resolver, mQuotaInfo, mData);
+       MOZ_ASSERT(resolver->Resolved());
+ 
+       mData = nullptr;
+ 
+       break;
+     }
+     // -------------------
+     case STATE_COMPLETING:
+     {
++      printf_stderr("QuotaInitRunnable::Run() COMPLETING\n");
+       NS_ASSERT_OWNINGTHREAD(QuotaInitRunnable);
+       mInitAction->CompleteOnInitiatingThread(mResult);
+       mContext->OnQuotaInit(mResult, mQuotaInfo, mDirectoryLock.forget());
+       mState = STATE_COMPLETE;
+ 
+       // Explicitly cleanup here as the destructor could fire on any of
+       // the threads we have bounced through.
+       Clear();
+@@ -509,16 +522,17 @@ public:
+     , mTarget(aTarget)
+     , mAction(aAction)
+     , mQuotaInfo(aQuotaInfo)
+     , mInitiatingThread(NS_GetCurrentThread())
+     , mState(STATE_INIT)
+     , mResult(NS_OK)
+     , mExecutingRunOnTarget(false)
+   {
++    printf_stderr("ActionRunnable ---- \n");
+     MOZ_ASSERT(mContext);
+     // mData may be nullptr
+     MOZ_ASSERT(mTarget);
+     MOZ_ASSERT(mAction);
+     // mQuotaInfo.mDir may be nullptr if QuotaInitRunnable failed
+     MOZ_ASSERT(mInitiatingThread);
+   }
+ 
+@@ -647,16 +661,17 @@ NS_IMPL_ISUPPORTS(StorageContext::Action
+ //
+ // Its important to note that synchronous actions will effectively Resolve()
+ // out of the Running state immediately. Asynchronous StorageActions may remain
+ // in the Running state for some time, but normally the ActionRunnable itself
+ // does not see any execution there. Its all handled internal to the StorageAction.
+ NS_IMETHODIMP
+ StorageContext::ActionRunnable::Run()
+ {
++  printf_stderr("ActionRunnable::Run()\n");
+   switch(mState) {
+     // ----------------------
+     case STATE_RUN_ON_TARGET:
+     {
+       MOZ_ASSERT(NS_GetCurrentThread() == mTarget);
+       MOZ_ASSERT(!mExecutingRunOnTarget);
+ 
+       // Note that we are calling RunOnTarget().  This lets us detect
+@@ -713,16 +728,17 @@ StorageContext::ActionRunnable::Run()
+     }
+   }
+   return NS_OK;
+ }
+ 
+ void
+ StorageContext::ThreadsafeHandle::AllowToClose()
+ {
++  printf_stderr("ThreadSafeHandle::AllowToClose()\n");
+   if (mOwningThread == NS_GetCurrentThread()) {
+     AllowToCloseOnOwningThread();
+     return;
+   }
+ 
+   // Dispatch is guaranteed to succeed here because we block shutdown until
+   // all StorageContexts have been destroyed.
+   nsCOMPtr<nsIRunnable> runnable =
+@@ -767,16 +783,17 @@ StorageContext::ThreadsafeHandle::~Threa
+   // Dispatch is guaranteed to succeed here because we block shutdown until
+   // all Contexts have been destroyed.
+   NS_ProxyRelease(mOwningThread, mStrongRef.forget());
+ }
+ 
+ void
+ StorageContext::ThreadsafeHandle::AllowToCloseOnOwningThread()
+ {
++  printf_stderr("ThreadsafeHandle::AllowToCloseOnOwningThread()\n");
+   MOZ_ASSERT(mOwningThread == NS_GetCurrentThread());
+ 
+   // A StorageContext "closes" when its ref count drops to zero. Dropping this
+   // strong ref is necessary, but not sufficient for the close to occur.
+   // Any outstanding IO will continue and keep the StorageContext alive. Once
+   // the StorageContext is idle, it will be destroyed.
+ 
+   // First, tell the context to flush any target thread shared data. This
+@@ -818,16 +835,17 @@ StorageContext::ThreadsafeHandle::Storag
+   mWeakRef = nullptr;
+ }
+ 
+ // static
+ already_AddRefed<StorageContext>
+ StorageContext::Create(StorageManager* aManager, nsIThread* aTarget,
+                        StorageAction* aInitAction, StorageContext* aOldContext)
+ {
++  printf_stderr("StorageContext::Create\n");
+   RefPtr<StorageContext> context =
+     new StorageContext(aManager, aTarget, aInitAction);
+   context->Init(aOldContext);
+   return context.forget();
+ }
+ 
+ StorageContext::StorageContext(StorageManager* aManager, nsIThread* aTarget,
+                                StorageAction* aInitAction)
+@@ -933,29 +951,31 @@ StorageContext::~StorageContext()
+   if (mNextContext) {
+     mNextContext->Start();
+   }
+ }
+ 
+ void
+ StorageContext::Init(StorageContext* aOldContext)
+ {
++  printf_stderr("StorageContext::Init\n");
+   NS_ASSERT_OWNINGTHREAD(StorageContext);
+ 
+   if (aOldContext) {
+     aOldContext->SetNextContext(this);
+     return;
+   }
+ 
+   Start();
+ }
+ 
+ void
+ StorageContext::Start()
+ {
++  printf_stderr("StorageContext::Start\n");
+   NS_ASSERT_OWNINGTHREAD(StorageContext);
+ 
+   // Previous context closing delayed our start, but then we were canceled.
+   // In this case, just do nothing here.
+   if (mState == STATE_CONTEXT_CANCELED) {
+     MOZ_ASSERT(!mInitRunnable);
+     MOZ_ASSERT(!mInitAction);
+     return;
+diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageManager.cpp
+--- a/dom/backgroundsync/StorageManager.cpp
++++ b/dom/backgroundsync/StorageManager.cpp
+@@ -27,16 +27,17 @@ public:
+   SetupAction()
+     : SyncDBAction(DBAction::Create)
+   { }
+ 
+   virtual nsresult
+   RunSyncOnTarget(const QuotaInfo& aQuotaInfo,
+                   mozIStorageConnection* aConn) override
+   {
++    printf_stderr("SetupAction::RunSyncOnTarget\n");
+     // Executes in its own transaction.
+     nsresult rv = db::CreateOrMigrateSchema(aConn);
+     if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+ 
+     return rv;
+   }
+ };
+ } // anonymous namespace
+@@ -316,16 +317,17 @@ StorageManager::~StorageManager()
+   // shutdown. Defer this to the main thread, instead.
+   MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(
+         NewRunnableMethod(ioThread, &nsIThread::Shutdown)));*/
+ }
+ 
+ void
+ StorageManager::Init(StorageManager* aOldManager)
+ {
++  printf_stderr("StorageManager::Init\n");
+   NS_ASSERT_OWNINGTHREAD(StorageManager);
+ 
+   RefPtr<StorageContext> oldContext;
+   if (aOldManager) {
+     oldContext = aOldManager->mContext;
+   }
+ 
+   // Create the context immediately. Since there can at most be one
+@@ -387,16 +389,18 @@ StorageManager::NoteClosing()
+ 
+   // This can be called more than once legitimately through different paths.
+   mState = Closing;
+ }
+ 
+ void
+ StorageManager::RemoveStorageContext(StorageContext* aContext)
+ {
++  printf_stderr("StorageManager::RemoveStorageContext\n");
++
+   NS_ASSERT_OWNINGTHREAD(StorageManager);
+   MOZ_ASSERT(mContext);
+   MOZ_ASSERT(mContext == aContext);
+ 
+   // Wether the StorageContext destruction was triggered from the StorageManager
+   // going idle or the underlying storage being invalidated, we should know we
+   // are closing before the StorageContext is destroyed.
+   MOZ_ASSERT(mState == Closing);
