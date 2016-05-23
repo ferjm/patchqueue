@@ -309,7 +309,28 @@ diff --git a/dom/backgroundsync/StorageContext.cpp b/dom/backgroundsync/StorageC
  
  StorageContext::StorageContext(StorageManager* aManager, nsIThread* aTarget,
                                 StorageAction* aInitAction)
-@@ -933,29 +951,31 @@ StorageContext::~StorageContext()
+@@ -914,48 +932,52 @@ StorageContext::AllowToClose()
+   NS_ASSERT_OWNINGTHREAD(StorageContext);
+   if (mThreadsafeHandle) {
+     mThreadsafeHandle->AllowToClose();
+   }
+ }
+ 
+ StorageContext::~StorageContext()
+ {
++  printf_stderr("StorageContext DESTRUCTOR\n");
+   NS_ASSERT_OWNINGTHREAD(StorageContext);
+   MOZ_ASSERT(mManager);
+   MOZ_ASSERT(!mData);
+ 
+   if (mThreadsafeHandle) {
+     mThreadsafeHandle->StorageContextDestroyed(this);
+   }
+ 
+   // Note, this may set the mOrphanedData flag.
++  printf_stderr("Calling RemoveStorageContext\n");
+   mManager->RemoveStorageContext(this);
+ 
    if (mNextContext) {
      mNextContext->Start();
    }
@@ -362,7 +383,24 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
    }
  };
  } // anonymous namespace
-@@ -316,16 +317,17 @@ StorageManager::~StorageManager()
+@@ -300,32 +301,34 @@ StorageManager::StorageManager(StorageMa
+   , mState(Open)
+ {
+   MOZ_ASSERT(mManagerId);
+   MOZ_ASSERT(mIOThread);
+ }
+ 
+ StorageManager::~StorageManager()
+ {
++  printf_stderr("StorageManager DESTRUCTOR\n");
+   NS_ASSERT_OWNINGTHREAD(StorageManager);
+   MOZ_ASSERT(mState == Closing);
+   MOZ_ASSERT(!mContext);
+ 
+ /*  nsCOMPtr<nsIThread> ioThread;
+   mIOThread.swap(ioThread);
+ 
+   // Don't spin the event loop in the destructor waiting for the thread to
    // shutdown. Defer this to the main thread, instead.
    MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(
          NewRunnableMethod(ioThread, &nsIThread::Shutdown)));*/
@@ -380,7 +418,52 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
    }
  
    // Create the context immediately. Since there can at most be one
-@@ -387,16 +389,18 @@ StorageManager::NoteClosing()
+@@ -335,32 +338,34 @@ StorageManager::Init(StorageManager* aOl
+   RefPtr<StorageContext> ref = StorageContext::Create(this, mIOThread,
+                                                       setupAction, oldContext);
+   mContext = ref;
+ }
+ 
+ void
+ StorageManager::Abort()
+ {
++  printf_stderr("StorageManager::Abort\n");
+   NS_ASSERT_OWNINGTHREAD(StorageManager);
+   MOZ_ASSERT(mContext);
+ 
+   // Note that we are closing to prevent any new requests from coming in and
+   // creating a new StorageContext. We must ensure all Contexts and IO
+   // operations are complete before shutdown proceeds.
+   NoteClosing();
+ 
+   // Cancel and only note that we are done after the context is cleaned up.
+   RefPtr<StorageContext> context = mContext;
+   context->CancelAll();
+ }
+ 
+ void
+ StorageManager::Shutdown()
+ {
++  printf_stderr("StorageManager::Shutdown\n");
+   NS_ASSERT_OWNINGTHREAD(StorageManager);
+ 
+   // Ignore duplicate attempts to shutdown. This can occur when we start a
+   // browser initiated shutdown and then run ~StorageManager() which also
+   // calls Shutdown().
+   if (mShuttingDown) {
+     return;
+   }
+@@ -378,25 +383,28 @@ StorageManager::Shutdown()
+     RefPtr<StorageContext> context = mContext;
+     context->CancelAll();
+   }
+ }
+ 
+ void
+ StorageManager::NoteClosing()
+ {
++  printf_stderr("StorageManager::NoteClosing\n");
+   NS_ASSERT_OWNINGTHREAD(StorageManager);
  
    // This can be called more than once legitimately through different paths.
    mState = Closing;
@@ -399,3 +482,21 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
    // going idle or the underlying storage being invalidated, we should know we
    // are closing before the StorageContext is destroyed.
    MOZ_ASSERT(mState == Closing);
+@@ -407,16 +415,17 @@ StorageManager::RemoveStorageContext(Sto
+   // Factory list. We don't need to block shutdown by stayin in the list
+   // any more.
+   Factory::Remove(this);
+ }
+ 
+ void
+ StorageManager::MaybeAllowContextToClose()
+ {
++  printf_stderr("StorageManager::MaybeAllowContextToClose\n");
+   NS_ASSERT_OWNINGTHREAD(StorageManager);
+   // If we have an active context, but we have no more users of the
+   // StorageManager, then let it shut itself down. We must wait for all
+   // possible users of state information to complete before doing this.
+   RefPtr<StorageContext> context = mContext;
+   if (context) { //XXX && mListeners.isEmpty()) {
+     // Mark the StorageManager as invalid so that it won't get used again.
+     NoteClosing();
