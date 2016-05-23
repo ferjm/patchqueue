@@ -348,7 +348,7 @@ new file mode 100644
 +    return;
 +  }
 +
-+  rv = dbDir->Append(NS_LITERAL_STRING("cache"));
++  rv = dbDir->Append(NS_LITERAL_STRING("backgroundsync"));
 +  if (NS_WARN_IF(NS_FAILED(rv))) {
 +    aResolver->Resolve(rv);
 +    return;
@@ -967,7 +967,7 @@ new file mode 100644
 +    "scope TEXT NOT NULL, "
 +    "tag TEXT NOT NULL, "
 +    "state INTEGER NOT NULL, "
-+    "lastChance INTEGER NOT NULL, "
++    "lastChance INTEGER NOT NULL"
 +  ")";
 +
 +// ---------
@@ -1245,7 +1245,7 @@ new file mode 100644
 +  Expect expect[] = {
 +    Expect("registrations", "table", kTableRegistrations),
 +    Expect("sqlite_sequence", "table"), // auto-gen by sqlite
-+    Expect("sqlite_autoindex_storage_1", "index"), // auto-gen by sqlite
++    Expect("sqlite_autoindex_registrations_1", "index"), // auto-gen by sqlite
 +  };
 +  const uint32_t expectLength = sizeof(expect) / sizeof(Expect);
 +
@@ -1508,7 +1508,7 @@ diff --git a/dom/backgroundsync/StorageContext.cpp b/dom/backgroundsync/StorageC
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/StorageContext.cpp
-@@ -0,0 +1,1111 @@
+@@ -0,0 +1,1113 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -2406,6 +2406,7 @@ new file mode 100644
 +StorageContext::IsCanceled() const
 +{
 +  NS_ASSERT_OWNINGTHREAD(StorageContext);
++
 +  return mState == STATE_CONTEXT_CANCELED;
 +}
 +
@@ -2413,6 +2414,7 @@ new file mode 100644
 +StorageContext::Invalidate()
 +{
 +  NS_ASSERT_OWNINGTHREAD(StorageContext);
++
 +  mManager->NoteClosing();
 +  CancelAll();
 +}
@@ -2624,7 +2626,7 @@ diff --git a/dom/backgroundsync/StorageContext.h b/dom/backgroundsync/StorageCon
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/StorageContext.h
-@@ -0,0 +1,212 @@
+@@ -0,0 +1,215 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -2633,6 +2635,9 @@ new file mode 100644
 +
 +#ifndef mozilla_dom_StorageContext_h
 +#define mozilla_dom_StorageContext_h
++
++#include "BackgroundSyncTypes.h"
++#include "StorageAction.h"
 +
 +namespace mozilla {
 +namespace dom {
@@ -2841,7 +2846,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/StorageManager.cpp
-@@ -0,0 +1,399 @@
+@@ -0,0 +1,429 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -2887,7 +2892,7 @@ new file mode 100644
 +
 +// ---------------------------------------------------------------------------
 +
-+// Singleton class to track Manager instances and ensure there is only
++// Singleton class to track StorageManager instances and ensure there is only
 +// one for each unique StorageManagerId.
 +class StorageManager::Factory
 +{
@@ -3236,7 +3241,37 @@ new file mode 100644
 +void
 +StorageManager::RemoveStorageContext(StorageContext* aContext)
 +{
-+  // XXX
++  NS_ASSERT_OWNINGTHREAD(StorageManager);
++  MOZ_ASSERT(mContext);
++  MOZ_ASSERT(mContext == aContext);
++
++  // Wether the StorageContext destruction was triggered from the StorageManager
++  // going idle or the underlying storage being invalidated, we should know we
++  // are closing before the StorageContext is destroyed.
++  MOZ_ASSERT(mState == Closing);
++
++  mContext = nullptr;
++
++  // Once the context is gone, we can immediately remove ourself from the
++  // Factory list. We don't need to block shutdown by stayin in the list
++  // any more.
++  Factory::Remove(this);
++}
++
++void
++StorageManager::MaybeAllowContextToClose()
++{
++  NS_ASSERT_OWNINGTHREAD(StorageManager);
++  // If we have an active context, but we have no more users of the
++  // StorageManager, then let it shut itself down. We must wait for all
++  // possible users of state information to complete before doing this.
++  RefPtr<StorageContext> context = mContext;
++  if (context) { //XXX && mListeners.isEmpty()) {
++    // Mark the StorageManager as invalid so that it won't get used again.
++    NoteClosing();
++
++    context->AllowToClose();
++  }
 +}
 +
 +} // namespace dom
@@ -3245,7 +3280,7 @@ diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageMan
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/StorageManager.h
-@@ -0,0 +1,82 @@
+@@ -0,0 +1,89 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -3254,6 +3289,8 @@ new file mode 100644
 +
 +#ifndef mozilla_dom_StorageManager_h
 +#define mozilla_dom_StorageManager_h
++
++#include "StorageContext.h"
 +
 +namespace mozilla {
 +namespace dom {
@@ -3268,6 +3305,9 @@ new file mode 100644
 + * using the BackgroundSync API. This uniqueness is defined by the
 + * StorageManagerId equality operator. The uniqueness is enforced by the
 + * Manager GetOrCreate() factory method.
++ * The StorageManager instances are kept alive by the BackgroundSyncService,
++ * which keeps a reference to the StorageManager dealing with a storage request
++ * until that request is completed or the actor requesting it is destroyed.
 + */
 +
 +class StorageManager final
@@ -3312,6 +3352,8 @@ new file mode 100644
 +  void Init(StorageManager* aOldManager);
 +  void Abort();
 +  void Shutdown();
++
++  void MaybeAllowContextToClose();
 +
 +  RefPtr<StorageManagerId> mManagerId;
 +  nsCOMPtr<nsIThread> mIOThread;
