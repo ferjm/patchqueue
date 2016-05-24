@@ -227,7 +227,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncService.cpp
-@@ -0,0 +1,183 @@
+@@ -0,0 +1,193 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -282,6 +282,10 @@ new file mode 100644
 +void
 +BackgroundSyncService::ReleaseStorageManagerRef(const nsID& aRequestId)
 +{
++  // It is possible that we call OnRequestComplete before AddStorageManagerRef
++  if (!mStorageManagers.Contains(aRequestId)) {
++    return;
++  }
 +  nsAutoPtr<StorageManagerRef> doomed;
 +  mStorageManagers.RemoveAndForget(aRequestId, doomed);
 +}
@@ -391,6 +395,12 @@ new file mode 100644
 +  printf_stderr("YAY\n");
 +}
 +
++void
++BackgroundSyncService::OnRequestComplete(const nsID& aRequestId)
++{
++  ReleaseStorageManagerRef(aRequestId);
++}
++
 +/**
 + * OnlineStateObserver::Listener implementation.
 + */
@@ -415,7 +425,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.h b/dom/backgroundsync/Bac
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncService.h
-@@ -0,0 +1,59 @@
+@@ -0,0 +1,64 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -434,6 +444,8 @@ new file mode 100644
 +
 +class BackgroundSyncService final : public OnlineStateObserver::Listener
 +{
++  friend class StorageManager;
++
 +public:
 +  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(BackgroundSyncService)
 +
@@ -453,11 +465,18 @@ new file mode 100644
 +
 +  void Init();
 +
++  void OnRequestComplete(const nsID& aRequestId);
++
 +  void AddStorageManagerRef(const nsID& aRequestId,
 +                            const uint64_t aActorId,
 +                            StorageManager* aStorageManager);
 +  void ReleaseStorageManagerRef(const nsID& aRequestId);
 +  void ReleaseStorageManagerRef(const uint64_t aActorId);
++
++  struct StorageManagerRef;
++  nsClassHashtable<nsIDHashKey, StorageManagerRef> mStorageManagers;
++
++  nsTHashtable<nsRefPtrHashKey<BackgroundSyncParent>> mBackgroundSyncActors;
 +
 +  // OnlineStateObserver::Listener method
 +  virtual void
@@ -465,10 +484,6 @@ new file mode 100644
 +
 +  RefPtr<OnlineStateObserver> mOnlineStateObserver;
 +  OnlineStateObserver::OnlineState mOnlineState;
-+
-+  nsTHashtable<nsRefPtrHashKey<BackgroundSyncParent>> mBackgroundSyncActors;
-+  struct StorageManagerRef;
-+  nsClassHashtable<nsIDHashKey, StorageManagerRef> mStorageManagers;
 +};
 +
 +} // namespace dom
