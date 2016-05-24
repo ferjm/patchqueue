@@ -48,6 +48,27 @@ diff --git a/dom/backgroundsync/BackgroundSyncChild.h b/dom/backgroundsync/Backg
  
  class BackgroundSyncChild final : public PBackgroundSyncChild
  {
+diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh
+--- a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh
++++ b/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh
+@@ -10,16 +10,17 @@ namespace dom {
+ struct SyncRegisterArgs
+ {
+   nsString mScope;
+   nsString mTag;
+ };
+ 
+ struct SyncGetTagsArgs
+ {
++  nsString mScope;
+ };
+ 
+ union SyncOpArgs
+ {
+   SyncRegisterArgs;
+   SyncGetTagsArgs;
+ };
+ 
 diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/BackgroundSyncParent.cpp
 --- a/dom/backgroundsync/BackgroundSyncParent.cpp
 +++ b/dom/backgroundsync/BackgroundSyncParent.cpp
