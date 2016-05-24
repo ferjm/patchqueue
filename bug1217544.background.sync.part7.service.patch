@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  64f31bfbe14476fb30dce9d6421077abc0a96259
+# Parent  fa23dcf5248583599cc5faf284a292fdf6e60708
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: BackgroundSyncService. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/BackgroundSyncParent.cpp
@@ -227,7 +227,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncService.cpp
-@@ -0,0 +1,180 @@
+@@ -0,0 +1,182 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -384,6 +384,8 @@ new file mode 100644
 +    // XXX Notify error to actor.
 +    return;
 +  }
++
++  AddStorageManagerRef(aRequestId, aActorId, manager);
 +
 +  printf_stderr("YAY\n");
 +}
