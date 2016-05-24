@@ -227,7 +227,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncService.cpp
-@@ -0,0 +1,182 @@
+@@ -0,0 +1,183 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -378,7 +378,8 @@ new file mode 100644
 +  printf_stderr("BackgroundSyncService::Request\n");
 +
 +  RefPtr<StorageManager> manager;
-+  nsresult rv = StorageManager::GetOrCreate(aManagerId,
++  nsresult rv = StorageManager::GetOrCreate(this,
++                                            aManagerId,
 +                                            getter_AddRefs(manager));
 +  if (NS_WARN_IF(NS_FAILED(rv))) {
 +    // XXX Notify error to actor.
@@ -474,6 +475,153 @@ new file mode 100644
 +} // namespace mozilla
 +
 +#endif // mozilla_dom_SyncService_h
+diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageManager.cpp
+--- a/dom/backgroundsync/StorageManager.cpp
++++ b/dom/backgroundsync/StorageManager.cpp
+@@ -46,17 +46,18 @@ public:
+ // Singleton class to track StorageManager instances and ensure there is only
+ // one for each unique StorageManagerId.
+ class StorageManager::Factory
+ {
+ public:
+   friend class StaticAutoPtr<StorageManager::Factory>;
+ 
+   static nsresult
+-  GetOrCreate(StorageManagerId* aManagerId,
++  GetOrCreate(BackgroundSyncService* aService,
++              StorageManagerId* aManagerId,
+               StorageManager** aManagerOut)
+   {
+     AssertIsOnBackgroundThread();
+ 
+     // Ensure there is a factory instance. This forces the Get() call
+     // below to use the same factory.
+     nsresult rv = MaybeCreateInstance();
+     if (NS_WARN_IF(NS_FAILED(rv))) {
+@@ -67,17 +68,17 @@ public:
+     if (!ref) {
+       nsCOMPtr<nsIThread> ioThread;
+       rv = NS_NewNamedThread("BSyncIOThread",
+                              getter_AddRefs(ioThread));
+       if (NS_WARN_IF(NS_FAILED(rv))) {
+         return rv;
+       }
+ 
+-      ref = new StorageManager(aManagerId, ioThread);
++      ref = new StorageManager(aService, aManagerId, ioThread);
+ 
+       // There may be an old manager for this origin in the process of
+       // cleaning up.  We need to tell the new manager about this so
+       // that it won't actually start until the old manager is done.
+       RefPtr<StorageManager> oldManager = Get(aManagerId, Closing);
+       ref->Init(oldManager);
+ 
+       MOZ_ASSERT(!sFactory->mManagerList.Contains(ref));
+@@ -279,41 +280,47 @@ StaticMutex StorageManager::Factory::sMu
+ 
+ // static
+ bool StorageManager::Factory::sFactoryShutdown = false;
+ 
+ // ---------------------------------------------------------------------------
+ 
+ // static
+ nsresult
+-StorageManager::GetOrCreate(StorageManagerId* aManagerId,
++StorageManager::GetOrCreate(BackgroundSyncService* aService,
++                            StorageManagerId* aManagerId,
+                             StorageManager** aManagerOut)
+ {
+   AssertIsOnBackgroundThread();
+-  return Factory::GetOrCreate(aManagerId, aManagerOut);
++  return Factory::GetOrCreate(aService, aManagerId, aManagerOut);
+ }
+ 
+-StorageManager::StorageManager(StorageManagerId* aManagerId,
++StorageManager::StorageManager(BackgroundSyncService* aService,
++                               StorageManagerId* aManagerId,
+                                nsIThread* aIOThread)
+-  : mManagerId(aManagerId)
++  : mService(aService)
++  , mManagerId(aManagerId)
+   , mIOThread(aIOThread)
+   , mContext(nullptr)
+   , mShuttingDown(false)
+   , mState(Open)
+ {
++  MOZ_ASSERT(mService);
+   MOZ_ASSERT(mManagerId);
+   MOZ_ASSERT(mIOThread);
+ }
+ 
+ StorageManager::~StorageManager()
+ {
+   NS_ASSERT_OWNINGTHREAD(StorageManager);
+   MOZ_ASSERT(mState == Closing);
+   MOZ_ASSERT(!mContext);
+ 
++  mService = nullptr;
++
+ /*  nsCOMPtr<nsIThread> ioThread;
+   mIOThread.swap(ioThread);
+ 
+   // Don't spin the event loop in the destructor waiting for the thread to
+   // shutdown. Defer this to the main thread, instead.
+   MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(
+         NewRunnableMethod(ioThread, &nsIThread::Shutdown)));*/
+ }
+diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageManager.h
+--- a/dom/backgroundsync/StorageManager.h
++++ b/dom/backgroundsync/StorageManager.h
+@@ -28,17 +28,18 @@ namespace dom {
+  * until that request is completed or the actor requesting it is destroyed.
+  */
+ 
+ class StorageManager final
+ {
+ public:
+   NS_INLINE_DECL_REFCOUNTING(StorageManager)
+ 
+-  static nsresult GetOrCreate(StorageManagerId* aManagerId,
++  static nsresult GetOrCreate(BackgroundSyncService* aService,
++                              StorageManagerId* aManagerId,
+                               StorageManager** aManagerOut);
+ 
+   enum State
+   {
+     Open,
+     Closing
+   };
+ 
+@@ -59,25 +60,28 @@ public:
+   // Marks the StorageManager "invalid". Once the StorageContext completes
+   // no new operations will be permitted with this StorageManager.
+   // New actors will get a new StorageManager.
+   void NoteClosing();
+ 
+ private:
+   class Factory;
+ 
+-  StorageManager(StorageManagerId* aManagerId, nsIThread* aIOThread);
++  StorageManager(BackgroundSyncService* aService,
++                 StorageManagerId* aManagerId,
++                 nsIThread* aIOThread);
+   ~StorageManager();
+ 
+   void Init(StorageManager* aOldManager);
+   void Abort();
+   void Shutdown();
+ 
+   void MaybeAllowContextToClose();
+ 
++  RefPtr<BackgroundSyncService> mService;
+   RefPtr<StorageManagerId> mManagerId;
+   nsCOMPtr<nsIThread> mIOThread;
+ 
+   // Weak reference cleared by RemoveStorageContext() in StorageContext
+   // destructor.
+   StorageContext* MOZ_NON_OWNING_REF mContext;
+ 
+   bool mShuttingDown;
 diff --git a/dom/backgroundsync/moz.build b/dom/backgroundsync/moz.build
 --- a/dom/backgroundsync/moz.build
 +++ b/dom/backgroundsync/moz.build
