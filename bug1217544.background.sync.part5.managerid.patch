@@ -2846,7 +2846,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/StorageManager.cpp
-@@ -0,0 +1,429 @@
+@@ -0,0 +1,493 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -3131,6 +3131,36 @@ new file mode 100644
 +
 +// ---------------------------------------------------------------------------
 +
++// Abstract class to help implement the varios StorageActions.
++class StorageManager::BaseAction : public SyncDBAction
++{
++protected:
++  BaseAction(StorageManager* aManager, const nsID& aRequestId)
++    : SyncDBAction(DBAction::Existing)
++    , mManager(aManager)
++    , mRequestId(aRequestId)
++  {}
++
++  virtual void
++  Complete(ErrorResult&& aRv) = 0;
++
++  virtual void
++  CompleteOnInitiatingThread(nsresult aRv) override
++  {
++    NS_ASSERT_OWNINGTHREAD(StorageManager::BaseAction);
++
++    Complete(ErrorResult(aRv));
++
++    // Ensure we release the manager on the initiating thread.
++    mManager = nullptr;
++  }
++
++  RefPtr<StorageManager> mManager;
++  const nsID mRequestId;
++};
++
++// ---------------------------------------------------------------------------
++
 +// static
 +nsresult
 +StorageManager::GetOrCreate(StorageManagerId* aManagerId,
@@ -3262,16 +3292,50 @@ new file mode 100644
 +StorageManager::MaybeAllowContextToClose()
 +{
 +  NS_ASSERT_OWNINGTHREAD(StorageManager);
-+  // If we have an active context, but we have no more users of the
-+  // StorageManager, then let it shut itself down. We must wait for all
-+  // possible users of state information to complete before doing this.
++  // If we have an active context, but we have no more pending requests,
++  // then let it shut itself down. We must wait for all possible users
++  // of state information to complete before doing this.
 +  RefPtr<StorageContext> context = mContext;
-+  if (context) { //XXX && mListeners.isEmpty()) {
++  if (context && mPendingRequests.IsEmpty()) {
 +    // Mark the StorageManager as invalid so that it won't get used again.
 +    NoteClosing();
 +
 +    context->AllowToClose();
 +  }
++}
++
++void
++StorageManager::ExecuteRequest(const nsID& aRequestId, const SyncOp& aOp)
++{
++  NS_ASSERT_OWNINGTHREAD(StorageManager);
++  MOZ_ASSERT(mContext);
++
++  mPendingRequests.AppendElement(aRequestId);
++
++  if (NS_WARN_IF(mState == Closing)) {
++    OnRequestComplete(aRequestId);
++    return;
++  }
++
++  RefPtr<StorageContext> context = mContext;
++  MOZ_ASSERT(!context->IsCanceled());
++
++  RefPtr<StorageAction> action;
++
++  //XXX create appropriate action
++
++  context->Dispatch(action);
++}
++
++void
++StorageManager::OnRequestComplete(const nsID& aRequestId)
++{
++  NS_ASSERT_OWNINGTHREAD(StorageManager);
++  MOZ_ASSERT(mPendingRequests.Contains(aRequestId));
++
++  mPendingRequests.RemoveElement(aRequestId);
++
++  // XXX Notify listener
 +}
 +
 +} // namespace dom
@@ -3280,7 +3344,7 @@ diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageMan
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/StorageManager.h
-@@ -0,0 +1,90 @@
+@@ -0,0 +1,98 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -3344,7 +3408,10 @@ new file mode 100644
 +  // New actors will get a new StorageManager.
 +  void NoteClosing();
 +
++  void ExecuteRequest(const nsID& aRequestId, const SyncOp& aOp);
++
 +private:
++  class BaseAction;
 +  class Factory;
 +
 +  StorageManager(StorageManagerId* aManagerId, nsIThread* aIOThread);
@@ -3356,6 +3423,8 @@ new file mode 100644
 +
 +  void MaybeAllowContextToClose();
 +
++  void OnRequestComplete(const nsID& aRequestId);
++
 +  RefPtr<StorageManagerId> mManagerId;
 +  nsCOMPtr<nsIThread> mIOThread;
 +
@@ -3365,6 +3434,9 @@ new file mode 100644
 +
 +  bool mShuttingDown;
 +  State mState;
++
++  // Keep a list of the request IDs coming from BackgroundSyncService.
++  nsTArray<nsID> mPendingRequests;
 +};
 +
 +} // namespace dom
