@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  0e2abbc9a4f81181962e63a5b9c36d0159793fe4
+# Parent  a81a09b9703db75671f08d6aa2447c0770d5696f
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: BackgroundSyncService. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/BackgroundSyncParent.cpp
@@ -534,7 +534,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
        ref->Init(oldManager);
  
        MOZ_ASSERT(!sFactory->mManagerList.Contains(ref));
-@@ -357,41 +358,47 @@ public:
+@@ -358,41 +359,47 @@ public:
      mManager->OnRequestComplete(mRequestId);
    }
  };
@@ -586,6 +586,24 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
    MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(
          NewRunnableMethod(ioThread, &nsIThread::Shutdown)));*/
  }
+@@ -545,15 +552,15 @@ StorageManager::ExecuteRequest(const nsI
+ void
+ StorageManager::OnRequestComplete(const nsID& aRequestId)
+ {
+   NS_ASSERT_OWNINGTHREAD(StorageManager);
+   MOZ_ASSERT(mPendingRequests.Contains(aRequestId));
+ 
+   mPendingRequests.RemoveElement(aRequestId);
+ 
+-  // XXX Notify listener
++  MaybeAllowContextToClose();
+ 
+-  MaybeAllowContextToClose();
++  mService->OnRequestComplete(aRequestId);
+ }
+ 
+ } // namespace dom
+ } // namespace mozilla
 diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageManager.h
 --- a/dom/backgroundsync/StorageManager.h
 +++ b/dom/backgroundsync/StorageManager.h
