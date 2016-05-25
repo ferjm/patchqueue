@@ -2867,7 +2867,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/StorageManager.cpp
-@@ -0,0 +1,493 @@
+@@ -0,0 +1,517 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -3156,10 +3156,10 @@ new file mode 100644
 +class StorageManager::BaseAction : public SyncDBAction
 +{
 +protected:
-+  BaseAction(StorageManager* aManager, const nsID& aRequestId)
++  BaseAction(const nsID& aRequestId, StorageManager* aManager)
 +    : SyncDBAction(DBAction::Existing)
-+    , mManager(aManager)
 +    , mRequestId(aRequestId)
++    , mManager(aManager)
 +  {}
 +
 +  virtual void
@@ -3176,8 +3176,32 @@ new file mode 100644
 +    mManager = nullptr;
 +  }
 +
-+  RefPtr<StorageManager> mManager;
 +  const nsID mRequestId;
++  RefPtr<StorageManager> mManager;
++};
++
++// ---------------------------------------------------------------------------
++
++class StorageManager::RegisterAction final : public StorageManager::BaseAction
++{
++public:
++  RegisterAction(const nsID& aRequestId, StorageManager* aManager)
++    : BaseAction(aRequestId, aManager)
++  {}
++
++  virtual nsresult
++  RunSyncOnTarget(const QuotaInfo& aQuotaInfo,
++                  mozIStorageConnection* aConn) override
++  {
++    // XXX
++    return NS_OK;
++  }
++
++  virtual void
++  Complete(ErrorResult&& aRv) override
++  {
++    mManager->OnRequestComplete(mRequestId);
++  }
 +};
 +
 +// ---------------------------------------------------------------------------
@@ -3365,7 +3389,7 @@ diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageMan
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/StorageManager.h
-@@ -0,0 +1,98 @@
+@@ -0,0 +1,99 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -3434,6 +3458,7 @@ new file mode 100644
 +private:
 +  class BaseAction;
 +  class Factory;
++  class RegisterAction;
 +
 +  StorageManager(StorageManagerId* aManagerId, nsIThread* aIOThread);
 +  ~StorageManager();
