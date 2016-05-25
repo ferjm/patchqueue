@@ -2867,7 +2867,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/StorageManager.cpp
-@@ -0,0 +1,517 @@
+@@ -0,0 +1,556 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -3206,6 +3206,30 @@ new file mode 100644
 +
 +// ---------------------------------------------------------------------------
 +
++class StorageManager::GetTagsAction final : public StorageManager::BaseAction
++{
++public:
++  GetTagsAction(const nsID& aRequestId, StorageManager* aManager)
++    : BaseAction(aRequestId, aManager)
++  {}
++
++  virtual nsresult
++  RunSyncOnTarget(const QuotaInfo& aQuotaInfo,
++                  mozIStorageConnection* aConn) override
++  {
++    // XXX
++    return NS_OK;
++  }
++
++  virtual void
++  Complete(ErrorResult&& aRv) override
++  {
++    mManager->OnRequestComplete(mRequestId);
++  }
++};
++
++// ---------------------------------------------------------------------------
++
 +// static
 +nsresult
 +StorageManager::GetOrCreate(StorageManagerId* aManagerId,
@@ -3367,7 +3391,22 @@ new file mode 100644
 +
 +  RefPtr<StorageAction> action;
 +
-+  //XXX create appropriate action
++  switch(aOp.mArgs().type()) {
++    case SyncOpArgs::TSyncRegisterArgs:
++    {
++      action = new RegisterAction(aRequestId, this);
++      break;
++    }
++    case SyncOpArgs::TSyncGetTagsArgs:
++    {
++      action = new GetTagsAction(aRequestId, this);
++      break;
++    }
++    default:
++    {
++      MOZ_CRASH("Unknown BackgroundSync request");
++    }
++  }
 +
 +  context->Dispatch(action);
 +}
@@ -3389,7 +3428,7 @@ diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageMan
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/StorageManager.h
-@@ -0,0 +1,99 @@
+@@ -0,0 +1,100 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -3458,6 +3497,7 @@ new file mode 100644
 +private:
 +  class BaseAction;
 +  class Factory;
++  class GetTagsAction;
 +  class RegisterAction;
 +
 +  StorageManager(StorageManagerId* aManagerId, nsIThread* aIOThread);
