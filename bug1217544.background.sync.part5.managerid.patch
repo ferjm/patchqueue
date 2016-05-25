@@ -2867,7 +2867,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/StorageManager.cpp
-@@ -0,0 +1,558 @@
+@@ -0,0 +1,559 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -3162,15 +3162,16 @@ new file mode 100644
 +    , mManager(aManager)
 +  {}
 +
++  // XXX We need to get a ErrorResult&& here.
 +  virtual void
-+  Complete(ErrorResult&& aRv) = 0;
++  Complete() = 0;
 +
 +  virtual void
 +  CompleteOnInitiatingThread(nsresult aRv) override
 +  {
 +    NS_ASSERT_OWNINGTHREAD(StorageManager::BaseAction);
 +
-+    Complete(ErrorResult(aRv));
++    Complete();
 +
 +    // Ensure we release the manager on the initiating thread.
 +    mManager = nullptr;
@@ -3198,7 +3199,7 @@ new file mode 100644
 +  }
 +
 +  virtual void
-+  Complete(ErrorResult&& aRv) override
++  Complete() override
 +  {
 +    mManager->OnRequestComplete(mRequestId);
 +  }
@@ -3222,7 +3223,7 @@ new file mode 100644
 +  }
 +
 +  virtual void
-+  Complete(ErrorResult&& aRv) override
++  Complete() override
 +  {
 +    mManager->OnRequestComplete(mRequestId);
 +  }
