@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  fa23dcf5248583599cc5faf284a292fdf6e60708
+# Parent  92b87a74a4ef35ab0e26a256ae717bd3d9e655dd
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: BackgroundSyncService. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/BackgroundSyncParent.cpp
@@ -532,10 +532,10 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
        ref->Init(oldManager);
  
        MOZ_ASSERT(!sFactory->mManagerList.Contains(ref));
-@@ -279,41 +280,47 @@ StaticMutex StorageManager::Factory::sMu
- 
- // static
- bool StorageManager::Factory::sFactoryShutdown = false;
+@@ -357,41 +358,47 @@ public:
+     mManager->OnRequestComplete(mRequestId);
+   }
+ };
  
  // ---------------------------------------------------------------------------
  
@@ -607,14 +607,14 @@ diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageMan
      Closing
    };
  
-@@ -59,25 +60,28 @@ public:
-   // Marks the StorageManager "invalid". Once the StorageContext completes
-   // no new operations will be permitted with this StorageManager.
-   // New actors will get a new StorageManager.
-   void NoteClosing();
+@@ -64,27 +65,30 @@ public:
+   void ExecuteRequest(const nsID& aRequestId, const SyncOp& aOp);
  
  private:
+   class BaseAction;
    class Factory;
+   class GetTagsAction;
+   class RegisterAction;
  
 -  StorageManager(StorageManagerId* aManagerId, nsIThread* aIOThread);
 +  StorageManager(BackgroundSyncService* aService,
@@ -627,6 +627,8 @@ diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageMan
    void Shutdown();
  
    void MaybeAllowContextToClose();
+ 
+   void OnRequestComplete(const nsID& aRequestId);
  
 +  RefPtr<BackgroundSyncService> mService;
    RefPtr<StorageManagerId> mManagerId;
