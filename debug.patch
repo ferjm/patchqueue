@@ -1,11 +1,29 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  52b7f6892134c6cf7ecfb1595b269a79179f9b37
+# Parent  5dbc5d49615581bcb411dc1373a2ab460f6b5f23
 
 diff --git a/dom/backgroundsync/StorageContext.cpp b/dom/backgroundsync/StorageContext.cpp
 --- a/dom/backgroundsync/StorageContext.cpp
 +++ b/dom/backgroundsync/StorageContext.cpp
-@@ -112,40 +112,43 @@ public:
+@@ -28,16 +28,17 @@ class NullAction final : public StorageA
+ public:
+   NullAction()
+   {
+   }
+ 
+   virtual void
+   RunOnTarget(Resolver* aResolver, const QuotaInfo&, Data*) override
+   {
++    printf_stderr("NullAction::RunOnTarget\n");
+     // Resolve success immediately. This Action does no actual work.
+     MOZ_ASSERT(aResolver);
+     aResolver->Resolve(NS_OK);
+   }
+ };
+ 
+ } // namespace
+ 
+@@ -112,40 +113,43 @@ public:
      , mData(aData)
      , mTarget(aTarget)
      , mInitAction(aInitAction)
@@ -49,7 +67,7 @@ diff --git a/dom/backgroundsync/StorageContext.cpp b/dom/backgroundsync/StorageC
  
    void OpenDirectory();
  
-@@ -163,16 +166,17 @@ private:
+@@ -163,16 +167,17 @@ private:
      SyncResolver()
        : mResolved(false)
        , mResult(NS_OK)
@@ -67,7 +85,7 @@ diff --git a/dom/backgroundsync/StorageContext.cpp b/dom/backgroundsync/StorageC
      bool Resolved() const { return mResolved; }
      nsresult Result() const { return mResult; }
  
-@@ -183,16 +187,17 @@ private:
+@@ -183,16 +188,17 @@ private:
      nsresult mResult;
  
      NS_INLINE_DECL_REFCOUNTING(StorageContext::QuotaInitRunnable::SyncResolver,
@@ -85,7 +103,7 @@ diff --git a/dom/backgroundsync/StorageContext.cpp b/dom/backgroundsync/StorageC
    enum State
    {
      STATE_INIT,
-@@ -204,28 +209,30 @@ private:
+@@ -204,28 +210,30 @@ private:
      STATE_RUN_ON_TARGET,
      STATE_RUNNING,
      STATE_COMPLETING,
@@ -116,7 +134,7 @@ diff --git a/dom/backgroundsync/StorageContext.cpp b/dom/backgroundsync/StorageC
    }
  
    RefPtr<StorageContext> mContext;
-@@ -362,16 +369,17 @@ StorageContext::QuotaInitRunnable::Run()
+@@ -362,16 +370,17 @@ StorageContext::QuotaInitRunnable::Run()
    // state cases for thread assertions.
  
    RefPtr<SyncResolver> resolver = new SyncResolver();
@@ -134,7 +152,7 @@ diff --git a/dom/backgroundsync/StorageContext.cpp b/dom/backgroundsync/StorageC
        }
  
        RefPtr<StorageManagerId> managerId = mManager->GetManagerId();
-@@ -388,16 +396,17 @@ StorageContext::QuotaInitRunnable::Run()
+@@ -388,16 +397,17 @@ StorageContext::QuotaInitRunnable::Run()
        mState = STATE_CREATE_QUOTA_MANAGER;
        MOZ_ALWAYS_SUCCEEDS(
          mInitiatingThread->Dispatch(this, nsIThread::DISPATCH_NORMAL));
@@ -152,7 +170,7 @@ diff --git a/dom/backgroundsync/StorageContext.cpp b/dom/backgroundsync/StorageC
        }
  
        if (QuotaManager::Get()) {
-@@ -407,29 +416,31 @@ StorageContext::QuotaInitRunnable::Run()
+@@ -407,29 +417,31 @@ StorageContext::QuotaInitRunnable::Run()
  
        mState = STATE_OPEN_DIRECTORY;
        QuotaManager::GetOrCreate(this);
@@ -184,7 +202,7 @@ diff --git a/dom/backgroundsync/StorageContext.cpp b/dom/backgroundsync/StorageC
        }
  
        QuotaManager* qm = QuotaManager::Get();
-@@ -448,32 +459,34 @@ StorageContext::QuotaInitRunnable::Run()
+@@ -448,32 +460,34 @@ StorageContext::QuotaInitRunnable::Run()
  
        MOZ_ALWAYS_SUCCEEDS(
          mTarget->Dispatch(this, nsIThread::DISPATCH_NORMAL));
@@ -219,7 +237,7 @@ diff --git a/dom/backgroundsync/StorageContext.cpp b/dom/backgroundsync/StorageC
        // Explicitly cleanup here as the destructor could fire on any of
        // the threads we have bounced through.
        Clear();
-@@ -509,16 +522,17 @@ public:
+@@ -509,16 +523,17 @@ public:
      , mTarget(aTarget)
      , mAction(aAction)
      , mQuotaInfo(aQuotaInfo)
@@ -237,7 +255,7 @@ diff --git a/dom/backgroundsync/StorageContext.cpp b/dom/backgroundsync/StorageC
      MOZ_ASSERT(mInitiatingThread);
    }
  
-@@ -647,16 +661,17 @@ NS_IMPL_ISUPPORTS(StorageContext::Action
+@@ -647,16 +662,17 @@ NS_IMPL_ISUPPORTS(StorageContext::Action
  //
  // Its important to note that synchronous actions will effectively Resolve()
  // out of the Running state immediately. Asynchronous StorageActions may remain
@@ -255,7 +273,7 @@ diff --git a/dom/backgroundsync/StorageContext.cpp b/dom/backgroundsync/StorageC
        MOZ_ASSERT(!mExecutingRunOnTarget);
  
        // Note that we are calling RunOnTarget().  This lets us detect
-@@ -713,16 +728,17 @@ StorageContext::ActionRunnable::Run()
+@@ -713,16 +729,17 @@ StorageContext::ActionRunnable::Run()
      }
    }
    return NS_OK;
@@ -273,7 +291,7 @@ diff --git a/dom/backgroundsync/StorageContext.cpp b/dom/backgroundsync/StorageC
    // Dispatch is guaranteed to succeed here because we block shutdown until
    // all StorageContexts have been destroyed.
    nsCOMPtr<nsIRunnable> runnable =
-@@ -767,16 +783,17 @@ StorageContext::ThreadsafeHandle::~Threa
+@@ -767,16 +784,17 @@ StorageContext::ThreadsafeHandle::~Threa
    // Dispatch is guaranteed to succeed here because we block shutdown until
    // all Contexts have been destroyed.
    NS_ProxyRelease(mOwningThread, mStrongRef.forget());
@@ -291,7 +309,7 @@ diff --git a/dom/backgroundsync/StorageContext.cpp b/dom/backgroundsync/StorageC
    // the StorageContext is idle, it will be destroyed.
  
    // First, tell the context to flush any target thread shared data. This
-@@ -818,16 +835,17 @@ StorageContext::ThreadsafeHandle::Storag
+@@ -818,16 +836,17 @@ StorageContext::ThreadsafeHandle::Storag
    mWeakRef = nullptr;
  }
  
@@ -309,7 +327,7 @@ diff --git a/dom/backgroundsync/StorageContext.cpp b/dom/backgroundsync/StorageC
  
  StorageContext::StorageContext(StorageManager* aManager, nsIThread* aTarget,
                                 StorageAction* aInitAction)
-@@ -914,48 +932,52 @@ StorageContext::AllowToClose()
+@@ -914,48 +933,52 @@ StorageContext::AllowToClose()
    NS_ASSERT_OWNINGTHREAD(StorageContext);
    if (mThreadsafeHandle) {
      mThreadsafeHandle->AllowToClose();
@@ -362,6 +380,78 @@ diff --git a/dom/backgroundsync/StorageContext.cpp b/dom/backgroundsync/StorageC
      MOZ_ASSERT(!mInitRunnable);
      MOZ_ASSERT(!mInitAction);
      return;
+@@ -977,16 +1000,17 @@ StorageContext::Start()
+     // Crash for this invariant violation.
+     MOZ_CRASH("Failed to dispatch QuotaInitRunnable.");
+   }
+ }
+ 
+ void
+ StorageContext::DispatchAction(StorageAction* aAction, bool aDoomData)
+ {
++  printf_stderr("StorageContext::DispatchAction\n");
+   NS_ASSERT_OWNINGTHREAD(StorageContext);
+ 
+   RefPtr<ActionRunnable> runnable =
+     new ActionRunnable(this, mData, mTarget, aAction, mQuotaInfo);
+ 
+   if (aDoomData) {
+     mData = nullptr;
+   }
+@@ -999,16 +1023,17 @@ StorageContext::DispatchAction(StorageAc
+   }
+   AddActivity(runnable);
+ }
+ 
+ void
+ StorageContext::OnQuotaInit(nsresult aRv, const QuotaInfo& aQuotaInfo,
+                             already_AddRefed<quota::DirectoryLock> aDirectoryLock)
+ {
++  printf_stderr("StorageContext::OnQuotaInit\n");
+   NS_ASSERT_OWNINGTHREAD(StorageContext);
+ 
+   MOZ_ASSERT(mInitRunnable);
+   mInitRunnable = nullptr;
+ 
+   mQuotaInfo = aQuotaInfo;
+ 
+   // Always save the directory lock to ensure QuotaManager does not shutdown
+@@ -1016,16 +1041,17 @@ StorageContext::OnQuotaInit(nsresult aRv
+   MOZ_ASSERT(!mDirectoryLock);
+   mDirectoryLock = aDirectoryLock;
+ 
+   // If we opening the context failed, but we were not explicitly canceled,
+   // still treat the entire context as canceled.  We don't want to allow
+   // new actions to be dispatched.  We also cannot leave the context in
+   // the INIT state after failing to open.
+   if (NS_FAILED(aRv)) {
++    printf_stderr("QuotaInit failed - STATE_CONTEXT_CANCELED\n");
+     mState = STATE_CONTEXT_CANCELED;
+   }
+ 
+   if (mState == STATE_CONTEXT_CANCELED) {
+     for (uint32_t i = 0; i < mPendingActions.Length(); ++i) {
+       mPendingActions[i].mAction->CompleteOnInitiatingThread(aRv);
+     }
+     mPendingActions.Clear();
+@@ -1087,16 +1113,17 @@ StorageContext::SetNextContext(StorageCo
+   MOZ_ASSERT(aNextContext);
+   MOZ_ASSERT(!mNextContext);
+   mNextContext = aNextContext;
+ }
+ 
+ void
+ StorageContext::DoomTargetData()
+ {
++  printf_stderr("DoomTargetData\n");
+   NS_ASSERT_OWNINGTHREAD(StorageContext);
+   MOZ_ASSERT(mData);
+ 
+   // We are about to drop our reference to the Data. We need to ensure that
+   // the ~StorageContext() destructor does not run until contents of Data have
+   // been released on the Target thread.
+ 
+   // Dispatch a no-op StorageAction. This will hold the StorageContext alive
 diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageManager.cpp
 --- a/dom/backgroundsync/StorageManager.cpp
 +++ b/dom/backgroundsync/StorageManager.cpp
@@ -383,7 +473,89 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
    }
  };
  } // anonymous namespace
-@@ -383,16 +384,17 @@ StorageManager::StorageManager(Backgroun
+@@ -294,16 +295,17 @@ protected:
+   {}
+ 
+   virtual void
+   Complete(ErrorResult&& aRv) = 0;
+ 
+   virtual void
+   CompleteOnInitiatingThread(nsresult aRv) override
+   {
++    printf_stderr("StorageManager::BaseAction::CompleteOnInitiatingThread\n");
+     NS_ASSERT_OWNINGTHREAD(StorageManager::BaseAction);
+ 
+     Complete(ErrorResult(aRv));
+ 
+     // Ensure we release the manager on the initiating thread.
+     mManager = nullptr;
+   }
+ 
+@@ -313,53 +315,61 @@ protected:
+ 
+ // ---------------------------------------------------------------------------
+ 
+ class StorageManager::RegisterAction final : public StorageManager::BaseAction
+ {
+ public:
+   RegisterAction(const nsID& aRequestId, StorageManager* aManager)
+     : BaseAction(aRequestId, aManager)
+-  {}
++  {
++    printf_stderr("RegisterAction::RegisterAction\n");
++  }
+ 
+   virtual nsresult
+   RunSyncOnTarget(const QuotaInfo& aQuotaInfo,
+                   mozIStorageConnection* aConn) override
+   {
++    printf_stderr("RegisterAction::RunSyncOnTarget\n");
+     // XXX
+     return NS_OK;
+   }
+ 
+   virtual void
+   Complete(ErrorResult&& aRv) override
+   {
++    printf_stderr("RegisterAction::Complete\n");
+     mManager->OnRequestComplete(mRequestId);
+   }
+ };
+ 
+ // ---------------------------------------------------------------------------
+ 
+ class StorageManager::GetTagsAction final : public StorageManager::BaseAction
+ {
+ public:
+   GetTagsAction(const nsID& aRequestId, StorageManager* aManager)
+     : BaseAction(aRequestId, aManager)
+-  {}
++  {
++    printf_stderr("GetTagsAction::GetTagsAction\n");
++  }
+ 
+   virtual nsresult
+   RunSyncOnTarget(const QuotaInfo& aQuotaInfo,
+                   mozIStorageConnection* aConn) override
+   {
++    printf_stderr("GetTagsAction::RunSyncOnTarget\n");
+     // XXX
+     return NS_OK;
+   }
+ 
+   virtual void
+   Complete(ErrorResult&& aRv) override
+   {
++    printf_stderr("GetTagsAction::Complete\n");
+     mManager->OnRequestComplete(mRequestId);
+   }
+ };
+ 
+ // ---------------------------------------------------------------------------
+ 
+ // static
+ nsresult
+@@ -383,16 +393,17 @@ StorageManager::StorageManager(Backgroun
  {
    MOZ_ASSERT(mService);
    MOZ_ASSERT(mManagerId);
@@ -401,7 +573,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
  
  /*  nsCOMPtr<nsIThread> ioThread;
    mIOThread.swap(ioThread);
-@@ -401,16 +403,17 @@ StorageManager::~StorageManager()
+@@ -401,16 +412,17 @@ StorageManager::~StorageManager()
    // shutdown. Defer this to the main thread, instead.
    MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(
          NewRunnableMethod(ioThread, &nsIThread::Shutdown)));*/
@@ -419,7 +591,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
    }
  
    // Create the context immediately. Since there can at most be one
-@@ -420,32 +423,34 @@ StorageManager::Init(StorageManager* aOl
+@@ -420,32 +432,34 @@ StorageManager::Init(StorageManager* aOl
    RefPtr<StorageContext> ref = StorageContext::Create(this, mIOThread,
                                                        setupAction, oldContext);
    mContext = ref;
@@ -454,7 +626,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
    if (mShuttingDown) {
      return;
    }
-@@ -463,25 +468,28 @@ StorageManager::Shutdown()
+@@ -463,25 +477,28 @@ StorageManager::Shutdown()
      RefPtr<StorageContext> context = mContext;
      context->CancelAll();
    }
@@ -483,7 +655,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
    // going idle or the underlying storage being invalidated, we should know we
    // are closing before the StorageContext is destroyed.
    MOZ_ASSERT(mState == Closing);
-@@ -492,16 +500,17 @@ StorageManager::RemoveStorageContext(Sto
+@@ -492,32 +509,34 @@ StorageManager::RemoveStorageContext(Sto
    // Factory list. We don't need to block shutdown by stayin in the list
    // any more.
    Factory::Remove(this);
@@ -501,3 +673,56 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
    if (context && mPendingRequests.IsEmpty()) {
      // Mark the StorageManager as invalid so that it won't get used again.
      NoteClosing();
+ 
+     context->AllowToClose();
+   }
+ }
+ 
+ void
+ StorageManager::ExecuteRequest(const nsID& aRequestId, const SyncOp& aOp)
+ {
++  printf_stderr("StorageManager::ExecuteRequest\n");
+   NS_ASSERT_OWNINGTHREAD(StorageManager);
+   MOZ_ASSERT(mContext);
+ 
+   mPendingRequests.AppendElement(aRequestId);
+ 
+   if (NS_WARN_IF(mState == Closing)) {
+     OnRequestComplete(aRequestId);
+     return;
+@@ -526,16 +545,17 @@ StorageManager::ExecuteRequest(const nsI
+   RefPtr<StorageContext> context = mContext;
+   MOZ_ASSERT(!context->IsCanceled());
+ 
+   RefPtr<StorageAction> action;
+ 
+   switch(aOp.mArgs().type()) {
+     case SyncOpArgs::TSyncRegisterArgs:
+     {
++      printf_stderr("Is REGISTER Action\n");
+       action = new RegisterAction(aRequestId, this);
+       break;
+     }
+     case SyncOpArgs::TSyncGetTagsArgs:
+     {
+       action = new GetTagsAction(aRequestId, this);
+       break;
+     }
+@@ -546,16 +566,17 @@ StorageManager::ExecuteRequest(const nsI
+   }
+ 
+   context->Dispatch(action);
+ }
+ 
+ void
+ StorageManager::OnRequestComplete(const nsID& aRequestId)
+ {
++  printf_stderr("StorageManager::OnRequestComplete\n");
+   NS_ASSERT_OWNINGTHREAD(StorageManager);
+   MOZ_ASSERT(mPendingRequests.Contains(aRequestId));
+ 
+   mPendingRequests.RemoveElement(aRequestId);
+ 
+   // XXX Notify listener
+ 
+   MaybeAllowContextToClose();

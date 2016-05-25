@@ -3,3 +3,6 @@ fa9771995fa3eb0d67660ab2a712c5ade77f5b01:bug1217544.background.sync.part2.servic
 4ce7792eead804bc078521b4b58cdb27daf0dcc9:bug1217544.background.sync.part3.ipc.patch
 53ec980e00e03d6609707c8413b71deca4125745:bug1217544.background.sync.part4.syncevent.patch
 3c49441f5d8cb783a5c058bcd39a59b063ea3a36:bug1217544.background.sync.part5.managerid.patch
+0e2abbc9a4f81181962e63a5b9c36d0159793fe4:bug1217544.background.sync.part6.onlineobserver.patch
+5dbc5d49615581bcb411dc1373a2ab460f6b5f23:bug1217544.background.sync.part7.service.patch
+87224746f55aff8749a7fe0cd9972fb28bcefb64:debug.patch
