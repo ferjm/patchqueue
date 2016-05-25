@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  56e012b436dd85cba61fed0f952681805f144cd0
+# Parent  d51ba67c3f72de32267a343c4ea558b4d9cc13f3
 
 diff --git a/dom/backgroundsync/StorageContext.cpp b/dom/backgroundsync/StorageContext.cpp
 --- a/dom/backgroundsync/StorageContext.cpp
@@ -787,6 +787,6 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
  
    mPendingRequests.RemoveElement(aRequestId);
  
-   // XXX Notify listener
- 
    MaybeAllowContextToClose();
+ 
+   mService->OnRequestComplete(aRequestId);
