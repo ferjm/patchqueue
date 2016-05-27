@@ -258,9 +258,9 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/Back
                        const SyncOpResponse& aResponse);
  
  private:
-   BackgroundSyncParent();
--  ~BackgroundSyncParent();
-+  ~BackgroundSyncParent(const PrincipalInfo& aPrincipalInfo);
+-  BackgroundSyncParent();
++  BackgroundSyncParent(const PrincipalInfo& aPrincipalInfo);
+   ~BackgroundSyncParent();
  
    virtual void ActorDestroy(ActorDestroyReason aWhy) override;
 +
