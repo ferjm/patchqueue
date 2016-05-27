@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  a87c64529484792897ec4de42ca2a2489065d2b4
+# Parent  d2f8d6fe85b76cdfeeb5f694e021722874d750e8
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: BackgroundSyncService. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/BackgroundSyncParent.cpp
@@ -197,8 +197,8 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/Back
 +  }
 +
  private:
-   BackgroundSyncParent();
-   ~BackgroundSyncParent(const PrincipalInfo& aPrincipalInfo);
+   BackgroundSyncParent(const PrincipalInfo& aPrincipalInfo);
+   ~BackgroundSyncParent();
  
    virtual void ActorDestroy(ActorDestroyReason aWhy) override;
  
