@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  53ec980e00e03d6609707c8413b71deca4125745
+# Parent  d5aa815c364bae96a8a508d4dfb18fefb0ec338d
 Bug 1217544 - Implement one-off BackgroundSync API. Part 5: Storage. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
@@ -142,7 +142,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
      {
        // XXX Do registration.
        const SyncRegisterResponse response(true);
-@@ -52,22 +84,60 @@ bool BackgroundSyncParent::RecvRequest(c
+@@ -52,29 +84,67 @@ bool BackgroundSyncParent::RecvRequest(c
        Unused << SendResponse(aRequestId, response);
        break;
      }
@@ -182,7 +182,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
    return true;
  }
  
-+void
+ void
 +BackgroundSyncParent::OnStorageManagerIdCreated(
 +    StorageManagerId* aManagerId)
 +{
@@ -202,12 +202,19 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
 +  mPendingRequests.Clear();
 +}
 +
- } // namespace dom
- } // namespace mozilla
++void
+ BackgroundSyncParent::NotifyResponse(const nsID& aRequestId,
+                                      const SyncOpResponse& aResponse)
+ {
+   AssertIsOnBackgroundThread();
+ 
+   Unused << SendResponse(aRequestId, aResponse);
+ }
+ 
 diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/BackgroundSyncParent.h
 --- a/dom/backgroundsync/BackgroundSyncParent.h
 +++ b/dom/backgroundsync/BackgroundSyncParent.h
-@@ -2,43 +2,62 @@
+@@ -2,47 +2,68 @@
  /* vim: set ts=8 sts=2 et sw=2 tw=80: */
  /* This Source Code Form is subject to the terms of the Mozilla Public
   * License, v. 2.0. If a copy of the MPL was not distributed with this file,
@@ -246,10 +253,14 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/Back
                             const SyncOp& aOp) override;
  
    virtual bool RecvShutdown() override;
+ 
+   void NotifyResponse(const nsID& aRequestId,
+                       const SyncOpResponse& aResponse);
+ 
  private:
--  BackgroundSyncParent();
-+  BackgroundSyncParent(const PrincipalInfo& aPrincipalInfo);
-   ~BackgroundSyncParent();
+   BackgroundSyncParent();
+-  ~BackgroundSyncParent();
++  ~BackgroundSyncParent(const PrincipalInfo& aPrincipalInfo);
  
    virtual void ActorDestroy(ActorDestroyReason aWhy) override;
 +
@@ -272,8 +283,8 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/Back
  } // namespace mozilla
  
  #endif // mozilla_dom_BackgroundSyncParent_h
--
--
+ 
+ 
 diff --git a/dom/backgroundsync/BackgroundSyncTypes.h b/dom/backgroundsync/BackgroundSyncTypes.h
 new file mode 100644
 --- /dev/null
