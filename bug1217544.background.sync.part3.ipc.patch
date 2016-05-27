@@ -834,7 +834,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncParent.cpp
-@@ -0,0 +1,73 @@
+@@ -0,0 +1,82 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -906,13 +906,22 @@ new file mode 100644
 +  return true;
 +}
 +
++void
++BackgroundSyncParent::NotifyResponse(const nsID& aRequestId,
++                                     const SyncOpResponse& aResponse)
++{
++  AssertIsOnBackgroundThread();
++
++  Unused << SendResponse(aRequestId, aResponse);
++}
++
 +} // namespace dom
 +} // namespace mozilla
 diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/BackgroundSyncParent.h
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncParent.h
-@@ -0,0 +1,44 @@
+@@ -0,0 +1,48 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -944,6 +953,10 @@ new file mode 100644
 +                           const SyncOp& aOp) override;
 +
 +  virtual bool RecvShutdown() override;
++
++  void NotifyResponse(const nsID& aRequestId,
++                      const SyncOpResponse& aResponse);
++
 +private:
 +  BackgroundSyncParent();
 +  ~BackgroundSyncParent();
