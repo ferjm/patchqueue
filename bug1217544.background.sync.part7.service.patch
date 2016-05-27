@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  a81a09b9703db75671f08d6aa2447c0770d5696f
+# Parent  a87c64529484792897ec4de42ca2a2489065d2b4
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: BackgroundSyncService. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/BackgroundSyncParent.cpp
@@ -158,7 +158,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
 diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/BackgroundSyncParent.h
 --- a/dom/backgroundsync/BackgroundSyncParent.h
 +++ b/dom/backgroundsync/BackgroundSyncParent.h
-@@ -18,41 +18,63 @@ namespace mozilla {
+@@ -18,16 +18,18 @@ namespace mozilla {
  
  namespace ipc {
    class BackgroundParentImpl;
@@ -177,12 +177,15 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/Back
  
  public:
    NS_INLINE_DECL_REFCOUNTING(BackgroundSyncParent)
- 
+@@ -35,35 +37,52 @@ public:
    virtual bool RecvRequest(const nsID& aRequestId,
                             const SyncOp& aOp) override;
  
    virtual bool RecvShutdown() override;
-+
+ 
+   void NotifyResponse(const nsID& aRequestId,
+                       const SyncOpResponse& aResponse);
+ 
 +  uint64_t Id() const
 +  {
 +    return mId;
@@ -194,8 +197,8 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/Back
 +  }
 +
  private:
-   BackgroundSyncParent(const PrincipalInfo& aPrincipalInfo);
-   ~BackgroundSyncParent();
+   BackgroundSyncParent();
+   ~BackgroundSyncParent(const PrincipalInfo& aPrincipalInfo);
  
    virtual void ActorDestroy(ActorDestroyReason aWhy) override;
  
@@ -223,6 +226,13 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/Back
    class PendingRequest;
    nsTArray<RefPtr<PendingRequest>> mPendingRequests;
  };
+ 
+ } // namespace dom
+ } // namespace mozilla
+ 
+ #endif // mozilla_dom_BackgroundSyncParent_h
+-
+-
 diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/BackgroundSyncService.cpp
 new file mode 100644
 --- /dev/null
