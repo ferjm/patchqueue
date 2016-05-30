@@ -1,12 +1,12 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  d5aa815c364bae96a8a508d4dfb18fefb0ec338d
+# Parent  896e5a16611c2dd84944cb6f673f7632ed30eee3
 Bug 1217544 - Implement one-off BackgroundSync API. Part 5: Storage. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
 --- a/dom/backgroundsync/BackgroundSync.cpp
 +++ b/dom/backgroundsync/BackgroundSync.cpp
-@@ -334,17 +334,18 @@ BackgroundSync::ActorCreated(PBackground
+@@ -336,17 +336,18 @@ BackgroundSync::ActorCreated(PBackground
    MOZ_ASSERT(IsBackgroundSyncThread());
    MOZ_ASSERT(aActor);
    MOZ_ASSERT(!mActor);
@@ -43,11 +43,11 @@ diff --git a/dom/backgroundsync/BackgroundSyncChild.h b/dom/backgroundsync/Backg
  } // namespace ipc
  
  namespace dom {
+ namespace backgroundsync {
  
  class BackgroundSync;
  
  class BackgroundSyncChild final : public PBackgroundSyncChild
- {
 diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh
 --- a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh
 +++ b/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh
@@ -72,14 +72,14 @@ diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsyn
 diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/BackgroundSyncParent.cpp
 --- a/dom/backgroundsync/BackgroundSyncParent.cpp
 +++ b/dom/backgroundsync/BackgroundSyncParent.cpp
-@@ -10,33 +10,65 @@
- #include "mozilla/ipc/BackgroundParent.h"
+@@ -11,33 +11,65 @@
  
  namespace mozilla {
  
  using namespace ipc;
  
  namespace dom {
+ namespace backgroundsync {
  
 -BackgroundSyncParent::BackgroundSyncParent()
 +class BackgroundSyncParent::PendingRequest final
@@ -142,7 +142,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
      {
        // XXX Do registration.
        const SyncRegisterResponse response(true);
-@@ -52,29 +84,67 @@ bool BackgroundSyncParent::RecvRequest(c
+@@ -53,29 +85,67 @@ bool BackgroundSyncParent::RecvRequest(c
        Unused << SendResponse(aRequestId, response);
        break;
      }
@@ -214,20 +214,17 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
 diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/BackgroundSyncParent.h
 --- a/dom/backgroundsync/BackgroundSyncParent.h
 +++ b/dom/backgroundsync/BackgroundSyncParent.h
-@@ -2,47 +2,68 @@
- /* vim: set ts=8 sts=2 et sw=2 tw=80: */
- /* This Source Code Form is subject to the terms of the Mozilla Public
-  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+@@ -5,46 +5,65 @@
   * You can obtain one at http://mozilla.org/MPL/2.0/. */
  
  #ifndef mozilla_dom_BackgroundSyncParent_h
  #define mozilla_dom_BackgroundSyncParent_h
  
-+#include "StorageManagerId.h"
-+
  #include "mozilla/dom/PBackgroundSyncParent.h"
  #include "mozilla/dom/BackgroundSyncIPCTypes.h"
  
++#include "StorageManagerId.h"
++
  #include "nsID.h"
  
  namespace mozilla {
@@ -239,6 +236,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/Back
  } // namespace ipc
  
  namespace dom {
+ namespace backgroundsync {
  
  class BackgroundSyncParent final : public PBackgroundSyncParent
 +                                 , StorageManagerIdFactory::Listener
@@ -279,12 +277,13 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/Back
 +  nsTArray<RefPtr<PendingRequest>> mPendingRequests;
  };
  
+ } // namespace backgroundsync
  } // namespace dom
  } // namespace mozilla
  
  #endif // mozilla_dom_BackgroundSyncParent_h
- 
- 
+-
+-
 diff --git a/dom/backgroundsync/BackgroundSyncTypes.h b/dom/backgroundsync/BackgroundSyncTypes.h
 new file mode 100644
 --- /dev/null
@@ -324,7 +323,7 @@ diff --git a/dom/backgroundsync/DBAction.cpp b/dom/backgroundsync/DBAction.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/DBAction.cpp
-@@ -0,0 +1,225 @@
+@@ -0,0 +1,227 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -347,6 +346,7 @@ new file mode 100644
 +
 +namespace mozilla {
 +namespace dom {
++namespace backgroundsync {
 +
 +using mozilla::dom::quota::PERSISTENCE_TYPE_DEFAULT;
 +using mozilla::dom::quota::PersistenceType;
@@ -548,13 +548,14 @@ new file mode 100644
 +  aResolver->Resolve(rv);
 +}
 +
++} // namespace backgroundsync
 +} // namespace dom
 +} // namespace mozilla
 diff --git a/dom/backgroundsync/DBAction.h b/dom/backgroundsync/DBAction.h
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/DBAction.h
-@@ -0,0 +1,78 @@
+@@ -0,0 +1,80 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -574,6 +575,7 @@ new file mode 100644
 +
 +namespace mozilla {
 +namespace dom {
++namespace backgroundsync {
 +
 +class DBAction : public StorageAction
 +{
@@ -629,6 +631,7 @@ new file mode 100644
 +                    nsIFile* aDBDir, mozIStorageConnection* aConn) override;
 +};
 +
++} // namespace backgroundsync
 +} // namespace dom
 +} // namespace mozilla
 +
@@ -637,7 +640,7 @@ diff --git a/dom/backgroundsync/DBConnection.cpp b/dom/backgroundsync/DBConnecti
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/DBConnection.cpp
-@@ -0,0 +1,285 @@
+@@ -0,0 +1,287 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -651,10 +654,11 @@ new file mode 100644
 +
 +namespace mozilla {
 +namespace dom {
++namespace backgroundsync {
 +
 +using quota::QuotaObject;
 +
-+NS_IMPL_ISUPPORTS(DBConnection, mozIStorageAsyncConnection,
++NS_IMPL_ISUPPORTS(backgroundsync::DBConnection, mozIStorageAsyncConnection,
 +                  mozIStorageConnection);
 +
 +DBConnection::DBConnection(mozIStorageConnection* aBase)
@@ -921,6 +925,7 @@ new file mode 100644
 +  return mBase->GetQuotaObjects(aDatabaseQuotaObject, aJournalQuotaObject);
 +}
 +
++} // namespace backgroundsync
 +} // namespace dom
 +} // namespace mozilla
 diff --git a/dom/backgroundsync/DBConnection.h b/dom/backgroundsync/DBConnection.h
@@ -966,7 +971,7 @@ diff --git a/dom/backgroundsync/DBSchema.cpp b/dom/backgroundsync/DBSchema.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/DBSchema.cpp
-@@ -0,0 +1,377 @@
+@@ -0,0 +1,379 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -982,6 +987,7 @@ new file mode 100644
 +
 +namespace mozilla {
 +namespace dom {
++namespace backgroundsync {
 +namespace db {
 +
 +const int32_t kFirstShippedSchemaVersion = 1;
@@ -1342,6 +1348,7 @@ new file mode 100644
 +} // anonymous namespace
 +
 +} // namespace db
++} // namespace backgroundsync
 +} // namespace dom
 +} // namespace mozilla
 diff --git a/dom/backgroundsync/DBSchema.h b/dom/backgroundsync/DBSchema.h
@@ -1363,7 +1370,7 @@ new file mode 100644
 +
 +namespace mozilla {
 +namespace dom {
-+
++namespace backgroundsync {
 +namespace db {
 +
 +// Note, this cannot be executed within a transaction.
@@ -1383,7 +1390,7 @@ new file mode 100644
 +extern const int32_t kFirstShippedSchemaVersion;
 +
 +} // namespace db
-+
++} // namespace backgroundsync
 +} // namespace dom
 +} // namespace mozilla
 +
@@ -1610,7 +1617,7 @@ diff --git a/dom/backgroundsync/StorageAction.cpp b/dom/backgroundsync/StorageAc
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/StorageAction.cpp
-@@ -0,0 +1,38 @@
+@@ -0,0 +1,40 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -1621,6 +1628,7 @@ new file mode 100644
 +
 +namespace mozilla {
 +namespace dom {
++namespace backgroundsync {
 +
 +void
 +StorageAction::CancelOnInitiatingThread()
@@ -1647,13 +1655,14 @@ new file mode 100644
 +  return mCanceled;
 +}
 +
++} // namespace backgroundsync
 +} // namespace dom
 +} // namespace mozilla
 diff --git a/dom/backgroundsync/StorageAction.h b/dom/backgroundsync/StorageAction.h
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/StorageAction.h
-@@ -0,0 +1,100 @@
+@@ -0,0 +1,102 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -1672,6 +1681,7 @@ new file mode 100644
 +
 +namespace mozilla {
 +namespace dom {
++namespace backgroundsync {
 +
 +class StorageAction
 +{
@@ -1750,6 +1760,7 @@ new file mode 100644
 +  Atomic<bool> mCanceled;
 +};
 +
++} // namespace backgroundsync
 +} // namespace dom
 +} // namespace mozilla
 +
@@ -1758,7 +1769,7 @@ diff --git a/dom/backgroundsync/StorageContext.cpp b/dom/backgroundsync/StorageC
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/StorageContext.cpp
-@@ -0,0 +1,1113 @@
+@@ -0,0 +1,1115 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -1804,6 +1815,7 @@ new file mode 100644
 +
 +namespace mozilla {
 +namespace dom {
++namespace backgroundsync {
 +
 +using mozilla::DebugOnly;
 +using mozilla::dom::quota::AssertIsOnIOThread;
@@ -2870,13 +2882,14 @@ new file mode 100644
 +  MOZ_ASSERT(!mData);
 +}
 +
++} // namespace backgroundsync
 +} // namespace dom
 +} // namespace mozilla
 diff --git a/dom/backgroundsync/StorageContext.h b/dom/backgroundsync/StorageContext.h
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/StorageContext.h
-@@ -0,0 +1,215 @@
+@@ -0,0 +1,217 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -2891,6 +2904,7 @@ new file mode 100644
 +
 +namespace mozilla {
 +namespace dom {
++namespace backgroundsync {
 +
 +namespace quota {
 +  class DirectoryLock;
@@ -3088,6 +3102,7 @@ new file mode 100644
 +  RefPtr<StorageContext> mNextContext;
 +};
 +
++} // namespace backgroundsync
 +} // namespace dom
 +} // namespace mozilla
 +
@@ -3096,7 +3111,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/StorageManager.cpp
-@@ -0,0 +1,559 @@
+@@ -0,0 +1,561 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -3114,6 +3129,7 @@ new file mode 100644
 +
 +namespace mozilla {
 +namespace dom {
++namespace backgroundsync {
 +
 +namespace {
 +
@@ -3654,13 +3670,14 @@ new file mode 100644
 +  MaybeAllowContextToClose();
 +}
 +
++} // namespace backgroundsync
 +} // namespace dom
 +} // namespace mozilla
 diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageManager.h
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/StorageManager.h
-@@ -0,0 +1,100 @@
+@@ -0,0 +1,102 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -3674,6 +3691,7 @@ new file mode 100644
 +
 +namespace mozilla {
 +namespace dom {
++namespace backgroundsync {
 +
 +/**
 + * The StorageManager class is responsible for managing the storage of sync
@@ -3757,6 +3775,7 @@ new file mode 100644
 +  nsTArray<nsID> mPendingRequests;
 +};
 +
++} // namespace backgroundsync
 +} // namespace dom
 +} // namespace mozilla
 +
@@ -3765,7 +3784,7 @@ diff --git a/dom/backgroundsync/StorageManagerId.cpp b/dom/backgroundsync/Storag
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/StorageManagerId.cpp
-@@ -0,0 +1,173 @@
+@@ -0,0 +1,175 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -3779,6 +3798,7 @@ new file mode 100644
 +
 +namespace mozilla {
 +namespace dom {
++namespace backgroundsync {
 +
 +/**
 + * StorageManagerIdFactory
@@ -3937,6 +3957,7 @@ new file mode 100644
 +  NS_ReleaseOnMainThread(mPrincipal.forget());
 +}
 +
++} // namespace backgroundsync
 +} // namespace dom
 +} // namespace mozilla
 diff --git a/dom/backgroundsync/StorageManagerId.h b/dom/backgroundsync/StorageManagerId.h
@@ -4041,7 +4062,7 @@ diff --git a/dom/backgroundsync/moz.build b/dom/backgroundsync/moz.build
 +++ b/dom/backgroundsync/moz.build
 @@ -5,17 +5,25 @@
  
- EXPORTS.mozilla.dom += [
+ EXPORTS.mozilla.dom.backgroundsync += [
      'BackgroundSync.h'
  ]
  
