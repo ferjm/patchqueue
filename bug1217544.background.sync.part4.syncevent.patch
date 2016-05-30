@@ -1,12 +1,12 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  c35f352400054fbbcf3bb907ab66042c5c3f5b5d
+# Parent  5b18a09c3482871b693be1dfd5825032be293e30
 Bug 1217544 - Implement one-off BackgroundSync API. Part 4: Sync event. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
 --- a/dom/backgroundsync/BackgroundSync.cpp
 +++ b/dom/backgroundsync/BackgroundSync.cpp
-@@ -143,29 +143,32 @@ private:
+@@ -145,29 +145,32 @@ private:
  };
  
  // BackgroundSync
@@ -40,7 +40,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
                             false /* ownsWeak */);
      if (NS_WARN_IF(aRv.Failed())) {
        return nullptr;
-@@ -181,41 +184,46 @@ BackgroundSync::CreateOnMainThread(nsIGl
+@@ -189,41 +192,46 @@ BackgroundSync::CreateOnMainThread(nsIGl
    ref->mInnerID = window->WindowID();
  
    return ref.forget();
@@ -90,7 +90,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
    MOZ_ASSERT(aGlobal);
  
    // Register this component to PBackground.
-@@ -390,17 +398,17 @@ BackgroundSync::ExecuteOp(const SyncOpAr
+@@ -414,17 +422,17 @@ BackgroundSync::ExecuteOp(const SyncOpAr
  
  // WebIDL interface methods.
  
@@ -112,7 +112,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
 diff --git a/dom/backgroundsync/BackgroundSync.h b/dom/backgroundsync/BackgroundSync.h
 --- a/dom/backgroundsync/BackgroundSync.h
 +++ b/dom/backgroundsync/BackgroundSync.h
-@@ -47,22 +47,24 @@ class BackgroundSync final : public nsII
+@@ -50,21 +50,23 @@ class BackgroundSync final : public nsII
  public:
    NS_DECL_CYCLE_COLLECTING_ISUPPORTS
    NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_AMBIGUOUS(
@@ -127,10 +127,9 @@ diff --git a/dom/backgroundsync/BackgroundSync.h b/dom/backgroundsync/Background
    static already_AddRefed<BackgroundSync>
    CreateOnWorker(nsIGlobalObject* aGlobal,
 -                 workers::WorkerPrivate* aWorkerPrivate);
--
 +                 workers::WorkerPrivate* aWorkerPrivate,
 +                 const nsAString& aScope);
-+ 
+ 
    // Binding methods.
  
    nsIGlobalObject*
@@ -138,8 +137,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.h b/dom/backgroundsync/Background
    {
      return mGlobal;
    }
- 
-@@ -77,17 +79,18 @@ public:
+@@ -80,17 +82,18 @@ public:
    Register(const nsAString& aTag, ErrorResult& aRv);
  
    already_AddRefed<Promise>
@@ -159,7 +157,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.h b/dom/backgroundsync/Background
    already_AddRefed<Promise>
    ExecuteOp(const SyncOpArgs& aArgs, ErrorResult& aRv);
  
-@@ -100,15 +103,17 @@ private:
+@@ -103,16 +106,18 @@ private:
    RefPtr<BackgroundSyncChild> mActor;
  
    bool mShuttingDown;
@@ -173,6 +171,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.h b/dom/backgroundsync/Background
    nsTArray<RefPtr<SyncOpRunnable>> mPendingOperations;
  };
  
+ } // namespace backgroundsync
  } // namespace dom
  } // namespace mozilla
  
@@ -201,13 +200,13 @@ diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsyn
 diff --git a/dom/bindings/Bindings.conf b/dom/bindings/Bindings.conf
 --- a/dom/bindings/Bindings.conf
 +++ b/dom/bindings/Bindings.conf
-@@ -126,16 +126,22 @@ DOMInterfaces = {
- 'AudioNode' : {
-     'concrete': False,
-     'binaryNames': {
-         'channelCountMode': 'channelCountModeValue',
-         'channelInterpretation': 'channelInterpretationValue',
+@@ -131,16 +131,22 @@ DOMInterfaces = {
      },
+ },
+ 
+ 'BackgroundSync': {
+     'nativeType': 'mozilla::dom::backgroundsync::BackgroundSync',
+     'headerFile': 'mozilla/dom/backgroundsync/BackgroundSync.h',
  },
  
 +'BackgroundSyncEvent': {
@@ -855,7 +854,7 @@ diff --git a/dom/workers/ServiceWorkerPrivate.h b/dom/workers/ServiceWorkerPriva
 diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWorkerRegistration.cpp
 --- a/dom/workers/ServiceWorkerRegistration.cpp
 +++ b/dom/workers/ServiceWorkerRegistration.cpp
-@@ -807,17 +807,17 @@ ServiceWorkerRegistrationMainThread::Get
+@@ -808,17 +808,17 @@ ServiceWorkerRegistrationMainThread::Get
  
      nsCOMPtr<nsIPrincipal> principal = document->NodePrincipal();
      if (!principal) {
@@ -864,7 +863,7 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
      }
  
      mBackgroundSync = BackgroundSync::CreateOnMainThread(globalObject, principal,
--                                                   aRv);
+-                                                         aRv);
 +                                                         mScope, aRv);
    }
  
@@ -874,7 +873,7 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
  ////////////////////////////////////////////////////
  // Worker Thread implementation
  class WorkerListener final : public ServiceWorkerRegistrationListener
-@@ -1259,16 +1259,17 @@ ServiceWorkerRegistrationWorkerThread::G
+@@ -1260,16 +1260,16 @@ ServiceWorkerRegistrationWorkerThread::G
  #endif /* ! MOZ_SIMPLEPUSH */
  }
  
@@ -882,10 +881,9 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
  ServiceWorkerRegistrationWorkerThread::GetSync(ErrorResult& aRv)
  {
    if (!mBackgroundSync) {
-     mBackgroundSync = BackgroundSync::CreateOnWorker(mWorkerPrivate->GlobalScope(),
--                                                     mWorkerPrivate);
-+                                                     mWorkerPrivate,
-+                                                     mScope);
+     mBackgroundSync = BackgroundSync::CreateOnWorker(
+-        mWorkerPrivate->GlobalScope(), mWorkerPrivate);
++        mWorkerPrivate->GlobalScope(), mWorkerPrivate, mScope);
    }
  
    return mBackgroundSync;
