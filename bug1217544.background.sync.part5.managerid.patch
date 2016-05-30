@@ -1388,6 +1388,224 @@ new file mode 100644
 +} // namespace mozilla
 +
 +#endif // mozilla_dom_DBSchema_h
+diff --git a/dom/backgroundsync/QuotaClient.cpp b/dom/backgroundsync/QuotaClient.cpp
+new file mode 100644
+--- /dev/null
++++ b/dom/backgroundsync/QuotaClient.cpp
+@@ -0,0 +1,184 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#include "QuotaClient.h"
++#include "StorageManager.h"
++
++#include "mozilla/DebugOnly.h"
++#include "mozilla/dom/quota/QuotaManager.h"
++#include "mozilla/dom/quota/UsageInfo.h"
++#include "mozilla/ipc/BackgroundParent.h"
++#include "nsIFile.h"
++#include "nsISimpleEnumerator.h"
++#include "nsThreadUtils.h"
++
++namespace {
++
++using mozilla::DebugOnly;
++using mozilla::dom::ContentParentId;
++using mozilla::dom::quota::Client;
++using mozilla::dom::quota::PersistenceType;
++using mozilla::dom::quota::QuotaManager;
++using mozilla::dom::quota::UsageInfo;
++using mozilla::ipc::AssertIsOnBackgroundThread;
++
++class BackgroundSyncQuotaClient final : public Client
++{
++public:
++  virtual Type
++  GetType() override
++  {
++    return BACKGROUNDSYNC;
++  }
++
++  virtual nsresult
++  InitOrigin(PersistenceType aPersistenceType, const nsACString& aGroup,
++             const nsACString& aOrigin, UsageInfo* aUsageInfo) override
++  {
++    // The QuotaManager passes a nullptr UsageInfo if there is no quota being
++    // enforced against the origin.
++    if (!aUsageInfo) {
++      return NS_OK;
++    }
++
++    return GetUsageForOrigin(aPersistenceType, aGroup, aOrigin, aUsageInfo);
++  }
++
++  virtual nsresult
++  GetUsageForOrigin(PersistenceType aPersistenceType, const nsACString& aGroup,
++                    const nsACString& aOrigin, UsageInfo* aUsageInfo) override
++  {
++    MOZ_ASSERT(aUsageInfo);
++
++    QuotaManager* qm = QuotaManager::Get();
++    MOZ_ASSERT(qm);
++
++    nsCOMPtr<nsIFile> dir;
++    nsresult rv = qm->GetDirectoryForOrigin(aPersistenceType, aOrigin,
++                                            getter_AddRefs(dir));
++    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++    rv = dir->Append(NS_LITERAL_STRING(BACKGROUNDSYNC_DIRECTORY_NAME));
++    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++    nsCOMPtr<nsISimpleEnumerator> entries;
++    rv = dir->GetDirectoryEntries(getter_AddRefs(entries));
++    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++    bool hasMore;
++    while (NS_SUCCEEDED(rv = entries->HasMoreElements(&hasMore)) && hasMore &&
++           !aUsageInfo->Canceled()) {
++      nsCOMPtr<nsISupports> entry;
++      rv = entries->GetNext(getter_AddRefs(entry));
++      if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++      nsCOMPtr<nsIFile> file = do_QueryInterface(entry);
++
++      nsAutoString leafName;
++      rv = file->GetLeafName(leafName);
++      if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++      bool isDir;
++      rv = file->IsDirectory(&isDir);
++      if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++      if (isDir) {
++        NS_WARNING("Unknown BackgroundSync directory found!");
++        continue;
++      }
++
++      // Ignore transient sqlite files and marker files
++      if (leafName.EqualsLiteral("registrations.sqlite-journal") ||
++          leafName.EqualsLiteral("registrations.sqlite-shm") ||
++          leafName.Find(NS_LITERAL_CSTRING("registrations.sqlite-mj"), false, 0, 0) == 0 ||
++          leafName.EqualsLiteral("context_open.marker")) {
++        continue;
++      }
++
++      if (leafName.EqualsLiteral("registrations.sqlite") ||
++          leafName.EqualsLiteral("registrations.sqlite-wal")) {
++        int64_t fileSize;
++        rv = file->GetFileSize(&fileSize);
++        if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++        MOZ_ASSERT(fileSize >= 0);
++
++        aUsageInfo->AppendToDatabaseUsage(fileSize);
++        continue;
++      }
++
++      NS_WARNING("Unknown BackgroundSync file found!");
++    }
++
++    return NS_OK;
++  }
++
++  virtual void
++  OnOriginClearCompleted(PersistenceType aPersistenceType,
++                         const nsACString& aOrigin) override
++  { }
++
++  virtual void
++  ReleaseIOThreadObjects() override
++  {
++    // Nothing to do here as the StorageContext handles cleaning everything up
++    // automatically.
++  }
++
++  virtual void
++  AbortOperations(const nsACString& aOrigin) override
++  {
++    AssertIsOnBackgroundThread();
++
++    StorageManager::Abort(aOrigin);
++  }
++
++  virtual void
++  AbortOperationsForProcess(ContentParentId aContentParentId) override
++  { }
++
++  virtual void
++  StartIdleMaintenance() override
++  { }
++
++  virtual void
++  StopIdleMaintenance() override
++  { }
++
++  virtual void
++  ShutdownWorkThreads() override
++  {
++    AssertIsOnBackgroundThread();
++
++    // spins the event loop and synchronously shuts down all StorageManagers.
++    StorageManager::ShutdownAll();
++  }
++
++private:
++  ~BackgroundSyncQuotaClient()
++  {
++    AssertIsOnBackgroundThread();
++  }
++
++  NS_INLINE_DECL_REFCOUNTING(BackgroundSyncQuotaClient, override)
++};
++
++} // namespace
++
++namespace mozilla {
++namespace dom {
++namespace backgroundsync {
++
++already_AddRefed<quota::Client> CreateQuotaClient()
++{
++  AssertIsOnBackgroundThread();
++
++  RefPtr<BackgroundSyncQuotaClient> ref = new BackgroundSyncQuotaClient();
++  return ref.forget();
++}
++
++} // namespace backgroundsync
++} // namespace dom
++} // namespace mozilla
+diff --git a/dom/backgroundsync/QuotaClient.h b/dom/backgroundsync/QuotaClient.h
+new file mode 100644
+--- /dev/null
++++ b/dom/backgroundsync/QuotaClient.h
+@@ -0,0 +1,24 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#ifndef mozilla_dom_backgroundsync_QuotaClient_h
++#define mozilla_dom_backgroundsync_QuotaClient_h
++
++#include "mozilla/Attributes.h"
++#include "mozilla/dom/quota/Client.h"
++
++namespace mozilla {
++namespace dom {
++namespace backgroundsync {
++
++already_AddRefed<quota::Client>
++CreateQuotaClient();
++
++} // namespace backgroundsync
++} // namespace dom
++} // namespace mozilla
++
++#endif // mozilla_dom_backgroundsync_QuotaClient_h
 diff --git a/dom/backgroundsync/StorageAction.cpp b/dom/backgroundsync/StorageAction.cpp
 new file mode 100644
 --- /dev/null
@@ -1805,7 +2023,7 @@ new file mode 100644
 +                                     mQuotaInfo.mGroup,
 +                                     mQuotaInfo.mOrigin,
 +                                     mQuotaInfo.mIsApp,
-+                                     quota::Client::DOMCACHE,
++                                     quota::Client::BACKGROUNDSYNC,
 +                                     /* aExclusive */ false,
 +                                     this);
 +}
@@ -3821,7 +4039,7 @@ new file mode 100644
 diff --git a/dom/backgroundsync/moz.build b/dom/backgroundsync/moz.build
 --- a/dom/backgroundsync/moz.build
 +++ b/dom/backgroundsync/moz.build
-@@ -5,17 +5,24 @@
+@@ -5,17 +5,25 @@
  
  EXPORTS.mozilla.dom += [
      'BackgroundSync.h'
@@ -3835,6 +4053,7 @@ diff --git a/dom/backgroundsync/moz.build b/dom/backgroundsync/moz.build
 +    'DBAction.cpp',
 +    'DBConnection.cpp',
 +    'DBSchema.cpp',
++    'QuotaClient.cpp',
 +    'StorageAction.cpp',
 +    'StorageContext.cpp',
 +    'StorageManager.cpp',
@@ -3847,6 +4066,136 @@ diff --git a/dom/backgroundsync/moz.build b/dom/backgroundsync/moz.build
  ]
  
  LOCAL_INCLUDES += [
+diff --git a/dom/quota/ActorsParent.cpp b/dom/quota/ActorsParent.cpp
+--- a/dom/quota/ActorsParent.cpp
++++ b/dom/quota/ActorsParent.cpp
+@@ -23,16 +23,17 @@
+ 
+ #include <algorithm>
+ #include "GeckoProfiler.h"
+ #include "mozilla/Atomics.h"
+ #include "mozilla/BasePrincipal.h"
+ #include "mozilla/CondVar.h"
+ #include "mozilla/dom/PContent.h"
+ #include "mozilla/dom/asmjscache/AsmJSCache.h"
++#include "mozilla/dom/backgroundsync/QuotaClient.h"
+ #include "mozilla/dom/cache/QuotaClient.h"
+ #include "mozilla/dom/indexedDB/ActorsParent.h"
+ #include "mozilla/dom/quota/PQuotaParent.h"
+ #include "mozilla/dom/quota/PQuotaRequestParent.h"
+ #include "mozilla/dom/quota/PQuotaUsageRequestParent.h"
+ #include "mozilla/ipc/BackgroundParent.h"
+ #include "mozilla/ipc/BackgroundUtils.h"
+ #include "mozilla/IntegerRange.h"
+@@ -3035,25 +3036,27 @@ QuotaManager::Init(const nsAString& aBas
+   // Make a timer here to avoid potential failures later. We don't actually
+   // initialize the timer until shutdown.
+   mShutdownTimer = do_CreateInstance(NS_TIMER_CONTRACTID);
+   if (NS_WARN_IF(!mShutdownTimer)) {
+     return NS_ERROR_FAILURE;
+   }
+ 
+   static_assert(Client::IDB == 0 && Client::ASMJS == 1 && Client::DOMCACHE == 2 &&
+-                Client::TYPE_MAX == 3, "Fix the registration!");
++                Client::BACKGROUNDSYNC == 3 && Client::TYPE_MAX == 4,
++                "Fix the registration!");
+ 
+   MOZ_ASSERT(mClients.Capacity() == Client::TYPE_MAX,
+              "Should be using an auto array with correct capacity!");
+ 
+   // Register clients.
+   mClients.AppendElement(indexedDB::CreateQuotaClient());
+   mClients.AppendElement(asmjscache::CreateClient());
+   mClients.AppendElement(cache::CreateQuotaClient());
++  mClients.AppendElement(backgroundsync::CreateQuotaClient());
+ 
+   return NS_OK;
+ }
+ 
+ void
+ QuotaManager::Shutdown()
+ {
+   AssertIsOnOwningThread();
+diff --git a/dom/quota/Client.h b/dom/quota/Client.h
+--- a/dom/quota/Client.h
++++ b/dom/quota/Client.h
+@@ -13,16 +13,17 @@
+ 
+ #include "PersistenceType.h"
+ 
+ class nsIRunnable;
+ 
+ #define IDB_DIRECTORY_NAME "idb"
+ #define ASMJSCACHE_DIRECTORY_NAME "asmjs"
+ #define DOMCACHE_DIRECTORY_NAME "cache"
++#define BACKGROUNDSYNC_DIRECTORY_NAME "backgroundsync"
+ 
+ BEGIN_QUOTA_NAMESPACE
+ 
+ class UsageInfo;
+ 
+ // An abstract interface for quota manager clients.
+ // Each storage API must provide an implementation of this interface in order
+ // to participate in centralized quota and storage handling.
+@@ -36,16 +37,17 @@ public:
+   Release() = 0;
+ 
+   enum Type {
+     IDB = 0,
+     //LS,
+     //APPCACHE,
+     ASMJS,
+     DOMCACHE,
++    BACKGROUNDSYNC,
+     TYPE_MAX
+   };
+ 
+   virtual Type
+   GetType() = 0;
+ 
+   static nsresult
+   TypeToText(Type aType, nsAString& aText)
+@@ -58,16 +60,20 @@ public:
+       case ASMJS:
+         aText.AssignLiteral(ASMJSCACHE_DIRECTORY_NAME);
+         break;
+ 
+       case DOMCACHE:
+         aText.AssignLiteral(DOMCACHE_DIRECTORY_NAME);
+         break;
+ 
++      case BACKGROUNDSYNC:
++        aText.AssignLiteral(BACKGROUNDSYNC_DIRECTORY_NAME);
++        break;
++
+       case TYPE_MAX:
+       default:
+         NS_NOTREACHED("Bad id value!");
+         return NS_ERROR_UNEXPECTED;
+     }
+ 
+     return NS_OK;
+   }
+@@ -79,16 +85,19 @@ public:
+       aType = IDB;
+     }
+     else if (aText.EqualsLiteral(ASMJSCACHE_DIRECTORY_NAME)) {
+       aType = ASMJS;
+     }
+     else if (aText.EqualsLiteral(DOMCACHE_DIRECTORY_NAME)) {
+       aType = DOMCACHE;
+     }
++    else if (aText.EqualsLiteral(BACKGROUNDSYNC_DIRECTORY_NAME)) {
++      aType = BACKGROUNDSYNC;
++    }
+     else {
+       return NS_ERROR_FAILURE;
+     }
+ 
+     return NS_OK;
+   }
+ 
+   // Methods which are called on the IO thred.
 diff --git a/ipc/glue/BackgroundChildImpl.cpp b/ipc/glue/BackgroundChildImpl.cpp
 --- a/ipc/glue/BackgroundChildImpl.cpp
 +++ b/ipc/glue/BackgroundChildImpl.cpp
