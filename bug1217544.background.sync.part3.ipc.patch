@@ -1,12 +1,12 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  fa9771995fa3eb0d67660ab2a712c5ade77f5b01
+# Parent  7a3d8f732f9ac0b9ca345073ef8ca0c2ef2a7aa8
 Bug 1217544 - Implement one-off BackgroundSync API. Part 3: IPC. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
 --- a/dom/backgroundsync/BackgroundSync.cpp
 +++ b/dom/backgroundsync/BackgroundSync.cpp
-@@ -1,86 +1,298 @@
+@@ -1,88 +1,300 @@
  /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
  /* vim: set ts=8 sts=2 et sw=2 tw=80: */
  /* This Source Code Form is subject to the terms of the Mozilla Public
@@ -36,6 +36,8 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
  namespace dom {
  
  using namespace workers;
+ 
+ namespace backgroundsync {
  
 +// Helpers
 +
@@ -304,7 +306,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
  {
 +  MOZ_ASSERT(IsBackgroundSyncThread());
 +
-   return BackgroundSyncBinding::Wrap(aCx, this, aGivenProto);
+   return mozilla::dom::BackgroundSyncBinding::Wrap(aCx, this, aGivenProto);
  }
  
  // static
@@ -312,7 +314,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
  BackgroundSync::PrefEnabled(JSContext* aCx, JSObject* aObj)
  {
    using mozilla::dom::workers::WorkerPrivate;
-@@ -95,42 +307,137 @@ BackgroundSync::PrefEnabled(JSContext* a
+@@ -97,43 +309,138 @@ BackgroundSync::PrefEnabled(JSContext* a
    WorkerPrivate* workerPrivate = GetWorkerPrivateFromContext(aCx);
    if (!workerPrivate) {
      return false;
@@ -456,12 +458,13 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
 +  NS_INTERFACE_MAP_ENTRY(nsIObserver)
  NS_INTERFACE_MAP_END
  
+ } // namespace backgroundsync
  } // namespace dom
  } // namespace mozilla
 diff --git a/dom/backgroundsync/BackgroundSync.h b/dom/backgroundsync/BackgroundSync.h
 --- a/dom/backgroundsync/BackgroundSync.h
 +++ b/dom/backgroundsync/BackgroundSync.h
-@@ -5,43 +5,54 @@
+@@ -5,45 +5,57 @@
   * You can obtain one at http://mozilla.org/MPL/2.0/. */
  
  #ifndef mozilla_dom_BackgroundSync_h
@@ -494,11 +497,13 @@ diff --git a/dom/backgroundsync/BackgroundSync.h b/dom/backgroundsync/Background
  } // namespace workers
  
  class Promise;
--
+ 
+ namespace backgroundsync {
+ 
 -class BackgroundSync final : public nsISupports
 +class BackgroundSyncChild;
 +class SyncOpRunnable;
-+ 
++
 +class BackgroundSync final : public nsIIPCBackgroundChildCreateCallback
 +                           , public nsIObserver
                             , public nsWrapperCache
@@ -519,7 +524,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.h b/dom/backgroundsync/Background
  
    static already_AddRefed<BackgroundSync>
    CreateOnWorker(nsIGlobalObject* aGlobal,
-@@ -58,28 +69,46 @@ public:
+@@ -60,29 +72,47 @@ public:
    JSObject*
    WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
  
@@ -564,6 +569,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.h b/dom/backgroundsync/Background
 +  nsTArray<RefPtr<SyncOpRunnable>> mPendingOperations;
  };
  
+ } // namespace backgroundsync
  } // namespace dom
  } // namespace mozilla
  
@@ -572,7 +578,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncChild.cpp b/dom/backgroundsync/Bac
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncChild.cpp
-@@ -0,0 +1,131 @@
+@@ -0,0 +1,133 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -589,6 +595,7 @@ new file mode 100644
 +using namespace ipc;
 +
 +namespace dom {
++namespace backgroundsync {
 +
 +struct BackgroundSyncChild::PendingRequest final
 +{
@@ -702,13 +709,14 @@ new file mode 100644
 +  }
 +}
 +
++} // namespace backgroundsync
 +} // namespace dom
 +} // namespace mozilla
 diff --git a/dom/backgroundsync/BackgroundSyncChild.h b/dom/backgroundsync/BackgroundSyncChild.h
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncChild.h
-@@ -0,0 +1,62 @@
+@@ -0,0 +1,64 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -732,6 +740,7 @@ new file mode 100644
 +} // namespace ipc
 +
 +namespace dom {
++namespace backgroundsync {
 +
 +class BackgroundSync;
 +
@@ -767,6 +776,7 @@ new file mode 100644
 +  nsClassHashtable<nsIDHashKey, PendingRequest> mPendingRequests;
 +};
 +
++} // namespace backgroundsync
 +} // namespace dom
 +} // namespace mozilla
 +
@@ -834,7 +844,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncParent.cpp
-@@ -0,0 +1,82 @@
+@@ -0,0 +1,84 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -851,6 +861,7 @@ new file mode 100644
 +using namespace ipc;
 +
 +namespace dom {
++namespace backgroundsync {
 +
 +BackgroundSyncParent::BackgroundSyncParent()
 +{
@@ -915,13 +926,14 @@ new file mode 100644
 +  Unused << SendResponse(aRequestId, aResponse);
 +}
 +
++} // namespace backgroundsync
 +} // namespace dom
 +} // namespace mozilla
 diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/BackgroundSyncParent.h
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncParent.h
-@@ -0,0 +1,48 @@
+@@ -0,0 +1,50 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -943,6 +955,7 @@ new file mode 100644
 +} // namespace ipc
 +
 +namespace dom {
++namespace backgroundsync {
 +
 +class BackgroundSyncParent final : public PBackgroundSyncParent
 +{
@@ -964,6 +977,7 @@ new file mode 100644
 +  virtual void ActorDestroy(ActorDestroyReason aWhy) override;
 +};
 +
++} // namespace backgroundsync
 +} // namespace dom
 +} // namespace mozilla
 +
@@ -1010,7 +1024,7 @@ diff --git a/dom/backgroundsync/moz.build b/dom/backgroundsync/moz.build
  # License, v. 2.0. If a copy of the MPL was not distributed with this
  # file, You can obtain one at http://mozilla.org/MPL/2.0/.
  
- EXPORTS.mozilla.dom += [
+ EXPORTS.mozilla.dom.backgroundsync += [
      'BackgroundSync.h'
  ]
  
@@ -1062,7 +1076,7 @@ diff --git a/ipc/glue/BackgroundChildImpl.cpp b/ipc/glue/BackgroundChildImpl.cpp
  using mozilla::dom::cache::PCacheStorageChild;
  using mozilla::dom::cache::PCacheStreamControlChild;
  using mozilla::dom::PNuwaChild;
-+using mozilla::dom::BackgroundSyncChild;
++using mozilla::dom::backgroundsync::BackgroundSyncChild;
  
  // -----------------------------------------------------------------------------
  // BackgroundChildImpl::ThreadLocal
@@ -1163,7 +1177,7 @@ diff --git a/ipc/glue/BackgroundParentImpl.cpp b/ipc/glue/BackgroundParentImpl.c
  using mozilla::dom::NuwaParent;
  using mozilla::dom::PMessagePortParent;
  using mozilla::dom::PNuwaParent;
-+using mozilla::dom::BackgroundSyncParent;
++using mozilla::dom::backgroundsync::BackgroundSyncParent;
  using mozilla::dom::UDPSocketParent;
  
  namespace {
@@ -1181,7 +1195,7 @@ diff --git a/ipc/glue/BackgroundParentImpl.cpp b/ipc/glue/BackgroundParentImpl.c
  using mozilla::dom::ContentParent;
  using mozilla::dom::BroadcastChannelParent;
  using mozilla::dom::ServiceWorkerRegistrationData;
-+using mozilla::dom::BackgroundSyncParent;
++using mozilla::dom::backgroundsync::BackgroundSyncParent;
  using mozilla::dom::workers::ServiceWorkerManagerParent;
  
  BackgroundParentImpl::BackgroundParentImpl()
