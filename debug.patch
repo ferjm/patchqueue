@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  d51ba67c3f72de32267a343c4ea558b4d9cc13f3
+# Parent  95e3ac9d75751ac82e81c2ccfb613f30fd57ea79
 
 diff --git a/dom/backgroundsync/StorageContext.cpp b/dom/backgroundsync/StorageContext.cpp
 --- a/dom/backgroundsync/StorageContext.cpp
@@ -537,11 +537,11 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
    }
  };
  } // anonymous namespace
-@@ -295,16 +296,17 @@ protected:
+@@ -294,16 +295,17 @@ protected:
+   {}
  
-   // XXX We need to get a ErrorResult&& here.
    virtual void
-   Complete() = 0;
+   Complete(nsresult aRv) = 0;
  
    virtual void
    CompleteOnInitiatingThread(nsresult aRv) override
@@ -549,13 +549,13 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
 +    printf_stderr("StorageManager::BaseAction::CompleteOnInitiatingThread\n");
      NS_ASSERT_OWNINGTHREAD(StorageManager::BaseAction);
  
-     Complete();
+     Complete(aRv);
  
      // Ensure we release the manager on the initiating thread.
      mManager = nullptr;
    }
  
-@@ -314,53 +316,61 @@ protected:
+@@ -313,58 +315,66 @@ protected:
  
  // ---------------------------------------------------------------------------
  
@@ -579,10 +579,15 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
    }
  
    virtual void
-   Complete() override
+   Complete(nsresult aRv) override
    {
 +    printf_stderr("RegisterAction::Complete\n");
-     mManager->OnRequestComplete(mRequestId);
+     if (NS_FAILED(aRv)) {
+       mManager->OnRequestComplete(mRequestId,
+                                   SyncOpError(static_cast<uint32_t>(aRv)));
+     } else {
+       mManager->OnRequestComplete(mRequestId, SyncRegisterResponse());
+     }
    }
  };
  
@@ -608,18 +613,18 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
    }
  
    virtual void
-   Complete() override
+   Complete(nsresult aRv) override
    {
 +    printf_stderr("GetTagsAction::Complete\n");
-     mManager->OnRequestComplete(mRequestId);
+     if (NS_FAILED(aRv)) {
+       mManager->OnRequestComplete(mRequestId,
+                                   SyncOpError(static_cast<uint32_t>(aRv)));
+     } else {
+       // XXX s/SyncRegisterResponse/SyncGetTagsResponse
+       mManager->OnRequestComplete(mRequestId, SyncRegisterResponse());
+     }
    }
- };
- 
- // ---------------------------------------------------------------------------
- 
- // static
- nsresult
-@@ -384,16 +394,17 @@ StorageManager::StorageManager(Backgroun
+@@ -394,16 +404,17 @@ StorageManager::StorageManager(Backgroun
  {
    MOZ_ASSERT(mService);
    MOZ_ASSERT(mManagerId);
@@ -637,7 +642,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
  
  /*  nsCOMPtr<nsIThread> ioThread;
    mIOThread.swap(ioThread);
-@@ -402,16 +413,17 @@ StorageManager::~StorageManager()
+@@ -412,16 +423,17 @@ StorageManager::~StorageManager()
    // shutdown. Defer this to the main thread, instead.
    MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(
          NewRunnableMethod(ioThread, &nsIThread::Shutdown)));*/
@@ -655,7 +660,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
    }
  
    // Create the context immediately. Since there can at most be one
-@@ -421,32 +433,34 @@ StorageManager::Init(StorageManager* aOl
+@@ -431,32 +443,34 @@ StorageManager::Init(StorageManager* aOl
    RefPtr<StorageContext> ref = StorageContext::Create(this, mIOThread,
                                                        setupAction, oldContext);
    mContext = ref;
@@ -690,7 +695,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
    if (mShuttingDown) {
      return;
    }
-@@ -464,25 +478,28 @@ StorageManager::Shutdown()
+@@ -474,25 +488,28 @@ StorageManager::Shutdown()
      RefPtr<StorageContext> context = mContext;
      context->CancelAll();
    }
@@ -719,7 +724,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
    // going idle or the underlying storage being invalidated, we should know we
    // are closing before the StorageContext is destroyed.
    MOZ_ASSERT(mState == Closing);
-@@ -493,32 +510,34 @@ StorageManager::RemoveStorageContext(Sto
+@@ -503,32 +520,34 @@ StorageManager::RemoveStorageContext(Sto
    // Factory list. We don't need to block shutdown by stayin in the list
    // any more.
    Factory::Remove(this);
@@ -752,9 +757,9 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
    mPendingRequests.AppendElement(aRequestId);
  
    if (NS_WARN_IF(mState == Closing)) {
-     OnRequestComplete(aRequestId);
-     return;
-@@ -527,16 +546,17 @@ StorageManager::ExecuteRequest(const nsI
+     OnRequestComplete(aRequestId,
+                       SyncOpError(static_cast<uint32_t>(NS_ERROR_ABORT)));
+@@ -538,16 +557,17 @@ StorageManager::ExecuteRequest(const nsI
    RefPtr<StorageContext> context = mContext;
    MOZ_ASSERT(!context->IsCanceled());
  
@@ -772,14 +777,14 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
        action = new GetTagsAction(aRequestId, this);
        break;
      }
-@@ -547,16 +567,17 @@ StorageManager::ExecuteRequest(const nsI
-   }
+@@ -559,16 +579,17 @@ StorageManager::ExecuteRequest(const nsI
  
    context->Dispatch(action);
  }
  
  void
- StorageManager::OnRequestComplete(const nsID& aRequestId)
+ StorageManager::OnRequestComplete(const nsID& aRequestId,
+                                   const SyncOpResponse& aResponse)
  {
 +  printf_stderr("StorageManager::OnRequestComplete\n");
    NS_ASSERT_OWNINGTHREAD(StorageManager);
@@ -789,4 +794,4 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
  
    MaybeAllowContextToClose();
  
-   mService->OnRequestComplete(aRequestId);
+   mService->OnRequestComplete(aRequestId, aResponse);
