@@ -7,7 +7,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSync.cpp
-@@ -0,0 +1,135 @@
+@@ -0,0 +1,138 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -33,6 +33,8 @@ new file mode 100644
 +namespace dom {
 +
 +using namespace workers;
++
++namespace backgroundsync {
 +
 +// BackgroundSync
 +
@@ -85,7 +87,7 @@ new file mode 100644
 +JSObject*
 +BackgroundSync::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 +{
-+  return BackgroundSyncBinding::Wrap(aCx, this, aGivenProto);
++  return mozilla::dom::BackgroundSyncBinding::Wrap(aCx, this, aGivenProto);
 +}
 +
 +// static
@@ -141,13 +143,14 @@ new file mode 100644
 +  NS_INTERFACE_MAP_ENTRY(nsISupports)
 +NS_INTERFACE_MAP_END
 +
++} // namespace backgroundsync
 +} // namespace dom
 +} // namespace mozilla
 diff --git a/dom/backgroundsync/BackgroundSync.h b/dom/backgroundsync/BackgroundSync.h
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSync.h
-@@ -0,0 +1,84 @@
+@@ -0,0 +1,87 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -181,8 +184,10 @@ new file mode 100644
 +
 +class Promise;
 +
++namespace backgroundsync {
++
 +class BackgroundSync final : public nsISupports
-+                        , public nsWrapperCache
++                           , public nsWrapperCache
 +{
 +public:
 +  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
@@ -228,6 +233,7 @@ new file mode 100644
 +  nsAutoPtr<mozilla::ipc::PrincipalInfo> mPrincipalInfo;
 +};
 +
++} // namespace backgroundsync
 +} // namespace dom
 +} // namespace mozilla
 +
@@ -242,7 +248,7 @@ new file mode 100644
 +# License, v. 2.0. If a copy of the MPL was not distributed with this
 +# file, You can obtain one at http://mozilla.org/MPL/2.0/.
 +
-+EXPORTS.mozilla.dom += [
++EXPORTS.mozilla.dom.backgroundsync += [
 +    'BackgroundSync.h'
 +]
 +
@@ -257,6 +263,31 @@ new file mode 100644
 +include('/ipc/chromium/chromium-config.mozbuild')
 +
 +FINAL_LIBRARY = 'xul'
+diff --git a/dom/bindings/Bindings.conf b/dom/bindings/Bindings.conf
+--- a/dom/bindings/Bindings.conf
++++ b/dom/bindings/Bindings.conf
+@@ -126,16 +126,21 @@ DOMInterfaces = {
+ 'AudioNode' : {
+     'concrete': False,
+     'binaryNames': {
+         'channelCountMode': 'channelCountModeValue',
+         'channelInterpretation': 'channelInterpretationValue',
+     },
+ },
+ 
++'BackgroundSync': {
++    'nativeType': 'mozilla::dom::backgroundsync::BackgroundSync',
++    'headerFile': 'mozilla/dom/backgroundsync/BackgroundSync.h',
++},
++
+ 'BarProp': {
+     'headerFile': 'mozilla/dom/BarProps.h',
+ },
+ 
+ 'Blob': {
+     'headerFile': 'mozilla/dom/File.h',
+ },
+ 
 diff --git a/dom/moz.build b/dom/moz.build
 --- a/dom/moz.build
 +++ b/dom/moz.build
@@ -315,7 +346,7 @@ new file mode 100644
 +*/
 +
 +[Exposed=(Window,Worker),
-+ Func="mozilla::dom::BackgroundSync::PrefEnabled"]
++ Func="mozilla::dom::backgroundsync::BackgroundSync::PrefEnabled"]
 +interface BackgroundSync {
 +  [Throws]
 +  Promise<void> register(DOMString tag);
