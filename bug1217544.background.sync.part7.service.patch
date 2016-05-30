@@ -3,6 +3,27 @@
 # Parent  d2f8d6fe85b76cdfeeb5f694e021722874d750e8
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: BackgroundSyncService. r=baku
 
+diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh
+--- a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh
++++ b/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh
+@@ -27,17 +27,16 @@ union SyncOpArgs
+ struct SyncOp
+ {
+   PrincipalInfo mPrincipal;
+   SyncOpArgs mArgs;
+ };
+ 
+ struct SyncRegisterResponse
+ {
+-  bool mSuccess;
+ };
+ 
+ struct SyncGetTagsResponse
+ {
+   nsString[] mTags;
+ };
+ 
+ struct SyncOpError
 diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/BackgroundSyncParent.cpp
 --- a/dom/backgroundsync/BackgroundSyncParent.cpp
 +++ b/dom/backgroundsync/BackgroundSyncParent.cpp
@@ -26,7 +47,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
  namespace dom {
  
 +namespace {
-+  uint64_t sBackgroundSyncManagerParentId = 0;
++  uint64_t sBackgroundSyncManagerParentId = 1;
 +}
 +
  class BackgroundSyncParent::PendingRequest final
@@ -237,7 +258,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncService.cpp
-@@ -0,0 +1,195 @@
+@@ -0,0 +1,213 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -289,15 +310,19 @@ new file mode 100644
 +  mStorageManagers.Put(aRequestId, ref);
 +}
 +
-+void
++uint64_t
 +BackgroundSyncService::ReleaseStorageManagerRef(const nsID& aRequestId)
 +{
 +  // It is possible that we call OnRequestComplete before AddStorageManagerRef
 +  if (!mStorageManagers.Contains(aRequestId)) {
-+    return;
++    return 0;
 +  }
 +  nsAutoPtr<StorageManagerRef> doomed;
++  StorageManagerRef* ref;
++  mStorageManagers.Get(aRequestId, &ref);
++  uint64_t actorId = ref->mActorId;
 +  mStorageManagers.RemoveAndForget(aRequestId, doomed);
++  return actorId;
 +}
 +
 +void
@@ -396,21 +421,35 @@ new file mode 100644
 +                                            aManagerId,
 +                                            getter_AddRefs(manager));
 +  if (NS_WARN_IF(NS_FAILED(rv))) {
-+    // XXX Notify error to actor.
-+    return;
++    return Response(aActorId, aRequestId,
++                    SyncOpError(static_cast<uint32_t>(NS_ERROR_UNEXPECTED)));
 +  }
 +
 +  AddStorageManagerRef(aRequestId, aActorId, manager);
 +
 +  manager->ExecuteRequest(aRequestId, aOp);
-+
-+  printf_stderr("YAY\n");
 +}
 +
 +void
-+BackgroundSyncService::OnRequestComplete(const nsID& aRequestId)
++BackgroundSyncService::Response(const uint64_t aActorId,
++                                const nsID& aRequestId,
++                                const SyncOpResponse& aResponse)
 +{
-+  ReleaseStorageManagerRef(aRequestId);
++  for (auto iter = mBackgroundSyncActors.Iter(); !iter.Done(); iter.Next()) {
++    RefPtr<BackgroundSyncParent> parent = iter.Get()->GetKey();
++    MOZ_ASSERT(parent);
++    if (parent->Id() != aActorId || parent->ActorDestroyed()) {
++      continue;
++    }
++    parent->NotifyResponse(aRequestId, aResponse);
++  }
++}
++
++void
++BackgroundSyncService::OnRequestComplete(const nsID& aRequestId,
++                                         const SyncOpResponse& aResponse)
++{
++  Response(ReleaseStorageManagerRef(aRequestId), aRequestId, aResponse);
 +}
 +
 +/**
@@ -437,7 +476,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.h b/dom/backgroundsync/Bac
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncService.h
-@@ -0,0 +1,64 @@
+@@ -0,0 +1,69 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -477,12 +516,17 @@ new file mode 100644
 +
 +  void Init();
 +
-+  void OnRequestComplete(const nsID& aRequestId);
++  void Response(const uint64_t aActorId,
++                const nsID& aRequestId,
++                const SyncOpResponse& aResponse);
++
++  void OnRequestComplete(const nsID& aRequestId,
++                         const SyncOpResponse& aResponse);
 +
 +  void AddStorageManagerRef(const nsID& aRequestId,
 +                            const uint64_t aActorId,
 +                            StorageManager* aStorageManager);
-+  void ReleaseStorageManagerRef(const nsID& aRequestId);
++  uint64_t ReleaseStorageManagerRef(const nsID& aRequestId);
 +  void ReleaseStorageManagerRef(const uint64_t aActorId);
 +
 +  struct StorageManagerRef;
@@ -544,8 +588,82 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
        ref->Init(oldManager);
  
        MOZ_ASSERT(!sFactory->mManagerList.Contains(ref));
-@@ -358,41 +359,47 @@ public:
-     mManager->OnRequestComplete(mRequestId);
+@@ -287,26 +288,25 @@ class StorageManager::BaseAction : publi
+ {
+ protected:
+   BaseAction(const nsID& aRequestId, StorageManager* aManager)
+     : SyncDBAction(DBAction::Existing)
+     , mRequestId(aRequestId)
+     , mManager(aManager)
+   {}
+ 
+-  // XXX We need to get a ErrorResult&& here.
+   virtual void
+-  Complete() = 0;
++  Complete(nsresult aRv) = 0;
+ 
+   virtual void
+   CompleteOnInitiatingThread(nsresult aRv) override
+   {
+     NS_ASSERT_OWNINGTHREAD(StorageManager::BaseAction);
+ 
+-    Complete();
++    Complete(aRv);
+ 
+     // Ensure we release the manager on the initiating thread.
+     mManager = nullptr;
+   }
+ 
+   const nsID mRequestId;
+   RefPtr<StorageManager> mManager;
+ };
+@@ -324,19 +324,24 @@ public:
+   RunSyncOnTarget(const QuotaInfo& aQuotaInfo,
+                   mozIStorageConnection* aConn) override
+   {
+     // XXX
+     return NS_OK;
+   }
+ 
+   virtual void
+-  Complete() override
++  Complete(nsresult aRv) override
+   {
+-    mManager->OnRequestComplete(mRequestId);
++    if (NS_FAILED(aRv)) {
++      mManager->OnRequestComplete(mRequestId,
++                                  SyncOpError(static_cast<uint32_t>(aRv)));
++    } else {
++      mManager->OnRequestComplete(mRequestId, SyncRegisterResponse());
++    }
+   }
+ };
+ 
+ // ---------------------------------------------------------------------------
+ 
+ class StorageManager::GetTagsAction final : public StorageManager::BaseAction
+ {
+ public:
+@@ -348,51 +353,63 @@ public:
+   RunSyncOnTarget(const QuotaInfo& aQuotaInfo,
+                   mozIStorageConnection* aConn) override
+   {
+     // XXX
+     return NS_OK;
+   }
+ 
+   virtual void
+-  Complete() override
++  Complete(nsresult aRv) override
+   {
+-    mManager->OnRequestComplete(mRequestId);
++    if (NS_FAILED(aRv)) {
++      mManager->OnRequestComplete(mRequestId,
++                                  SyncOpError(static_cast<uint32_t>(aRv)));
++    } else {
++      // XXX s/SyncRegisterResponse/SyncGetTagsResponse
++      mManager->OnRequestComplete(mRequestId, SyncRegisterResponse());
++    }
    }
  };
  
@@ -596,9 +714,38 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
    MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(
          NewRunnableMethod(ioThread, &nsIThread::Shutdown)));*/
  }
-@@ -545,15 +552,15 @@ StorageManager::ExecuteRequest(const nsI
+@@ -508,17 +525,18 @@ void
+ StorageManager::ExecuteRequest(const nsID& aRequestId, const SyncOp& aOp)
+ {
+   NS_ASSERT_OWNINGTHREAD(StorageManager);
+   MOZ_ASSERT(mContext);
+ 
+   mPendingRequests.AppendElement(aRequestId);
+ 
+   if (NS_WARN_IF(mState == Closing)) {
+-    OnRequestComplete(aRequestId);
++    OnRequestComplete(aRequestId,
++                      SyncOpError(static_cast<uint32_t>(NS_ERROR_ABORT)));
+     return;
+   }
+ 
+   RefPtr<StorageContext> context = mContext;
+   MOZ_ASSERT(!context->IsCanceled());
+ 
+   RefPtr<StorageAction> action;
+ 
+@@ -538,22 +556,23 @@ StorageManager::ExecuteRequest(const nsI
+       MOZ_CRASH("Unknown BackgroundSync request");
+     }
+   }
+ 
+   context->Dispatch(action);
+ }
+ 
  void
- StorageManager::OnRequestComplete(const nsID& aRequestId)
+-StorageManager::OnRequestComplete(const nsID& aRequestId)
++StorageManager::OnRequestComplete(const nsID& aRequestId,
++                                  const SyncOpResponse& aResponse)
  {
    NS_ASSERT_OWNINGTHREAD(StorageManager);
    MOZ_ASSERT(mPendingRequests.Contains(aRequestId));
@@ -609,7 +756,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
 +  MaybeAllowContextToClose();
  
 -  MaybeAllowContextToClose();
-+  mService->OnRequestComplete(aRequestId);
++  mService->OnRequestComplete(aRequestId, aResponse);
  }
  
  } // namespace dom
@@ -637,7 +784,7 @@ diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageMan
      Closing
    };
  
-@@ -64,27 +65,30 @@ public:
+@@ -64,27 +65,31 @@ public:
    void ExecuteRequest(const nsID& aRequestId, const SyncOp& aOp);
  
  private:
@@ -658,7 +805,9 @@ diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageMan
  
    void MaybeAllowContextToClose();
  
-   void OnRequestComplete(const nsID& aRequestId);
+-  void OnRequestComplete(const nsID& aRequestId);
++  void OnRequestComplete(const nsID& aRequestId,
++                         const SyncOpResponse& aResponse);
  
 +  RefPtr<BackgroundSyncService> mService;
    RefPtr<StorageManagerId> mManagerId;
