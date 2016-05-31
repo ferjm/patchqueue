@@ -544,6 +544,118 @@ new file mode 100644
 +} // namespace mozilla
 +
 +#endif // mozilla_dom_SyncService_h
+diff --git a/dom/backgroundsync/DBSchema.cpp b/dom/backgroundsync/DBSchema.cpp
+--- a/dom/backgroundsync/DBSchema.cpp
++++ b/dom/backgroundsync/DBSchema.cpp
+@@ -196,16 +196,84 @@ InitializeConnection(mozIStorageConnecti
+ 
+   // integer value 2 is incremental mode
+   if (NS_WARN_IF(mode != 2)) { return NS_ERROR_UNEXPECTED; }
+ #endif
+ 
+   return NS_OK;
+ }
+ 
++void
++GetId(const nsAString& aScope, const nsAString& aTag, nsAString& aId)
++{
++  aId = aScope + NS_LITERAL_STRING("@") + aTag;
++}
++
++nsresult
++Register(mozIStorageConnection* aConn,
++         const SyncRegisterArgs& aRegisterArgs)
++{
++  MOZ_ASSERT(!NS_IsMainThread());
++  MOZ_ASSERT(aConn);
++
++  nsresult rv = NS_OK;
++
++  nsCOMPtr<mozIStorageStatement> state;
++  rv = aConn->CreateStatement(NS_LITERAL_CSTRING(
++    "INSERT INTO registrations ("
++      "id, "
++      "originSuffix, "
++      "scope, "
++      "tag, "
++      "state, "
++      "lastChance "
++    ") VALUES ("
++      ":id, "
++      ":originSuffix, "
++      ":scope, "
++      ":tag, "
++      ":state, "
++      ":lastChance "
++    ");"
++  ), getter_AddRefs(state));
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  nsString id;
++  GetId(aRegisterArgs.mScope(), aRegisterArgs.mTag(), id);
++
++  rv = state->BindStringByName(NS_LITERAL_CSTRING("id"), id);
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  // XXX
++  rv = state->BindUTF8StringByName(NS_LITERAL_CSTRING("originSuffix"),
++                                   NS_LITERAL_CSTRING("XXX"));
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  rv = state->BindStringByName(NS_LITERAL_CSTRING("scope"),
++                               aRegisterArgs.mScope());
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  rv = state->BindStringByName(NS_LITERAL_CSTRING("tag"),
++                               aRegisterArgs.mTag());
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  // XXX enum
++  rv = state->BindInt32ByName(NS_LITERAL_CSTRING("state"), 0);
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  // By default new registrations are not flagged as last chance.
++  rv = state->BindInt32ByName(NS_LITERAL_CSTRING("lastChance"), 0);
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  rv = state->Execute();
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  return rv;
++}
++
+ nsresult
+ IncrementalVacuum(mozIStorageConnection* aConn)
+ {
+   // Determine how much free space is in the database.
+   nsCOMPtr<mozIStorageStatement> state;
+   nsresult rv = aConn->CreateStatement(NS_LITERAL_CSTRING(
+     "PRAGMA freelist_count;"
+   ), getter_AddRefs(state));
+diff --git a/dom/backgroundsync/DBSchema.h b/dom/backgroundsync/DBSchema.h
+--- a/dom/backgroundsync/DBSchema.h
++++ b/dom/backgroundsync/DBSchema.h
+@@ -18,16 +18,20 @@ namespace db {
+ // Note, this cannot be executed within a transaction.
+ nsresult
+ CreateOrMigrateSchema(mozIStorageConnection* aConn);
+ 
+ // Note, this cannot be executed within a transaction.
+ nsresult
+ InitializeConnection(mozIStorageConnection* aConn);
+ 
++nsresult
++Register(mozIStorageConnection* aConn,
++         const SyncRegisterArgs& aRegisterArgs);
++
+ // Note, this works best when its NOT executed within a transaction.
+ nsresult
+ IncrementalVacuum(mozIStorageConnection* aConn);
+ 
+ // We will wipe out databases with a schema versions less than this.  Newer
+ // versions will be migrated on open to the latest schema version.
+ extern const int32_t kFirstShippedSchemaVersion;
+ 
 diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageManager.cpp
 --- a/dom/backgroundsync/StorageManager.cpp
 +++ b/dom/backgroundsync/StorageManager.cpp
@@ -586,7 +698,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
        ref->Init(oldManager);
  
        MOZ_ASSERT(!sFactory->mManagerList.Contains(ref));
-@@ -288,26 +289,25 @@ class StorageManager::BaseAction : publi
+@@ -288,57 +289,68 @@ class StorageManager::BaseAction : publi
  {
  protected:
    BaseAction(const nsID& aRequestId, StorageManager* aManager)
@@ -615,12 +727,29 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
    const nsID mRequestId;
    RefPtr<StorageManager> mManager;
  };
-@@ -325,19 +325,24 @@ public:
+ 
+ // ---------------------------------------------------------------------------
+ 
+ class StorageManager::RegisterAction final : public StorageManager::BaseAction
+ {
+ public:
+-  RegisterAction(const nsID& aRequestId, StorageManager* aManager)
++  RegisterAction(const nsID& aRequestId,
++                 StorageManager* aManager,
++                 const SyncRegisterArgs& aRegisterArgs)
+     : BaseAction(aRequestId, aManager)
++    , mArgs(aRegisterArgs)
+   {}
+ 
+   virtual nsresult
    RunSyncOnTarget(const QuotaInfo& aQuotaInfo,
                    mozIStorageConnection* aConn) override
    {
-     // XXX
-     return NS_OK;
+-    // XXX
+-    return NS_OK;
++    nsresult rv = db::Register(aConn, mArgs);
++    NS_WARN_IF(NS_FAILED(rv));
++    return rv;
    }
  
    virtual void
@@ -635,6 +764,9 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
 +      mManager->OnRequestComplete(mRequestId, SyncRegisterResponse());
 +    }
    }
++
++private:
++  SyncRegisterArgs mArgs;
  };
  
  // ---------------------------------------------------------------------------
@@ -642,7 +774,8 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
  class StorageManager::GetTagsAction final : public StorageManager::BaseAction
  {
  public:
-@@ -349,31 +354,38 @@ public:
+   GetTagsAction(const nsID& aRequestId, StorageManager* aManager)
+@@ -349,31 +361,38 @@ public:
    RunSyncOnTarget(const QuotaInfo& aQuotaInfo,
                    mozIStorageConnection* aConn) override
    {
@@ -685,7 +818,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
  {
    mozilla::ipc::AssertIsOnBackgroundThread();
  
-@@ -390,34 +402,39 @@ StorageManager::ShutdownAll()
+@@ -390,34 +409,39 @@ StorageManager::ShutdownAll()
  void
  StorageManager::Abort(const nsACString& aOrigin)
  {
@@ -727,7 +860,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
    MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(
          NewRunnableMethod(ioThread, &nsIThread::Shutdown)));*/
  }
-@@ -533,17 +550,18 @@ void
+@@ -533,29 +557,31 @@ void
  StorageManager::ExecuteRequest(const nsID& aRequestId, const SyncOp& aOp)
  {
    NS_ASSERT_OWNINGTHREAD(StorageManager);
@@ -747,7 +880,21 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
  
    RefPtr<StorageAction> action;
  
-@@ -563,23 +581,24 @@ StorageManager::ExecuteRequest(const nsI
+   switch(aOp.mArgs().type()) {
+     case SyncOpArgs::TSyncRegisterArgs:
+     {
+-      action = new RegisterAction(aRequestId, this);
++      action = new RegisterAction(aRequestId, this,
++                                  aOp.mArgs().get_SyncRegisterArgs());
+       break;
+     }
+     case SyncOpArgs::TSyncGetTagsArgs:
+     {
+       action = new GetTagsAction(aRequestId, this);
+       break;
+     }
+     default:
+@@ -563,23 +589,24 @@ StorageManager::ExecuteRequest(const nsI
        MOZ_CRASH("Unknown BackgroundSync request");
      }
    }
