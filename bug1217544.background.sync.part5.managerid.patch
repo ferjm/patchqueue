@@ -1774,7 +1774,7 @@ diff --git a/dom/backgroundsync/StorageContext.cpp b/dom/backgroundsync/StorageC
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/StorageContext.cpp
-@@ -0,0 +1,1115 @@
+@@ -0,0 +1,1116 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -1828,6 +1828,7 @@ new file mode 100644
 +using mozilla::dom::quota::QuotaManager;
 +using mozilla::dom::quota::PERSISTENCE_TYPE_DEFAULT;
 +using mozilla::dom::quota::PersistenceType;
++using mozilla::dom::quota::DirectoryLock;
 +
 +class StorageContext::Data final : public StorageAction::Data
 +{
@@ -1929,7 +1930,7 @@ new file mode 100644
 +
 +  // OpenDirectoryListener methods
 +  virtual void
-+  DirectoryLockAcquired(DirectoryLock* aLock) override;
++  DirectoryLockAcquired(mozilla::dom::quota::DirectoryLock* aLock) override;
 +
 +  virtual void
 +  DirectoryLockFailed() override;
@@ -2040,14 +2041,14 @@ new file mode 100644
 +                                     mQuotaInfo.mGroup,
 +                                     mQuotaInfo.mOrigin,
 +                                     mQuotaInfo.mIsApp,
-+                                     quota::Client::BACKGROUNDSYNC,
++                                     mozilla::dom::quota::Client::BACKGROUNDSYNC,
 +                                     /* aExclusive */ false,
 +                                     this);
 +}
 +
 +void
 +StorageContext::QuotaInitRunnable::DirectoryLockAcquired(
-+    quota::DirectoryLock* aLock)
++    mozilla::dom::quota::DirectoryLock* aLock)
 +{
 +  NS_ASSERT_OWNINGTHREAD(QuotaInitRunnable);
 +  MOZ_ASSERT(mState == STATE_WAIT_FOR_DIRECTORY_LOCK);
@@ -2894,7 +2895,7 @@ diff --git a/dom/backgroundsync/StorageContext.h b/dom/backgroundsync/StorageCon
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/StorageContext.h
-@@ -0,0 +1,217 @@
+@@ -0,0 +1,218 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -2909,11 +2910,12 @@ new file mode 100644
 +
 +namespace mozilla {
 +namespace dom {
-+namespace backgroundsync {
 +
 +namespace quota {
 +  class DirectoryLock;
 +} // namespace quota
++
++namespace backgroundsync {
 +
 +class StorageManager;
 +
@@ -3071,7 +3073,7 @@ new file mode 100644
 +  void Start();
 +  void DispatchAction(StorageAction* aAction, bool aDoomData = false);
 +  void OnQuotaInit(nsresult aRv, const QuotaInfo& aQuotaInfo,
-+                   already_AddRefed<quota::DirectoryLock> aDirectoryLock);
++    already_AddRefed<mozilla::dom::quota::DirectoryLock> aDirectoryLock);
 +
 +
 +  already_AddRefed<ThreadsafeHandle>
@@ -3103,7 +3105,7 @@ new file mode 100644
 +  // when ThreadsafeHandle::AllowToClose() is called.
 +  RefPtr<ThreadsafeHandle> mThreadsafeHandle;
 +
-+  RefPtr<quota::DirectoryLock> mDirectoryLock;
++  RefPtr<mozilla::dom::quota::DirectoryLock> mDirectoryLock;
 +  RefPtr<StorageContext> mNextContext;
 +};
 +
@@ -3999,7 +4001,7 @@ diff --git a/dom/backgroundsync/StorageManagerId.h b/dom/backgroundsync/StorageM
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/StorageManagerId.h
-@@ -0,0 +1,92 @@
+@@ -0,0 +1,94 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -4011,6 +4013,7 @@ new file mode 100644
 +
 +namespace mozilla {
 +namespace dom {
++namespace backgroundsync {
 +
 +using mozilla::ipc::PrincipalInfo;
 +
@@ -4088,6 +4091,7 @@ new file mode 100644
 +  NS_DECL_NSIRUNNABLE
 +};
 +
++} // namespace backgroundsync
 +} // namespace dom
 +} // namespace mozilla
 +
