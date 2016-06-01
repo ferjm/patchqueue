@@ -975,7 +975,7 @@ diff --git a/dom/backgroundsync/DBSchema.cpp b/dom/backgroundsync/DBSchema.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/DBSchema.cpp
-@@ -0,0 +1,379 @@
+@@ -0,0 +1,447 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -1179,6 +1179,74 @@ new file mode 100644
 +  return NS_OK;
 +}
 +
++void
++GetId(const nsAString& aScope, const nsAString& aTag, nsAString& aId)
++{
++  aId = aScope + NS_LITERAL_STRING("@") + aTag;
++}
++
++nsresult
++Register(mozIStorageConnection* aConn,
++         const SyncRegisterArgs& aRegisterArgs)
++{
++  MOZ_ASSERT(!NS_IsMainThread());
++  MOZ_ASSERT(aConn);
++
++  nsresult rv = NS_OK;
++
++  nsCOMPtr<mozIStorageStatement> state;
++  rv = aConn->CreateStatement(NS_LITERAL_CSTRING(
++    "INSERT INTO registrations ("
++      "id, "
++      "originSuffix, "
++      "scope, "
++      "tag, "
++      "state, "
++      "lastChance "
++    ") VALUES ("
++      ":id, "
++      ":originSuffix, "
++      ":scope, "
++      ":tag, "
++      ":state, "
++      ":lastChance "
++    ");"
++  ), getter_AddRefs(state));
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  nsString id;
++  GetId(aRegisterArgs.mScope(), aRegisterArgs.mTag(), id);
++
++  rv = state->BindStringByName(NS_LITERAL_CSTRING("id"), id);
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  // XXX
++  rv = state->BindUTF8StringByName(NS_LITERAL_CSTRING("originSuffix"),
++                                   NS_LITERAL_CSTRING("XXX"));
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  rv = state->BindStringByName(NS_LITERAL_CSTRING("scope"),
++                               aRegisterArgs.mScope());
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  rv = state->BindStringByName(NS_LITERAL_CSTRING("tag"),
++                               aRegisterArgs.mTag());
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  // XXX enum
++  rv = state->BindInt32ByName(NS_LITERAL_CSTRING("state"), 0);
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  // By default new registrations are not flagged as last chance.
++  rv = state->BindInt32ByName(NS_LITERAL_CSTRING("lastChance"), 0);
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  rv = state->Execute();
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  return rv;
++}
++
 +nsresult
 +IncrementalVacuum(mozIStorageConnection* aConn)
 +{
@@ -1359,7 +1427,7 @@ diff --git a/dom/backgroundsync/DBSchema.h b/dom/backgroundsync/DBSchema.h
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/DBSchema.h
-@@ -0,0 +1,39 @@
+@@ -0,0 +1,43 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -1384,6 +1452,10 @@ new file mode 100644
 +// Note, this cannot be executed within a transaction.
 +nsresult
 +InitializeConnection(mozIStorageConnection* aConn);
++
++nsresult
++Register(mozIStorageConnection* aConn,
++         const SyncRegisterArgs& aRegisterArgs);
 +
 +// Note, this works best when its NOT executed within a transaction.
 +nsresult
@@ -3118,7 +3190,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/StorageManager.cpp
-@@ -0,0 +1,585 @@
+@@ -0,0 +1,605 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -3414,16 +3486,15 @@ new file mode 100644
 +    , mManager(aManager)
 +  {}
 +
-+  // XXX We need to get a ErrorResult&& here.
 +  virtual void
-+  Complete() = 0;
++  Complete(nsresult aRv) = 0;
 +
 +  virtual void
 +  CompleteOnInitiatingThread(nsresult aRv) override
 +  {
 +    NS_ASSERT_OWNINGTHREAD(StorageManager::BaseAction);
 +
-+    Complete();
++    Complete(aRv);
 +
 +    // Ensure we release the manager on the initiating thread.
 +    mManager = nullptr;
@@ -3438,23 +3509,35 @@ new file mode 100644
 +class StorageManager::RegisterAction final : public StorageManager::BaseAction
 +{
 +public:
-+  RegisterAction(const nsID& aRequestId, StorageManager* aManager)
++  RegisterAction(const nsID& aRequestId,
++                 StorageManager* aManager,
++                 const SyncRegisterArgs& aRegisterArgs)
 +    : BaseAction(aRequestId, aManager)
++    , mArgs(aRegisterArgs)
 +  {}
 +
 +  virtual nsresult
 +  RunSyncOnTarget(const QuotaInfo& aQuotaInfo,
 +                  mozIStorageConnection* aConn) override
 +  {
-+    // XXX
-+    return NS_OK;
++    nsresult rv = db::Register(aConn, mArgs);
++    NS_WARN_IF(NS_FAILED(rv));
++    return rv;
 +  }
 +
 +  virtual void
-+  Complete() override
++  Complete(nsresult aRv) override
 +  {
-+    mManager->OnRequestComplete(mRequestId);
++    if (NS_FAILED(aRv)) {
++      mManager->OnRequestComplete(mRequestId,
++                                  SyncOpError(static_cast<uint32_t>(aRv)));
++    } else {
++      mManager->OnRequestComplete(mRequestId, SyncRegisterResponse());
++    }
 +  }
++
++private:
++  SyncRegisterArgs mArgs;
 +};
 +
 +// ---------------------------------------------------------------------------
@@ -3475,9 +3558,15 @@ new file mode 100644
 +  }
 +
 +  virtual void
-+  Complete() override
++  Complete(nsresult aRv) override
 +  {
-+    mManager->OnRequestComplete(mRequestId);
++    if (NS_FAILED(aRv)) {
++      mManager->OnRequestComplete(mRequestId,
++                                  SyncOpError(static_cast<uint32_t>(aRv)));
++    } else {
++      // XXX s/SyncRegisterResponse/SyncGetTagsResponse
++      mManager->OnRequestComplete(mRequestId, SyncRegisterResponse());
++    }
 +  }
 +};
 +
@@ -3659,7 +3748,8 @@ new file mode 100644
 +  mPendingRequests.AppendElement(aRequestId);
 +
 +  if (NS_WARN_IF(mState == Closing)) {
-+    OnRequestComplete(aRequestId);
++    OnRequestComplete(aRequestId,
++                      SyncOpError(static_cast<uint32_t>(NS_ERROR_ABORT)));
 +    return;
 +  }
 +
@@ -3671,7 +3761,8 @@ new file mode 100644
 +  switch(aOp.mArgs().type()) {
 +    case SyncOpArgs::TSyncRegisterArgs:
 +    {
-+      action = new RegisterAction(aRequestId, this);
++      action = new RegisterAction(aRequestId, this,
++                                  aOp.mArgs().get_SyncRegisterArgs());
 +      break;
 +    }
 +    case SyncOpArgs::TSyncGetTagsArgs:
@@ -3689,7 +3780,8 @@ new file mode 100644
 +}
 +
 +void
-+StorageManager::OnRequestComplete(const nsID& aRequestId)
++StorageManager::OnRequestComplete(const nsID& aRequestId,
++                                  const SyncOpResponse& aResponse)
 +{
 +  NS_ASSERT_OWNINGTHREAD(StorageManager);
 +  MOZ_ASSERT(mPendingRequests.Contains(aRequestId));
@@ -3708,7 +3800,7 @@ diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageMan
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/StorageManager.h
-@@ -0,0 +1,108 @@
+@@ -0,0 +1,109 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -3796,7 +3888,8 @@ new file mode 100644
 +
 +  void MaybeAllowContextToClose();
 +
-+  void OnRequestComplete(const nsID& aRequestId);
++  void OnRequestComplete(const nsID& aRequestId,
++                         const SyncOpResponse& aResponse);
 +
 +  RefPtr<StorageManagerId> mManagerId;
 +  nsCOMPtr<nsIThread> mIOThread;
