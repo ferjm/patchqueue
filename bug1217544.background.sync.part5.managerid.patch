@@ -288,7 +288,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncTypes.h b/dom/backgroundsync/Backg
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncTypes.h
-@@ -0,0 +1,32 @@
+@@ -0,0 +1,49 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -314,6 +314,23 @@ new file mode 100644
 +  nsCString mGroup;
 +  nsCString mOrigin;
 +  bool mIsApp;
++};
++
++struct Registration
++{
++  enum State
++  {
++    PENDING = 1,
++    WAITING,
++    FIRING,
++    REREGISTERING_WHILE_FIRING
++  };
++
++  nsString mId;
++  nsString mScope;
++  nsString mTag;
++  State mState;
++  bool mLastChance;
 +};
 +
 +} // namespace backgroundsync
@@ -975,7 +992,7 @@ diff --git a/dom/backgroundsync/DBSchema.cpp b/dom/backgroundsync/DBSchema.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/DBSchema.cpp
-@@ -0,0 +1,464 @@
+@@ -0,0 +1,535 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -1225,8 +1242,8 @@ new file mode 100644
 +                               aRegisterArgs.mTag());
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
-+  // XXX enum
-+  rv = state->BindInt32ByName(NS_LITERAL_CSTRING("state"), 0);
++  rv = state->BindInt32ByName(NS_LITERAL_CSTRING("state"),
++                              Registration::State::PENDING);
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +  // By default new registrations are not flagged as last chance.
@@ -1261,6 +1278,77 @@ new file mode 100644
 +    aTags.AppendElement(tag);
 +  }
 +
++  return rv;
++}
++
++nsresult
++GetAll(mozIStorageConnection* aConn,
++       nsTArray<Registration>& aRegistrations)
++{
++  MOZ_ASSERT(!NS_IsMainThread());
++  MOZ_ASSERT(aConn);
++
++  nsCOMPtr<mozIStorageStatement> state;
++  nsresult rv = aConn->CreateStatement(NS_LITERAL_CSTRING(
++    "SELECT * FROM registrations;"
++  ), getter_AddRefs(state));
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  bool hasMoreData = false;
++  while (NS_SUCCEEDED(state->ExecuteStep(&hasMoreData)) && hasMoreData) {
++    Registration registration;
++    rv = state->GetString(0, registration.mId);
++    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++    rv = state->GetString(1, registration.mScope);
++    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++    rv = state->GetString(2, registration.mTag);
++    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++    int32_t registrationState;
++    rv = state->GetInt32(3, &registrationState);
++    registration.mState = static_cast<Registration::State>(registrationState);
++    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++    int32_t lastChance;
++    rv = state->GetInt32(4, &lastChance);
++    registration.mLastChance = lastChance;
++    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++    aRegistrations.AppendElement(registration);
++  }
++
++  return rv;
++}
++
++nsresult
++Remove(mozIStorageConnection* aConn,
++       const nsAString& aId)
++{
++  MOZ_ASSERT(!NS_IsMainThread());
++  MOZ_ASSERT(aConn);
++
++  nsCOMPtr<mozIStorageStatement> state;
++  nsresult rv = aConn->CreateStatement(NS_LITERAL_CSTRING(
++    "DELETE FROM registrations WHERE id=:id;"
++  ), getter_AddRefs(state));
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  rv = state->BindStringByName(NS_LITERAL_CSTRING("id"), aId);
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  rv = state->Execute();
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  return rv;
++}
++
++nsresult
++ChangeState(mozIStorageConnection* aConn,
++            const nsAString& aId,
++            const Registration::State aState)
++{
 +  return NS_OK;
 +}
 +
@@ -1444,7 +1532,7 @@ diff --git a/dom/backgroundsync/DBSchema.h b/dom/backgroundsync/DBSchema.h
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/DBSchema.h
-@@ -0,0 +1,48 @@
+@@ -0,0 +1,61 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -1478,6 +1566,19 @@ new file mode 100644
 +GetTags(mozIStorageConnection* aConn,
 +        const SyncGetTagsArgs& aGetTagsArgs,
 +        nsTArray<nsString>& aTags);
++
++nsresult
++GetAll(mozIStorageConnection* aConn,
++       nsTArray<Registration>& aRegistrations);
++
++nsresult
++Remove(mozIStorageConnection* aConn,
++       const nsAString& aId);
++
++nsresult
++ChangeState(mozIStorageConnection* aConn,
++            const nsAString& aId,
++            const Registration::State aState);
 +
 +// Note, this works best when its NOT executed within a transaction.
 +nsresult
@@ -3212,7 +3313,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/StorageManager.cpp
-@@ -0,0 +1,613 @@
+@@ -0,0 +1,707 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -3601,6 +3702,100 @@ new file mode 100644
 +
 +// ---------------------------------------------------------------------------
 +
++class StorageManager::GetAllAction final : public StorageManager::BaseAction
++{
++public:
++  GetAllAction(const nsID& aRequestId,
++               StorageManager* aManager)
++    : BaseAction(aRequestId, aManager)
++  {}
++
++  virtual nsresult
++  RunSyncOnTarget(const QuotaInfo& aQuotaInfo,
++                  mozIStorageConnection* aConn) override
++  {
++    nsresult rv = db::GetAll(aConn, mRegistrations);
++    NS_WARN_IF(NS_FAILED(rv));
++    return rv;
++  }
++
++  virtual void
++  Complete(nsresult aRv) override
++  {
++    // XXX
++  }
++
++private:
++  nsTArray<Registration> mRegistrations;
++};
++
++// ---------------------------------------------------------------------------
++
++class StorageManager::RemoveAction final : public StorageManager::BaseAction
++{
++public:
++  RemoveAction(const nsID& aRequestId,
++               StorageManager* aManager,
++               const nsAString& aId)
++    : BaseAction(aRequestId, aManager)
++    , mId(aId)
++  {}
++
++  virtual nsresult
++  RunSyncOnTarget(const QuotaInfo& aQuotaInfo,
++                  mozIStorageConnection* aConn) override
++  {
++    nsresult rv = db::Remove(aConn, mId);
++    NS_WARN_IF(NS_FAILED(rv));
++    return rv;
++  }
++
++  virtual void
++  Complete(nsresult aRv) override
++  {
++    // XXX
++  }
++
++private:
++  nsString mId;
++};
++
++// ---------------------------------------------------------------------------
++
++class StorageManager::ChangeStateAction final : public StorageManager::BaseAction
++{
++public:
++  ChangeStateAction(const nsID& aRequestId,
++                   StorageManager* aManager,
++                   const nsAString& aId,
++                   Registration::State aState)
++    : BaseAction(aRequestId, aManager)
++    , mId(aId)
++    , mState(aState)
++  {}
++
++  virtual nsresult
++  RunSyncOnTarget(const QuotaInfo& aQuotaInfo,
++                  mozIStorageConnection* aConn) override
++  {
++    nsresult rv = db::ChangeState(aConn, mId, mState);
++    NS_WARN_IF(NS_FAILED(rv));
++    return rv;
++  }
++
++  virtual void
++  Complete(nsresult aRv) override
++  {
++    // XXX
++  }
++
++private:
++  nsString mId;
++  Registration::State mState;
++};
++
++// ---------------------------------------------------------------------------
++
 +// static
 +nsresult
 +StorageManager::GetOrCreate(StorageManagerId* aManagerId,
@@ -3830,7 +4025,7 @@ diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageMan
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/StorageManager.h
-@@ -0,0 +1,109 @@
+@@ -0,0 +1,112 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -3905,9 +4100,12 @@ new file mode 100644
 +
 +private:
 +  class BaseAction;
++  class ChangeStateAction;
 +  class Factory;
++  class GetAllAction;
 +  class GetTagsAction;
 +  class RegisterAction;
++  class RemoveAction;
 +
 +  StorageManager(StorageManagerId* aManagerId, nsIThread* aIOThread);
 +  ~StorageManager();
