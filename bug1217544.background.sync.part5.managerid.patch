@@ -975,7 +975,7 @@ diff --git a/dom/backgroundsync/DBSchema.cpp b/dom/backgroundsync/DBSchema.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/DBSchema.cpp
-@@ -0,0 +1,447 @@
+@@ -0,0 +1,464 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -1005,7 +1005,6 @@ new file mode 100644
 +const char* const kTableRegistrations =
 +  "CREATE TABLE registrations ("
 +    "id TEXT NOT NULL PRIMARY KEY, " // Concatenation of scope + tag
-+    "originSuffix TEXT NOT NULL, "
 +    "scope TEXT NOT NULL, "
 +    "tag TEXT NOT NULL, "
 +    "state INTEGER NOT NULL, "
@@ -1198,14 +1197,12 @@ new file mode 100644
 +  rv = aConn->CreateStatement(NS_LITERAL_CSTRING(
 +    "INSERT INTO registrations ("
 +      "id, "
-+      "originSuffix, "
 +      "scope, "
 +      "tag, "
 +      "state, "
 +      "lastChance "
 +    ") VALUES ("
 +      ":id, "
-+      ":originSuffix, "
 +      ":scope, "
 +      ":tag, "
 +      ":state, "
@@ -1218,11 +1215,6 @@ new file mode 100644
 +  GetId(aRegisterArgs.mScope(), aRegisterArgs.mTag(), id);
 +
 +  rv = state->BindStringByName(NS_LITERAL_CSTRING("id"), id);
-+  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
-+
-+  // XXX
-+  rv = state->BindUTF8StringByName(NS_LITERAL_CSTRING("originSuffix"),
-+                                   NS_LITERAL_CSTRING("XXX"));
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +  rv = state->BindStringByName(NS_LITERAL_CSTRING("scope"),
@@ -1245,6 +1237,31 @@ new file mode 100644
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +  return rv;
++}
++
++nsresult
++GetTags(mozIStorageConnection* aConn,
++        const SyncGetTagsArgs& aGetTagsArgs,
++        nsTArray<nsString>& aTags)
++{
++  MOZ_ASSERT(!NS_IsMainThread());
++  MOZ_ASSERT(aConn);
++
++  nsCOMPtr<mozIStorageStatement> state;
++  nsresult rv = aConn->CreateStatement(NS_LITERAL_CSTRING(
++    "SELECT tag FROM registrations;"
++  ), getter_AddRefs(state));
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  bool hasMoreData = false;
++  while (NS_SUCCEEDED(state->ExecuteStep(&hasMoreData)) && hasMoreData) {
++    nsString tag;
++    rv = state->GetString(0, tag);
++    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++    aTags.AppendElement(tag);
++  }
++
++  return NS_OK;
 +}
 +
 +nsresult
@@ -1427,7 +1444,7 @@ diff --git a/dom/backgroundsync/DBSchema.h b/dom/backgroundsync/DBSchema.h
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/DBSchema.h
-@@ -0,0 +1,43 @@
+@@ -0,0 +1,48 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -1457,11 +1474,16 @@ new file mode 100644
 +Register(mozIStorageConnection* aConn,
 +         const SyncRegisterArgs& aRegisterArgs);
 +
++nsresult
++GetTags(mozIStorageConnection* aConn,
++        const SyncGetTagsArgs& aGetTagsArgs,
++        nsTArray<nsString>& aTags);
++
 +// Note, this works best when its NOT executed within a transaction.
 +nsresult
 +IncrementalVacuum(mozIStorageConnection* aConn);
 +
-+// We will wipe out databases with a schema versions less than this.  Newer
++// We will wipe out databases with schema versions less than this. Newer
 +// versions will be migrated on open to the latest schema version.
 +extern const int32_t kFirstShippedSchemaVersion;
 +
@@ -3190,7 +3212,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/StorageManager.cpp
-@@ -0,0 +1,605 @@
+@@ -0,0 +1,613 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -3545,16 +3567,20 @@ new file mode 100644
 +class StorageManager::GetTagsAction final : public StorageManager::BaseAction
 +{
 +public:
-+  GetTagsAction(const nsID& aRequestId, StorageManager* aManager)
++  GetTagsAction(const nsID& aRequestId,
++                StorageManager* aManager,
++                const SyncGetTagsArgs& aGetTagsArgs)
 +    : BaseAction(aRequestId, aManager)
++    , mArgs(aGetTagsArgs)
 +  {}
 +
 +  virtual nsresult
 +  RunSyncOnTarget(const QuotaInfo& aQuotaInfo,
 +                  mozIStorageConnection* aConn) override
 +  {
-+    // XXX
-+    return NS_OK;
++    nsresult rv = db::GetTags(aConn, mArgs, mTags);
++    NS_WARN_IF(NS_FAILED(rv));
++    return rv;
 +  }
 +
 +  virtual void
@@ -3564,10 +3590,13 @@ new file mode 100644
 +      mManager->OnRequestComplete(mRequestId,
 +                                  SyncOpError(static_cast<uint32_t>(aRv)));
 +    } else {
-+      // XXX s/SyncRegisterResponse/SyncGetTagsResponse
-+      mManager->OnRequestComplete(mRequestId, SyncRegisterResponse());
++      mManager->OnRequestComplete(mRequestId, SyncGetTagsResponse(mTags));
 +    }
 +  }
++
++private:
++  SyncGetTagsArgs mArgs;
++  nsTArray<nsString> mTags;
 +};
 +
 +// ---------------------------------------------------------------------------
@@ -3767,7 +3796,8 @@ new file mode 100644
 +    }
 +    case SyncOpArgs::TSyncGetTagsArgs:
 +    {
-+      action = new GetTagsAction(aRequestId, this);
++      action = new GetTagsAction(aRequestId, this,
++                                 aOp.mArgs().get_SyncGetTagsArgs());
 +      break;
 +    }
 +    default:
