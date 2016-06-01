@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  bab24cb4cde6391144b79215de28978ce0c01368
+# Parent  90e63c563909b703d50b95061654a8c2c3e1f383
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: BackgroundSyncService. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh
@@ -586,9 +586,9 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
        ref->Init(oldManager);
  
        MOZ_ASSERT(!sFactory->mManagerList.Contains(ref));
-@@ -376,21 +377,22 @@ public:
-     }
-   }
+@@ -477,21 +478,22 @@ private:
+   nsString mId;
+   Registration::State mState;
  };
  
  // ---------------------------------------------------------------------------
@@ -611,7 +611,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
  {
    mozilla::ipc::AssertIsOnBackgroundThread();
  
-@@ -407,34 +409,39 @@ StorageManager::ShutdownAll()
+@@ -508,34 +510,39 @@ StorageManager::ShutdownAll()
  void
  StorageManager::Abort(const nsACString& aOrigin)
  {
@@ -653,7 +653,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
    MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(
          NewRunnableMethod(ioThread, &nsIThread::Shutdown)));*/
  }
-@@ -590,16 +597,16 @@ void
+@@ -692,16 +699,16 @@ void
  StorageManager::OnRequestComplete(const nsID& aRequestId,
                                    const SyncOpResponse& aResponse)
  {
@@ -695,14 +695,14 @@ diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageMan
      Closing
    };
  
-@@ -71,28 +72,31 @@ public:
-   void ExecuteRequest(const nsID& aRequestId, const SyncOp& aOp);
- 
- private:
+@@ -74,28 +75,31 @@ private:
    class BaseAction;
+   class ChangeStateAction;
    class Factory;
+   class GetAllAction;
    class GetTagsAction;
    class RegisterAction;
+   class RemoveAction;
  
 -  StorageManager(StorageManagerId* aManagerId, nsIThread* aIOThread);
 +  StorageManager(BackgroundSyncService* aService,
