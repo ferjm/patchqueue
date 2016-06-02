@@ -653,6 +653,100 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
    MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(
          NewRunnableMethod(ioThread, &nsIThread::Shutdown)));*/
  }
+@@ -668,28 +675,29 @@ StorageManager::MaybeAllowContextToClose
+     // Mark the StorageManager as invalid so that it won't get used again.
+     NoteClosing();
+ 
+     context->AllowToClose();
+   }
+ }
+ 
+ // Common to DOM and internal requests.
++template<typename T>
+ void
+ StorageManager::ExecuteRequest(const nsID& aRequestId, StorageAction* aAction)
+ {
+   NS_ASSERT_OWNINGTHREAD(StorageManager);
+   MOZ_ASSERT(mContext);
+   MOZ_ASSERT(aAction);
+ 
+   mPendingRequests.AppendElement(aRequestId);
+ 
+   if (NS_WARN_IF(mState == Closing)) {
+-    OnRequestComplete(aRequestId,
+-                      SyncOpError(static_cast<uint32_t>(NS_ERROR_ABORT)));
++    OnRequestComplete<T>(aRequestId,
++                         SyncOpError(static_cast<uint32_t>(NS_ERROR_ABORT)));
+     return;
+   }
+ 
+   RefPtr<StorageContext> context = mContext;
+   MOZ_ASSERT(!context->IsCanceled());
+ 
+   context->Dispatch(aAction);
+ }
+@@ -714,17 +722,17 @@ StorageManager::ExecuteRequest(const nsI
+       break;
+     }
+     default:
+     {
+       MOZ_CRASH("Unknown BackgroundSync request");
+     }
+   }
+ 
+-  ExecuteRequest(aRequestId, action);
++  ExecuteRequest<SyncOpResponse>(aRequestId, action);
+ }
+ 
+ // Internal request.
+ void
+ StorageManager::ExecuteRequest(const nsID& aRequestId, const SyncInternalOp& aOp)
+ {
+   RefPtr<StorageAction> action;
+ 
+@@ -747,17 +755,17 @@ StorageManager::ExecuteRequest(const nsI
+       break;
+     }
+     default:
+     {
+       MOZ_CRASH("Unknown BackgroundSync internal request");
+     }
+   }
+ 
+-  ExecuteRequest(aRequestId, action);
++  ExecuteRequest<SyncInternalOpResponse>(aRequestId, action);
+ }
+ 
+ // Common to DOM and internal responses.
+ void
+ StorageManager::OnRequestComplete(const nsID& aRequestId)
+ {
+   NS_ASSERT_OWNINGTHREAD(StorageManager);
+   MOZ_ASSERT(mPendingRequests.Contains(aRequestId));
+@@ -768,14 +776,23 @@ StorageManager::OnRequestComplete(const 
+ }
+ 
+ template<typename T>
+ void
+ StorageManager::OnRequestComplete(const nsID& aRequestId, const T& aResponse)
+ {
+   // XXX Notify listener
+ 
++  switch(aResponse.type()) {
++    case SyncOpResponse::TSyncRegisterResponse:
++    case SyncOpResponse::TSyncGetTagsResponse:
++      mService->OnRequestComplete(aRequestId, SyncOpResponse(aResponse));
++      break;
++    default:
++      break;
++  }
++
+   OnRequestComplete(aRequestId);
+ }
+ 
+ } // namespace backgroundsync
+ } // namespace dom
+ } // namespace mozilla
 diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageManager.h
 --- a/dom/backgroundsync/StorageManager.h
 +++ b/dom/backgroundsync/StorageManager.h
@@ -676,7 +770,7 @@ diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageMan
      Closing
    };
  
-@@ -74,32 +75,35 @@ private:
+@@ -74,32 +75,36 @@ private:
    class BaseAction;
    class ChangeStateAction;
    class Factory;
@@ -701,6 +795,7 @@ diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageMan
    template<typename T>
    void OnRequestComplete(const nsID& aRequestId, const T& aResponse);
  
++  template<typename T>
    void ExecuteRequest(const nsID& aRequestId, StorageAction* aAction);
    void ExecuteRequest(const nsID& aRequestId, const SyncInternalOp& aOp);
  
