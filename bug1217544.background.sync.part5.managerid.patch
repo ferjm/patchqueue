@@ -6,7 +6,25 @@ Bug 1217544 - Implement one-off BackgroundSync API. Part 5: Storage. r=baku
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
 --- a/dom/backgroundsync/BackgroundSync.cpp
 +++ b/dom/backgroundsync/BackgroundSync.cpp
-@@ -336,17 +336,18 @@ BackgroundSync::ActorCreated(PBackground
+@@ -4,17 +4,16 @@
+  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+  * You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "BackgroundSync.h"
+ #include "BackgroundSyncChild.h"
+ 
+ #include "mozilla/dom/Promise.h"
+ #include "mozilla/dom/PromiseWorkerProxy.h"
+-#include "mozilla/dom/BackgroundSyncIPCTypes.h"
+ #include "mozilla/dom/BackgroundSyncBinding.h"
+ #include "mozilla/ipc/BackgroundChild.h"
+ #include "mozilla/ipc/BackgroundUtils.h"
+ #include "mozilla/ipc/PBackgroundChild.h"
+ #include "mozilla/unused.h"
+ #include "mozilla/Preferences.h"
+ #include "nsISupportsPrimitives.h"
+ #include "nsIGlobalObject.h"
+@@ -336,17 +335,18 @@ BackgroundSync::ActorCreated(PBackground
    MOZ_ASSERT(IsBackgroundSyncThread());
    MOZ_ASSERT(aActor);
    MOZ_ASSERT(!mActor);
@@ -26,11 +44,42 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
      RefPtr<SyncOpRunnable> runnable = mPendingOperations[i];
      MOZ_ASSERT(runnable);
      runnable->SetActor(mActor);
+diff --git a/dom/backgroundsync/BackgroundSync.h b/dom/backgroundsync/BackgroundSync.h
+--- a/dom/backgroundsync/BackgroundSync.h
++++ b/dom/backgroundsync/BackgroundSync.h
+@@ -5,17 +5,17 @@
+  * You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #ifndef mozilla_dom_BackgroundSync_h
+ #define mozilla_dom_BackgroundSync_h
+ 
+ #include "jsapi.h"
+ #include "mozilla/AlreadyAddRefed.h"
+ #include "mozilla/ErrorResult.h"
+-#include "mozilla/dom/BackgroundSyncIPCTypes.h"
++#include "mozilla/dom/backgroundsync/BackgroundSyncIPCTypes.h"
+ #include "mozilla/dom/BindingDeclarations.h"
+ #include "nsCOMPtr.h"
+ #include "nsIIPCBackgroundChildCreateCallback.h"
+ #include "nsIObserver.h"
+ #include "nsWrapperCache.h"
+ 
+ class nsIGlobalObject;
+ class nsIPrincipal;
 diff --git a/dom/backgroundsync/BackgroundSyncChild.h b/dom/backgroundsync/BackgroundSyncChild.h
 --- a/dom/backgroundsync/BackgroundSyncChild.h
 +++ b/dom/backgroundsync/BackgroundSyncChild.h
-@@ -12,17 +12,17 @@
- #include "mozilla/dom/PBackgroundSyncChild.h"
+@@ -4,25 +4,25 @@
+  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+  * You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #ifndef mozilla_dom_BackgroundSyncChild_h
+ #define mozilla_dom_BackgroundSyncChild_h
+ 
+ #include "BackgroundSync.h"
+ 
+-#include "mozilla/dom/PBackgroundSyncChild.h"
++#include "mozilla/dom/backgroundsync/PBackgroundSyncChild.h"
  
  #include "nsID.h"
  #include "nsClassHashtable.h"
@@ -51,7 +100,20 @@ diff --git a/dom/backgroundsync/BackgroundSyncChild.h b/dom/backgroundsync/Backg
 diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh
 --- a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh
 +++ b/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh
-@@ -10,16 +10,17 @@ namespace dom {
+@@ -1,25 +1,30 @@
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ include PBackgroundSharedTypes;
+ 
++using RegistrationState from "mozilla/dom/backgroundsync/BackgroundSyncTypes.h";
++using mozilla::void_t from "ipc/IPCMessageUtils.h";
++
+ namespace mozilla {
+ namespace dom {
++namespace backgroundsync {
+ 
  struct SyncRegisterArgs
  {
    nsString mScope;
@@ -69,7 +131,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsyn
    SyncGetTagsArgs;
  };
  
-@@ -46,10 +47,36 @@ struct SyncOpError
+@@ -46,10 +51,57 @@ struct SyncOpError
  
  union SyncOpResponse
  {
@@ -104,6 +166,27 @@ diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsyn
 +  SyncInternalOpArgs mArgs;
 +};
 +
++struct Registration
++{
++  nsString mId;
++  nsString mScope;
++  nsString mTag;
++  RegistrationState mState;
++  bool mLastChance;
++};
++
++struct SyncGetAllResponse
++{
++  Registration[] mRegistrations;
++};
++
++union SyncInternalOpResponse
++{
++  void_t;
++  SyncGetAllResponse;
++};
++
++} // namespace backgroundsync
  } // namespace dom
  } // namespace mozilla
 diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/BackgroundSyncParent.cpp
@@ -251,17 +334,22 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
 diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/BackgroundSyncParent.h
 --- a/dom/backgroundsync/BackgroundSyncParent.h
 +++ b/dom/backgroundsync/BackgroundSyncParent.h
-@@ -5,46 +5,65 @@
+@@ -2,49 +2,68 @@
+ /* vim: set ts=8 sts=2 et sw=2 tw=80: */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
   * You can obtain one at http://mozilla.org/MPL/2.0/. */
  
  #ifndef mozilla_dom_BackgroundSyncParent_h
  #define mozilla_dom_BackgroundSyncParent_h
  
- #include "mozilla/dom/PBackgroundSyncParent.h"
- #include "mozilla/dom/BackgroundSyncIPCTypes.h"
- 
-+#include "StorageManagerId.h"
+-#include "mozilla/dom/PBackgroundSyncParent.h"
+-#include "mozilla/dom/BackgroundSyncIPCTypes.h"
++#include "mozilla/dom/backgroundsync/PBackgroundSyncParent.h"
++#include "mozilla/dom/backgroundsync/BackgroundSyncIPCTypes.h"
 +
++#include "StorageManagerId.h"
+ 
  #include "nsID.h"
  
  namespace mozilla {
@@ -325,7 +413,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncTypes.h b/dom/backgroundsync/Backg
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncTypes.h
-@@ -0,0 +1,49 @@
+@@ -0,0 +1,40 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -353,21 +441,12 @@ new file mode 100644
 +  bool mIsApp;
 +};
 +
-+struct Registration
++enum RegistrationState
 +{
-+  enum State
-+  {
-+    PENDING = 1,
-+    WAITING,
-+    FIRING,
-+    REREGISTERING_WHILE_FIRING
-+  };
-+
-+  nsString mId;
-+  nsString mScope;
-+  nsString mTag;
-+  State mState;
-+  bool mLastChance;
++  PENDING = 1,
++  WAITING,
++  FIRING,
++  REREGISTERING_WHILE_FIRING
 +};
 +
 +} // namespace backgroundsync
@@ -1280,7 +1359,7 @@ new file mode 100644
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +  rv = state->BindInt32ByName(NS_LITERAL_CSTRING("state"),
-+                              Registration::State::PENDING);
++                              RegistrationState::PENDING);
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +  // By default new registrations are not flagged as last chance.
@@ -1334,23 +1413,23 @@ new file mode 100644
 +  bool hasMoreData = false;
 +  while (NS_SUCCEEDED(state->ExecuteStep(&hasMoreData)) && hasMoreData) {
 +    Registration registration;
-+    rv = state->GetString(0, registration.mId);
++    rv = state->GetString(0, registration.mId());
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
-+    rv = state->GetString(1, registration.mScope);
++    rv = state->GetString(1, registration.mScope());
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
-+    rv = state->GetString(2, registration.mTag);
++    rv = state->GetString(2, registration.mTag());
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +    int32_t registrationState;
 +    rv = state->GetInt32(3, &registrationState);
-+    registration.mState = static_cast<Registration::State>(registrationState);
++    registration.mState() = static_cast<RegistrationState>(registrationState);
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +    int32_t lastChance;
 +    rv = state->GetInt32(4, &lastChance);
-+    registration.mLastChance = lastChance;
++    registration.mLastChance() = lastChance;
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +    aRegistrations.AppendElement(registration);
@@ -1648,6 +1727,36 @@ new file mode 100644
 +} // namespace mozilla
 +
 +#endif // mozilla_dom_DBSchema_h
+diff --git a/dom/backgroundsync/PBackgroundSync.ipdl b/dom/backgroundsync/PBackgroundSync.ipdl
+--- a/dom/backgroundsync/PBackgroundSync.ipdl
++++ b/dom/backgroundsync/PBackgroundSync.ipdl
+@@ -5,24 +5,26 @@
+ include protocol PBackground;
+ 
+ include BackgroundSyncIPCTypes;
+ 
+ using struct nsID from "nsID.h";
+ 
+ namespace mozilla {
+ namespace dom {
++namespace backgroundsync {
+ 
+ protocol PBackgroundSync
+ {
+   manager PBackground;
+ 
+ parent: // child -> parent messages
+   async Request(nsID aRequestId, SyncOp aOp);
+   async Shutdown();
+ 
+ child: // parent -> child messages
+   async Response(nsID requestId, SyncOpResponse aResponse);
+   async __delete__();
+ };
+ 
++} // namespace backgroundsync
+ } // namespace dom
+ } // namespace mozilla
 diff --git a/dom/backgroundsync/QuotaClient.cpp b/dom/backgroundsync/QuotaClient.cpp
 new file mode 100644
 --- /dev/null
@@ -4554,7 +4663,7 @@ new file mode 100644
 diff --git a/dom/backgroundsync/moz.build b/dom/backgroundsync/moz.build
 --- a/dom/backgroundsync/moz.build
 +++ b/dom/backgroundsync/moz.build
-@@ -1,21 +1,30 @@
+@@ -1,21 +1,31 @@
  # vim: set filetype=python:
  # This Source Code Form is subject to the terms of the Mozilla Public
  # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -4563,6 +4672,7 @@ diff --git a/dom/backgroundsync/moz.build b/dom/backgroundsync/moz.build
  EXPORTS.mozilla.dom.backgroundsync += [
 -    'BackgroundSync.h'
 +    'BackgroundSync.h',
++    'BackgroundSyncTypes.h',
 +    'QuotaClient.h'
  ]
  
@@ -4720,7 +4830,8 @@ diff --git a/dom/quota/Client.h b/dom/quota/Client.h
 diff --git a/ipc/glue/BackgroundChildImpl.cpp b/ipc/glue/BackgroundChildImpl.cpp
 --- a/ipc/glue/BackgroundChildImpl.cpp
 +++ b/ipc/glue/BackgroundChildImpl.cpp
-@@ -470,17 +470,18 @@ BackgroundChildImpl::DeallocPFileSystemR
+@@ -469,18 +469,19 @@ BackgroundChildImpl::DeallocPFileSystemR
+     dont_AddRef(static_cast<dom::FileSystemTaskChildBase*>(aActor));
    return true;
  }
  
@@ -4728,8 +4839,9 @@ diff --git a/ipc/glue/BackgroundChildImpl.cpp b/ipc/glue/BackgroundChildImpl.cpp
  // Background Sync API
  // -----------------------------------------------------------------------------
  
- dom::PBackgroundSyncChild*
+-dom::PBackgroundSyncChild*
 -BackgroundChildImpl::AllocPBackgroundSyncChild()
++dom::backgroundsync::PBackgroundSyncChild*
 +BackgroundChildImpl::AllocPBackgroundSyncChild(
 +    const PrincipalInfo& aPrincipalInfo)
  {
@@ -4765,7 +4877,8 @@ diff --git a/ipc/glue/BackgroundChildImpl.h b/ipc/glue/BackgroundChildImpl.h
 diff --git a/ipc/glue/BackgroundParentImpl.cpp b/ipc/glue/BackgroundParentImpl.cpp
 --- a/ipc/glue/BackgroundParentImpl.cpp
 +++ b/ipc/glue/BackgroundParentImpl.cpp
-@@ -889,32 +889,38 @@ BackgroundParentImpl::DeallocPFileSystem
+@@ -888,33 +888,39 @@ BackgroundParentImpl::DeallocPFileSystem
+   AssertIsInMainProcess();
    AssertIsOnBackgroundThread();
  
    RefPtr<FileSystemRequestParent> parent =
@@ -4773,8 +4886,9 @@ diff --git a/ipc/glue/BackgroundParentImpl.cpp b/ipc/glue/BackgroundParentImpl.c
    return true;
  }
  
- mozilla::dom::PBackgroundSyncParent*
+-mozilla::dom::PBackgroundSyncParent*
 -BackgroundParentImpl::AllocPBackgroundSyncParent()
++mozilla::dom::backgroundsync::PBackgroundSyncParent*
 +BackgroundParentImpl::AllocPBackgroundSyncParent(
 +    const PrincipalInfo& aPrincipalInfo)
  {
