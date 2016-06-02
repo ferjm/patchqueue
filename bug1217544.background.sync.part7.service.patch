@@ -1,12 +1,12 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  f6bfd29b7879ff6ecad0309e058f53c63551b2a9
+# Parent  c9ad9627d750d94d5935205f570ee8390809852d
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: BackgroundSyncService. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh
 --- a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh
 +++ b/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh
-@@ -27,17 +27,16 @@ union SyncOpArgs
+@@ -31,17 +31,16 @@ union SyncOpArgs
  struct SyncOp
  {
    PrincipalInfo mPrincipal;
@@ -586,7 +586,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
        ref->Init(oldManager);
  
        MOZ_ASSERT(!sFactory->mManagerList.Contains(ref));
-@@ -483,21 +484,22 @@ public:
+@@ -502,21 +503,22 @@ public:
  private:
    SyncChangeStateArgs mArgs;
  };
@@ -611,7 +611,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
  {
    mozilla::ipc::AssertIsOnBackgroundThread();
  
-@@ -514,34 +516,39 @@ StorageManager::ShutdownAll()
+@@ -533,34 +535,39 @@ StorageManager::ShutdownAll()
  void
  StorageManager::Abort(const nsACString& aOrigin)
  {
@@ -653,28 +653,6 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
    MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(
          NewRunnableMethod(ioThread, &nsIThread::Shutdown)));*/
  }
-@@ -698,19 +705,19 @@ void
- StorageManager::OnRequestComplete(const nsID& aRequestId,
-                                   const SyncOpResponse& aResponse)
- {
-   NS_ASSERT_OWNINGTHREAD(StorageManager);
-   MOZ_ASSERT(mPendingRequests.Contains(aRequestId));
- 
-   mPendingRequests.RemoveElement(aRequestId);
- 
--  // XXX Notify listener
-+  MaybeAllowContextToClose();
- 
--  MaybeAllowContextToClose();
-+  mService->OnRequestComplete(aRequestId, aResponse);
- }
- 
- void
- StorageManager::ExecuteInternalRequest(const nsID& aRequestId,
-                                        const SyncInternalOp& aOp)
- {
-   NS_ASSERT_OWNINGTHREAD(StorageManager);
-   MOZ_ASSERT(mContext);
 diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageManager.h
 --- a/dom/backgroundsync/StorageManager.h
 +++ b/dom/backgroundsync/StorageManager.h
@@ -698,7 +676,7 @@ diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageMan
      Closing
    };
  
-@@ -74,17 +75,19 @@ private:
+@@ -74,32 +75,35 @@ private:
    class BaseAction;
    class ChangeStateAction;
    class Factory;
@@ -719,14 +697,12 @@ diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageMan
  
    void MaybeAllowContextToClose();
  
-@@ -92,16 +95,17 @@ private:
-                          const SyncOpResponse& aResponse);
+   void OnRequestComplete(const nsID& aRequestId);
+   template<typename T>
+   void OnRequestComplete(const nsID& aRequestId, const T& aResponse);
  
-   void ExecuteInternalRequest(const nsID& aRequestId,
-                               const SyncInternalOp& aOp);
-   void OnInternalRequestComplete(const nsID& aRequestId);
-   void OnInternalRequestComplete(const nsID& aRequestId,
-                                  nsTArray<Registration>& aRegistrations);
+   void ExecuteRequest(const nsID& aRequestId, StorageAction* aAction);
+   void ExecuteRequest(const nsID& aRequestId, const SyncInternalOp& aOp);
  
 +  RefPtr<BackgroundSyncService> mService;
    RefPtr<StorageManagerId> mManagerId;
@@ -740,8 +716,8 @@ diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageMan
 diff --git a/dom/backgroundsync/moz.build b/dom/backgroundsync/moz.build
 --- a/dom/backgroundsync/moz.build
 +++ b/dom/backgroundsync/moz.build
-@@ -7,16 +7,17 @@ EXPORTS.mozilla.dom.backgroundsync += [
-     'BackgroundSync.h',
+@@ -8,16 +8,17 @@ EXPORTS.mozilla.dom.backgroundsync += [
+     'BackgroundSyncTypes.h',
      'QuotaClient.h'
  ]
  
