@@ -131,7 +131,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsyn
    SyncGetTagsArgs;
  };
  
-@@ -46,10 +51,57 @@ struct SyncOpError
+@@ -46,10 +51,58 @@ struct SyncOpError
  
  union SyncOpResponse
  {
@@ -184,6 +184,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsyn
 +{
 +  void_t;
 +  SyncGetAllResponse;
++  SyncOpError;
 +};
 +
 +} // namespace backgroundsync
@@ -3815,10 +3816,15 @@ new file mode 100644
 +  Complete(nsresult aRv) override
 +  {
 +    if (NS_FAILED(aRv)) {
-+      mManager->OnRequestComplete(mRequestId,
-+                                  SyncOpError(static_cast<uint32_t>(aRv)));
++      mManager->OnRequestComplete<SyncOpResponse>(
++        mRequestId,
++        SyncOpError(static_cast<uint32_t>(aRv))
++      );
 +    } else {
-+      mManager->OnRequestComplete(mRequestId, SyncRegisterResponse());
++      mManager->OnRequestComplete<SyncOpResponse>(
++          mRequestId,
++          SyncRegisterResponse()
++      );
 +    }
 +  }
 +
@@ -3851,10 +3857,15 @@ new file mode 100644
 +  Complete(nsresult aRv) override
 +  {
 +    if (NS_FAILED(aRv)) {
-+      mManager->OnRequestComplete(mRequestId,
-+                                  SyncOpError(static_cast<uint32_t>(aRv)));
++      mManager->OnRequestComplete<SyncOpResponse>(
++        mRequestId,
++        SyncOpError(static_cast<uint32_t>(aRv))
++      );
 +    } else {
-+      mManager->OnRequestComplete(mRequestId, SyncGetTagsResponse(mTags));
++      mManager->OnRequestComplete<SyncOpResponse>(
++          mRequestId,
++          SyncGetTagsResponse(mTags)
++      );
 +    }
 +  }
 +
@@ -3888,7 +3899,10 @@ new file mode 100644
 +    NS_WARN_IF(NS_FAILED(aRv));
 +    // We need to remove the reference to the request independently of
 +    // its result so we can close the context.
-+    mManager->OnInternalRequestComplete(mRequestId, mRegistrations);
++    mManager->OnRequestComplete<SyncInternalOpResponse>(
++        mRequestId,
++        SyncGetAllResponse(mRegistrations)
++    );
 +  }
 +
 +private:
@@ -3922,7 +3936,10 @@ new file mode 100644
 +    NS_WARN_IF(NS_FAILED(aRv));
 +    // We need to remove the reference to the request independently of
 +    // its result so we can close the context.
-+    mManager->OnInternalRequestComplete(mRequestId);
++    mManager->OnRequestComplete<SyncInternalOpResponse>(
++        mRequestId,
++        SyncInternalOpResponse(void_t())
++    );
 +  }
 +
 +private:
@@ -3956,7 +3973,10 @@ new file mode 100644
 +    NS_WARN_IF(NS_FAILED(aRv));
 +    // We need to remove the reference to the request independently of
 +    // its result so we can close the context.
-+    mManager->OnInternalRequestComplete(mRequestId);
++    mManager->OnRequestComplete<SyncInternalOpResponse>(
++        mRequestId,
++        SyncInternalOpResponse(void_t())
++    );
 +  }
 +
 +private:
@@ -4132,11 +4152,13 @@ new file mode 100644
 +  }
 +}
 +
++// Common to DOM and internal requests.
 +void
-+StorageManager::ExecuteRequest(const nsID& aRequestId, const SyncOp& aOp)
++StorageManager::ExecuteRequest(const nsID& aRequestId, StorageAction* aAction)
 +{
 +  NS_ASSERT_OWNINGTHREAD(StorageManager);
 +  MOZ_ASSERT(mContext);
++  MOZ_ASSERT(aAction);
 +
 +  mPendingRequests.AppendElement(aRequestId);
 +
@@ -4149,6 +4171,13 @@ new file mode 100644
 +  RefPtr<StorageContext> context = mContext;
 +  MOZ_ASSERT(!context->IsCanceled());
 +
++  context->Dispatch(aAction);
++}
++
++// DOM request.
++void
++StorageManager::ExecuteRequest(const nsID& aRequestId, const SyncOp& aOp)
++{
 +  RefPtr<StorageAction> action;
 +
 +  switch(aOp.mArgs().type()) {
@@ -4170,40 +4199,13 @@ new file mode 100644
 +    }
 +  }
 +
-+  context->Dispatch(action);
++  ExecuteRequest(aRequestId, action);
 +}
 +
++// Internal request.
 +void
-+StorageManager::OnRequestComplete(const nsID& aRequestId,
-+                                  const SyncOpResponse& aResponse)
++StorageManager::ExecuteRequest(const nsID& aRequestId, const SyncInternalOp& aOp)
 +{
-+  NS_ASSERT_OWNINGTHREAD(StorageManager);
-+  MOZ_ASSERT(mPendingRequests.Contains(aRequestId));
-+
-+  mPendingRequests.RemoveElement(aRequestId);
-+
-+  // XXX Notify listener
-+
-+  MaybeAllowContextToClose();
-+}
-+
-+void
-+StorageManager::ExecuteInternalRequest(const nsID& aRequestId,
-+                                       const SyncInternalOp& aOp)
-+{
-+  NS_ASSERT_OWNINGTHREAD(StorageManager);
-+  MOZ_ASSERT(mContext);
-+
-+  mPendingRequests.AppendElement(aRequestId);
-+
-+  if (NS_WARN_IF(mState == Closing)) {
-+    OnInternalRequestComplete(aRequestId);
-+    return;
-+  }
-+
-+  RefPtr<StorageContext> context = mContext;
-+  MOZ_ASSERT(!context->IsCanceled());
-+
 +  RefPtr<StorageAction> action;
 +
 +  switch(aOp.mArgs().type()) {
@@ -4230,11 +4232,12 @@ new file mode 100644
 +    }
 +  }
 +
-+  context->Dispatch(action);
++  ExecuteRequest(aRequestId, action);
 +}
 +
++// Common to DOM and internal responses.
 +void
-+StorageManager::OnInternalRequestComplete(const nsID& aRequestId)
++StorageManager::OnRequestComplete(const nsID& aRequestId)
 +{
 +  NS_ASSERT_OWNINGTHREAD(StorageManager);
 +  MOZ_ASSERT(mPendingRequests.Contains(aRequestId));
@@ -4244,15 +4247,13 @@ new file mode 100644
 +  MaybeAllowContextToClose();
 +}
 +
++template<typename T>
 +void
-+StorageManager::OnInternalRequestComplete(const nsID& aRequestId,
-+                                          nsTArray<Registration>& aRegistrations)
++StorageManager::OnRequestComplete(const nsID& aRequestId, const T& aResponse)
 +{
-+  NS_ASSERT_OWNINGTHREAD(StorageManager);
-+
 +  // XXX Notify listener
 +
-+  OnInternalRequestComplete(aRequestId);
++  OnRequestComplete(aRequestId);
 +}
 +
 +} // namespace backgroundsync
@@ -4262,7 +4263,7 @@ diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageMan
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/StorageManager.h
-@@ -0,0 +1,118 @@
+@@ -0,0 +1,116 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -4353,14 +4354,12 @@ new file mode 100644
 +
 +  void MaybeAllowContextToClose();
 +
-+  void OnRequestComplete(const nsID& aRequestId,
-+                         const SyncOpResponse& aResponse);
++  void OnRequestComplete(const nsID& aRequestId);
++  template<typename T>
++  void OnRequestComplete(const nsID& aRequestId, const T& aResponse);
 +
-+  void ExecuteInternalRequest(const nsID& aRequestId,
-+                              const SyncInternalOp& aOp);
-+  void OnInternalRequestComplete(const nsID& aRequestId);
-+  void OnInternalRequestComplete(const nsID& aRequestId,
-+                                 nsTArray<Registration>& aRegistrations);
++  void ExecuteRequest(const nsID& aRequestId, StorageAction* aAction);
++  void ExecuteRequest(const nsID& aRequestId, const SyncInternalOp& aOp);
 +
 +  RefPtr<StorageManagerId> mManagerId;
 +  nsCOMPtr<nsIThread> mIOThread;
