@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  90e63c563909b703d50b95061654a8c2c3e1f383
+# Parent  8a2aea0f2083220b9ed8c6d7874dd8ae5aa8e9dc
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: BackgroundSyncService. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh
@@ -586,7 +586,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
        ref->Init(oldManager);
  
        MOZ_ASSERT(!sFactory->mManagerList.Contains(ref));
-@@ -477,21 +478,22 @@ private:
+@@ -480,21 +481,22 @@ private:
    nsString mId;
    Registration::State mState;
  };
@@ -611,7 +611,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
  {
    mozilla::ipc::AssertIsOnBackgroundThread();
  
-@@ -508,34 +510,39 @@ StorageManager::ShutdownAll()
+@@ -511,34 +513,39 @@ StorageManager::ShutdownAll()
  void
  StorageManager::Abort(const nsACString& aOrigin)
  {
@@ -653,7 +653,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
    MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(
          NewRunnableMethod(ioThread, &nsIThread::Shutdown)));*/
  }
-@@ -692,16 +699,16 @@ void
+@@ -695,19 +702,19 @@ void
  StorageManager::OnRequestComplete(const nsID& aRequestId,
                                    const SyncOpResponse& aResponse)
  {
@@ -669,9 +669,12 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
 +  mService->OnRequestComplete(aRequestId, aResponse);
  }
  
- } // namespace backgroundsync
- } // namespace dom
- } // namespace mozilla
+ void
+ StorageManager::OnGetAllComplete(nsTArray<Registration>& aRegistrations)
+ {
+   NS_ASSERT_OWNINGTHREAD(StorageManager);
+ 
+   // XXX Notify listener
 diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageManager.h
 --- a/dom/backgroundsync/StorageManager.h
 +++ b/dom/backgroundsync/StorageManager.h
@@ -695,7 +698,7 @@ diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageMan
      Closing
    };
  
-@@ -74,28 +75,31 @@ private:
+@@ -74,29 +75,32 @@ private:
    class BaseAction;
    class ChangeStateAction;
    class Factory;
@@ -718,6 +721,7 @@ diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageMan
  
    void OnRequestComplete(const nsID& aRequestId,
                           const SyncOpResponse& aResponse);
+   void OnGetAllComplete(nsTArray<Registration>& aRegistrations);
  
 +  RefPtr<BackgroundSyncService> mService;
    RefPtr<StorageManagerId> mManagerId;
