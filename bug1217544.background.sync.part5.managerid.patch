@@ -69,6 +69,43 @@ diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsyn
    SyncGetTagsArgs;
  };
  
+@@ -46,10 +47,36 @@ struct SyncOpError
+ 
+ union SyncOpResponse
+ {
+   SyncRegisterResponse;
+   SyncGetTagsResponse;
+   SyncOpError;
+ };
+ 
++struct SyncGetAllArgs
++{};
++
++struct SyncChangeStateArgs
++{
++  nsString mId;
++  uint16_t mState;
++};
++
++struct SyncRemoveArgs
++{
++  nsString mId;
++};
++
++union SyncInternalOpArgs
++{
++  SyncGetAllArgs;
++  SyncChangeStateArgs;
++  SyncRemoveArgs;
++};
++
++struct SyncInternalOp
++{
++  SyncInternalOpArgs mArgs;
++};
++
+ } // namespace dom
+ } // namespace mozilla
 diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/BackgroundSyncParent.cpp
 --- a/dom/backgroundsync/BackgroundSyncParent.cpp
 +++ b/dom/backgroundsync/BackgroundSyncParent.cpp
@@ -992,7 +1029,7 @@ diff --git a/dom/backgroundsync/DBSchema.cpp b/dom/backgroundsync/DBSchema.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/DBSchema.cpp
-@@ -0,0 +1,554 @@
+@@ -0,0 +1,553 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -1203,7 +1240,7 @@ new file mode 100644
 +
 +nsresult
 +Register(mozIStorageConnection* aConn,
-+         const SyncRegisterArgs& aRegisterArgs)
++         const SyncRegisterArgs& aArgs)
 +{
 +  MOZ_ASSERT(!NS_IsMainThread());
 +  MOZ_ASSERT(aConn);
@@ -1229,17 +1266,17 @@ new file mode 100644
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +  nsString id;
-+  GetId(aRegisterArgs.mScope(), aRegisterArgs.mTag(), id);
++  GetId(aArgs.mScope(), aArgs.mTag(), id);
 +
 +  rv = state->BindStringByName(NS_LITERAL_CSTRING("id"), id);
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +  rv = state->BindStringByName(NS_LITERAL_CSTRING("scope"),
-+                               aRegisterArgs.mScope());
++                               aArgs.mScope());
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +  rv = state->BindStringByName(NS_LITERAL_CSTRING("tag"),
-+                               aRegisterArgs.mTag());
++                               aArgs.mTag());
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +  rv = state->BindInt32ByName(NS_LITERAL_CSTRING("state"),
@@ -1258,7 +1295,7 @@ new file mode 100644
 +
 +nsresult
 +GetTags(mozIStorageConnection* aConn,
-+        const SyncGetTagsArgs& aGetTagsArgs,
++        const SyncGetTagsArgs& aArgs,
 +        nsTArray<nsString>& aTags)
 +{
 +  MOZ_ASSERT(!NS_IsMainThread());
@@ -1324,7 +1361,7 @@ new file mode 100644
 +
 +nsresult
 +Remove(mozIStorageConnection* aConn,
-+       const nsAString& aId)
++       const SyncRemoveArgs& aArgs)
 +{
 +  MOZ_ASSERT(!NS_IsMainThread());
 +  MOZ_ASSERT(aConn);
@@ -1335,7 +1372,7 @@ new file mode 100644
 +  ), getter_AddRefs(state));
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
-+  rv = state->BindStringByName(NS_LITERAL_CSTRING("id"), aId);
++  rv = state->BindStringByName(NS_LITERAL_CSTRING("id"), aArgs.mId());
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +  rv = state->Execute();
@@ -1346,8 +1383,7 @@ new file mode 100644
 +
 +nsresult
 +ChangeState(mozIStorageConnection* aConn,
-+            const nsAString& aId,
-+            const Registration::State aState)
++            const SyncChangeStateArgs& aArgs)
 +{
 +  MOZ_ASSERT(!NS_IsMainThread());
 +  MOZ_ASSERT(aConn);
@@ -1359,10 +1395,10 @@ new file mode 100644
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +  rv = state->BindInt32ByName(NS_LITERAL_CSTRING("regstate"),
-+                              static_cast<int32_t>(aState));
++                              static_cast<int32_t>(aArgs.mState()));
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
-+  rv = state->BindStringByName(NS_LITERAL_CSTRING("id"), aId);
++  rv = state->BindStringByName(NS_LITERAL_CSTRING("id"), aArgs.mId());
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +  rv = state->Execute();
@@ -1551,7 +1587,7 @@ diff --git a/dom/backgroundsync/DBSchema.h b/dom/backgroundsync/DBSchema.h
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/DBSchema.h
-@@ -0,0 +1,61 @@
+@@ -0,0 +1,60 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -1579,11 +1615,11 @@ new file mode 100644
 +
 +nsresult
 +Register(mozIStorageConnection* aConn,
-+         const SyncRegisterArgs& aRegisterArgs);
++         const SyncRegisterArgs& aArgs);
 +
 +nsresult
 +GetTags(mozIStorageConnection* aConn,
-+        const SyncGetTagsArgs& aGetTagsArgs,
++        const SyncGetTagsArgs& aArgs,
 +        nsTArray<nsString>& aTags);
 +
 +nsresult
@@ -1592,12 +1628,11 @@ new file mode 100644
 +
 +nsresult
 +Remove(mozIStorageConnection* aConn,
-+       const nsAString& aId);
++       const SyncRemoveArgs& aArgs);
 +
 +nsresult
 +ChangeState(mozIStorageConnection* aConn,
-+            const nsAString& aId,
-+            const Registration::State aState);
++            const SyncChangeStateArgs& aArgs);
 +
 +// Note, this works best when its NOT executed within a transaction.
 +nsresult
@@ -3332,7 +3367,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/StorageManager.cpp
-@@ -0,0 +1,718 @@
+@@ -0,0 +1,781 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -3741,10 +3776,10 @@ new file mode 100644
 +  virtual void
 +  Complete(nsresult aRv) override
 +  {
-+    if (NS_WARN_IF(NS_FAILED(aRv))) {
-+      return;
-+    }
-+    mManager->OnGetAllComplete(mRegistrations);
++    NS_WARN_IF(NS_FAILED(aRv));
++    // We need to remove the reference to the request independently of
++    // its result so we can close the context.
++    mManager->OnInternalRequestComplete(mRequestId, mRegistrations);
 +  }
 +
 +private:
@@ -3758,16 +3793,16 @@ new file mode 100644
 +public:
 +  RemoveAction(const nsID& aRequestId,
 +               StorageManager* aManager,
-+               const nsAString& aId)
++               const SyncRemoveArgs& aRemoveArgs)
 +    : BaseAction(aRequestId, aManager)
-+    , mId(aId)
++    , mArgs(aRemoveArgs)
 +  {}
 +
 +  virtual nsresult
 +  RunSyncOnTarget(const QuotaInfo& aQuotaInfo,
 +                  mozIStorageConnection* aConn) override
 +  {
-+    nsresult rv = db::Remove(aConn, mId);
++    nsresult rv = db::Remove(aConn, mArgs);
 +    NS_WARN_IF(NS_FAILED(rv));
 +    return rv;
 +  }
@@ -3776,10 +3811,13 @@ new file mode 100644
 +  Complete(nsresult aRv) override
 +  {
 +    NS_WARN_IF(NS_FAILED(aRv));
++    // We need to remove the reference to the request independently of
++    // its result so we can close the context.
++    mManager->OnInternalRequestComplete(mRequestId);
 +  }
 +
 +private:
-+  nsString mId;
++  SyncRemoveArgs mArgs;
 +};
 +
 +// ---------------------------------------------------------------------------
@@ -3789,18 +3827,16 @@ new file mode 100644
 +public:
 +  ChangeStateAction(const nsID& aRequestId,
 +                   StorageManager* aManager,
-+                   const nsAString& aId,
-+                   Registration::State aState)
++                   const SyncChangeStateArgs& aChangeStateArgs)
 +    : BaseAction(aRequestId, aManager)
-+    , mId(aId)
-+    , mState(aState)
++    , mArgs(aChangeStateArgs)
 +  {}
 +
 +  virtual nsresult
 +  RunSyncOnTarget(const QuotaInfo& aQuotaInfo,
 +                  mozIStorageConnection* aConn) override
 +  {
-+    nsresult rv = db::ChangeState(aConn, mId, mState);
++    nsresult rv = db::ChangeState(aConn, mArgs);
 +    NS_WARN_IF(NS_FAILED(rv));
 +    return rv;
 +  }
@@ -3809,11 +3845,13 @@ new file mode 100644
 +  Complete(nsresult aRv) override
 +  {
 +    NS_WARN_IF(NS_FAILED(aRv));
++    // We need to remove the reference to the request independently of
++    // its result so we can close the context.
++    mManager->OnInternalRequestComplete(mRequestId);
 +  }
 +
 +private:
-+  nsString mId;
-+  Registration::State mState;
++  SyncChangeStateArgs mArgs;
 +};
 +
 +// ---------------------------------------------------------------------------
@@ -4041,11 +4079,71 @@ new file mode 100644
 +}
 +
 +void
-+StorageManager::OnGetAllComplete(nsTArray<Registration>& aRegistrations)
++StorageManager::ExecuteInternalRequest(const nsID& aRequestId,
++                                       const SyncInternalOp& aOp)
++{
++  NS_ASSERT_OWNINGTHREAD(StorageManager);
++  MOZ_ASSERT(mContext);
++
++  mPendingRequests.AppendElement(aRequestId);
++
++  if (NS_WARN_IF(mState == Closing)) {
++    OnInternalRequestComplete(aRequestId);
++    return;
++  }
++
++  RefPtr<StorageContext> context = mContext;
++  MOZ_ASSERT(!context->IsCanceled());
++
++  RefPtr<StorageAction> action;
++
++  switch(aOp.mArgs().type()) {
++    case SyncInternalOpArgs::TSyncGetAllArgs:
++    {
++      action = new GetAllAction(aRequestId, this);
++      break;
++    }
++    case SyncInternalOpArgs::TSyncChangeStateArgs:
++    {
++      action = new ChangeStateAction(aRequestId, this,
++                                     aOp.mArgs().get_SyncChangeStateArgs());
++      break;
++    }
++    case SyncInternalOpArgs::TSyncRemoveArgs:
++    {
++      action = new RemoveAction(aRequestId, this,
++                                aOp.mArgs().get_SyncRemoveArgs());
++      break;
++    }
++    default:
++    {
++      MOZ_CRASH("Unknown BackgroundSync internal request");
++    }
++  }
++
++  context->Dispatch(action);
++}
++
++void
++StorageManager::OnInternalRequestComplete(const nsID& aRequestId)
++{
++  NS_ASSERT_OWNINGTHREAD(StorageManager);
++  MOZ_ASSERT(mPendingRequests.Contains(aRequestId));
++
++  mPendingRequests.RemoveElement(aRequestId);
++
++  MaybeAllowContextToClose();
++}
++
++void
++StorageManager::OnInternalRequestComplete(const nsID& aRequestId,
++                                          nsTArray<Registration>& aRegistrations)
 +{
 +  NS_ASSERT_OWNINGTHREAD(StorageManager);
 +
 +  // XXX Notify listener
++
++  OnInternalRequestComplete(aRequestId);
 +}
 +
 +} // namespace backgroundsync
@@ -4055,7 +4153,7 @@ diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageMan
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/StorageManager.h
-@@ -0,0 +1,113 @@
+@@ -0,0 +1,118 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -4148,7 +4246,12 @@ new file mode 100644
 +
 +  void OnRequestComplete(const nsID& aRequestId,
 +                         const SyncOpResponse& aResponse);
-+  void OnGetAllComplete(nsTArray<Registration>& aRegistrations);
++
++  void ExecuteInternalRequest(const nsID& aRequestId,
++                              const SyncInternalOp& aOp);
++  void OnInternalRequestComplete(const nsID& aRequestId);
++  void OnInternalRequestComplete(const nsID& aRequestId,
++                                 nsTArray<Registration>& aRegistrations);
 +
 +  RefPtr<StorageManagerId> mManagerId;
 +  nsCOMPtr<nsIThread> mIOThread;
