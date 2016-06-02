@@ -6,7 +6,7 @@ Bug 1217544 - Implement one-off BackgroundSync API. Part 7: BackgroundSyncServic
 diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh
 --- a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh
 +++ b/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh
-@@ -31,17 +31,16 @@ union SyncOpArgs
+@@ -31,33 +31,48 @@ union SyncOpArgs
  struct SyncOp
  {
    PrincipalInfo mPrincipal;
@@ -23,7 +23,72 @@ diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsyn
    nsString[] mTags;
  };
  
++struct Registration
++{
++  nsString mId;
++  nsString mScope;
++  nsString mTag;
++  RegistrationState mState;
++  bool mLastChance;
++};
++
++struct SyncGetAllResponse
++{
++  Registration[] mRegistrations;
++};
++
  struct SyncOpError
+ {
+   uint32_t mCode;
+ };
+ 
+ union SyncOpResponse
+ {
++  void_t;
+   SyncRegisterResponse;
+   SyncGetTagsResponse;
++  SyncGetAllResponse;
+   SyncOpError;
+ };
+ 
+ struct SyncGetAllArgs
+ {};
+ 
+ struct SyncChangeStateArgs
+ {
+@@ -77,32 +92,11 @@ union SyncInternalOpArgs
+   SyncRemoveArgs;
+ };
+ 
+ struct SyncInternalOp
+ {
+   SyncInternalOpArgs mArgs;
+ };
+ 
+-struct Registration
+-{
+-  nsString mId;
+-  nsString mScope;
+-  nsString mTag;
+-  RegistrationState mState;
+-  bool mLastChance;
+-};
+-
+-struct SyncGetAllResponse
+-{
+-  Registration[] mRegistrations;
+-};
+-
+-union SyncInternalOpResponse
+-{
+-  void_t;
+-  SyncGetAllResponse;
+-  SyncOpError;
+-};
+-
+ } // namespace backgroundsync
+ } // namespace dom
+ } // namespace mozilla
 diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/BackgroundSyncParent.cpp
 --- a/dom/backgroundsync/BackgroundSyncParent.cpp
 +++ b/dom/backgroundsync/BackgroundSyncParent.cpp
@@ -586,7 +651,125 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
        ref->Init(oldManager);
  
        MOZ_ASSERT(!sFactory->mManagerList.Contains(ref));
-@@ -502,21 +503,22 @@ public:
+@@ -331,25 +332,20 @@ public:
+     NS_WARN_IF(NS_FAILED(rv));
+     return rv;
+   }
+ 
+   virtual void
+   Complete(nsresult aRv) override
+   {
+     if (NS_FAILED(aRv)) {
+-      mManager->OnRequestComplete<SyncOpResponse>(
+-        mRequestId,
+-        SyncOpError(static_cast<uint32_t>(aRv))
+-      );
++      mManager->OnRequestComplete(mRequestId,
++                                  SyncOpError(static_cast<uint32_t>(aRv)));
+     } else {
+-      mManager->OnRequestComplete<SyncOpResponse>(
+-          mRequestId,
+-          SyncRegisterResponse()
+-      );
++      mManager->OnRequestComplete(mRequestId, SyncRegisterResponse());
+     }
+   }
+ 
+ private:
+   SyncRegisterArgs mArgs;
+ };
+ 
+ // ---------------------------------------------------------------------------
+@@ -372,25 +368,20 @@ public:
+     NS_WARN_IF(NS_FAILED(rv));
+     return rv;
+   }
+ 
+   virtual void
+   Complete(nsresult aRv) override
+   {
+     if (NS_FAILED(aRv)) {
+-      mManager->OnRequestComplete<SyncOpResponse>(
+-        mRequestId,
+-        SyncOpError(static_cast<uint32_t>(aRv))
+-      );
++      mManager->OnRequestComplete(mRequestId,
++                                  SyncOpError(static_cast<uint32_t>(aRv)));
+     } else {
+-      mManager->OnRequestComplete<SyncOpResponse>(
+-          mRequestId,
+-          SyncGetTagsResponse(mTags)
+-      );
++      mManager->OnRequestComplete(mRequestId, SyncGetTagsResponse(mTags));
+     }
+   }
+ 
+ private:
+   SyncGetTagsArgs mArgs;
+   nsTArray<nsString> mTags;
+ };
+ 
+@@ -414,20 +405,17 @@ public:
+   }
+ 
+   virtual void
+   Complete(nsresult aRv) override
+   {
+     NS_WARN_IF(NS_FAILED(aRv));
+     // We need to remove the reference to the request independently of
+     // its result so we can close the context.
+-    mManager->OnRequestComplete<SyncInternalOpResponse>(
+-        mRequestId,
+-        SyncGetAllResponse(mRegistrations)
+-    );
++    mManager->OnRequestComplete(mRequestId, SyncGetAllResponse(mRegistrations));
+   }
+ 
+ private:
+   nsTArray<Registration> mRegistrations;
+ };
+ 
+ // ---------------------------------------------------------------------------
+ 
+@@ -451,20 +439,17 @@ public:
+   }
+ 
+   virtual void
+   Complete(nsresult aRv) override
+   {
+     NS_WARN_IF(NS_FAILED(aRv));
+     // We need to remove the reference to the request independently of
+     // its result so we can close the context.
+-    mManager->OnRequestComplete<SyncInternalOpResponse>(
+-        mRequestId,
+-        SyncInternalOpResponse(void_t())
+-    );
++    mManager->OnRequestComplete(mRequestId, SyncOpResponse(void_t()));
+   }
+ 
+ private:
+   SyncRemoveArgs mArgs;
+ };
+ 
+ // ---------------------------------------------------------------------------
+ 
+@@ -488,35 +473,34 @@ public:
+   }
+ 
+   virtual void
+   Complete(nsresult aRv) override
+   {
+     NS_WARN_IF(NS_FAILED(aRv));
+     // We need to remove the reference to the request independently of
+     // its result so we can close the context.
+-    mManager->OnRequestComplete<SyncInternalOpResponse>(
+-        mRequestId,
+-        SyncInternalOpResponse(void_t())
+-    );
++    mManager->OnRequestComplete(mRequestId,
++                                SyncOpResponse(void_t()));
+   }
+ 
  private:
    SyncChangeStateArgs mArgs;
  };
@@ -611,7 +794,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
  {
    mozilla::ipc::AssertIsOnBackgroundThread();
  
-@@ -533,34 +535,39 @@ StorageManager::ShutdownAll()
+@@ -533,34 +517,39 @@ StorageManager::ShutdownAll()
  void
  StorageManager::Abort(const nsACString& aOrigin)
  {
@@ -653,94 +836,34 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
    MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(
          NewRunnableMethod(ioThread, &nsIThread::Shutdown)));*/
  }
-@@ -668,28 +675,29 @@ StorageManager::MaybeAllowContextToClose
-     // Mark the StorageManager as invalid so that it won't get used again.
-     NoteClosing();
- 
-     context->AllowToClose();
-   }
- }
- 
- // Common to DOM and internal requests.
-+template<typename T>
- void
- StorageManager::ExecuteRequest(const nsID& aRequestId, StorageAction* aAction)
- {
-   NS_ASSERT_OWNINGTHREAD(StorageManager);
-   MOZ_ASSERT(mContext);
-   MOZ_ASSERT(aAction);
- 
-   mPendingRequests.AppendElement(aRequestId);
- 
-   if (NS_WARN_IF(mState == Closing)) {
--    OnRequestComplete(aRequestId,
--                      SyncOpError(static_cast<uint32_t>(NS_ERROR_ABORT)));
-+    OnRequestComplete<T>(aRequestId,
-+                         SyncOpError(static_cast<uint32_t>(NS_ERROR_ABORT)));
-     return;
-   }
- 
-   RefPtr<StorageContext> context = mContext;
-   MOZ_ASSERT(!context->IsCanceled());
- 
-   context->Dispatch(aAction);
- }
-@@ -714,17 +722,17 @@ StorageManager::ExecuteRequest(const nsI
-       break;
-     }
-     default:
-     {
-       MOZ_CRASH("Unknown BackgroundSync request");
-     }
-   }
- 
--  ExecuteRequest(aRequestId, action);
-+  ExecuteRequest<SyncOpResponse>(aRequestId, action);
- }
- 
- // Internal request.
- void
- StorageManager::ExecuteRequest(const nsID& aRequestId, const SyncInternalOp& aOp)
- {
-   RefPtr<StorageAction> action;
- 
-@@ -747,17 +755,17 @@ StorageManager::ExecuteRequest(const nsI
-       break;
-     }
-     default:
-     {
-       MOZ_CRASH("Unknown BackgroundSync internal request");
-     }
-   }
- 
--  ExecuteRequest(aRequestId, action);
-+  ExecuteRequest<SyncInternalOpResponse>(aRequestId, action);
- }
- 
- // Common to DOM and internal responses.
- void
- StorageManager::OnRequestComplete(const nsID& aRequestId)
- {
+@@ -762,20 +751,30 @@ StorageManager::OnRequestComplete(const 
    NS_ASSERT_OWNINGTHREAD(StorageManager);
    MOZ_ASSERT(mPendingRequests.Contains(aRequestId));
-@@ -768,14 +776,23 @@ StorageManager::OnRequestComplete(const 
+ 
+   mPendingRequests.RemoveElement(aRequestId);
+ 
+   MaybeAllowContextToClose();
  }
  
- template<typename T>
+-template<typename T>
  void
- StorageManager::OnRequestComplete(const nsID& aRequestId, const T& aResponse)
+-StorageManager::OnRequestComplete(const nsID& aRequestId, const T& aResponse)
++StorageManager::OnRequestComplete(const nsID& aRequestId,
++                                  const SyncOpResponse& aResponse)
  {
-   // XXX Notify listener
- 
+-  // XXX Notify listener
 +  switch(aResponse.type()) {
 +    case SyncOpResponse::TSyncRegisterResponse:
 +    case SyncOpResponse::TSyncGetTagsResponse:
++    case SyncOpResponse::TSyncOpError:
 +      mService->OnRequestComplete(aRequestId, SyncOpResponse(aResponse));
++      break;
++    case SyncOpResponse::TSyncGetAllResponse:
 +      break;
 +    default:
 +      break;
 +  }
-+
+ 
    OnRequestComplete(aRequestId);
  }
  
@@ -770,7 +893,7 @@ diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageMan
      Closing
    };
  
-@@ -74,32 +75,36 @@ private:
+@@ -74,32 +75,35 @@ private:
    class BaseAction;
    class ChangeStateAction;
    class Factory;
@@ -792,10 +915,11 @@ diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageMan
    void MaybeAllowContextToClose();
  
    void OnRequestComplete(const nsID& aRequestId);
-   template<typename T>
-   void OnRequestComplete(const nsID& aRequestId, const T& aResponse);
+-  template<typename T>
+-  void OnRequestComplete(const nsID& aRequestId, const T& aResponse);
++  void OnRequestComplete(const nsID& aRequestId,
++                         const SyncOpResponse& aResponse);
  
-+  template<typename T>
    void ExecuteRequest(const nsID& aRequestId, StorageAction* aAction);
    void ExecuteRequest(const nsID& aRequestId, const SyncInternalOp& aOp);
  
