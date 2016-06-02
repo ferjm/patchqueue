@@ -992,7 +992,7 @@ diff --git a/dom/backgroundsync/DBSchema.cpp b/dom/backgroundsync/DBSchema.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/DBSchema.cpp
-@@ -0,0 +1,535 @@
+@@ -0,0 +1,554 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -1349,7 +1349,26 @@ new file mode 100644
 +            const nsAString& aId,
 +            const Registration::State aState)
 +{
-+  return NS_OK;
++  MOZ_ASSERT(!NS_IsMainThread());
++  MOZ_ASSERT(aConn);
++
++  nsCOMPtr<mozIStorageStatement> state;
++  nsresult rv = aConn->CreateStatement(NS_LITERAL_CSTRING(
++    "UPDATE state SET state=:regstate WHERE id=:id;"
++  ), getter_AddRefs(state));
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  rv = state->BindInt32ByName(NS_LITERAL_CSTRING("regstate"),
++                              static_cast<int32_t>(aState));
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  rv = state->BindStringByName(NS_LITERAL_CSTRING("id"), aId);
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  rv = state->Execute();
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  return rv;
 +}
 +
 +nsresult
@@ -3313,7 +3332,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/StorageManager.cpp
-@@ -0,0 +1,707 @@
+@@ -0,0 +1,718 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -3722,7 +3741,10 @@ new file mode 100644
 +  virtual void
 +  Complete(nsresult aRv) override
 +  {
-+    // XXX
++    if (NS_WARN_IF(NS_FAILED(aRv))) {
++      return;
++    }
++    mManager->OnGetAllComplete(mRegistrations);
 +  }
 +
 +private:
@@ -3753,7 +3775,7 @@ new file mode 100644
 +  virtual void
 +  Complete(nsresult aRv) override
 +  {
-+    // XXX
++    NS_WARN_IF(NS_FAILED(aRv));
 +  }
 +
 +private:
@@ -3786,7 +3808,7 @@ new file mode 100644
 +  virtual void
 +  Complete(nsresult aRv) override
 +  {
-+    // XXX
++    NS_WARN_IF(NS_FAILED(aRv));
 +  }
 +
 +private:
@@ -4018,6 +4040,14 @@ new file mode 100644
 +  MaybeAllowContextToClose();
 +}
 +
++void
++StorageManager::OnGetAllComplete(nsTArray<Registration>& aRegistrations)
++{
++  NS_ASSERT_OWNINGTHREAD(StorageManager);
++
++  // XXX Notify listener
++}
++
 +} // namespace backgroundsync
 +} // namespace dom
 +} // namespace mozilla
@@ -4025,7 +4055,7 @@ diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageMan
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/StorageManager.h
-@@ -0,0 +1,112 @@
+@@ -0,0 +1,113 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -4118,6 +4148,7 @@ new file mode 100644
 +
 +  void OnRequestComplete(const nsID& aRequestId,
 +                         const SyncOpResponse& aResponse);
++  void OnGetAllComplete(nsTArray<Registration>& aRegistrations);
 +
 +  RefPtr<StorageManagerId> mManagerId;
 +  nsCOMPtr<nsIThread> mIOThread;
