@@ -211,7 +211,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncService.cpp
-@@ -0,0 +1,215 @@
+@@ -0,0 +1,228 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -403,7 +403,20 @@ new file mode 100644
 +BackgroundSyncService::OnRequestComplete(const nsID& aRequestId,
 +                                         const SyncOpResponse& aResponse)
 +{
-+  Response(ReleaseStorageManagerRef(aRequestId), aRequestId, aResponse);
++  uint64_t actorId = ReleaseStorageManagerRef(aRequestId);
++  // If we have an actor ID, this is a DOM request which response needs to be
++  // reported back to the content process through the IPC actor.
++  if (actorId != 0) {
++    return Response(actorId, aRequestId, aResponse);
++  }
++
++  // Otherwise, this is a response to an internal request that can be handled
++  // here.
++
++  // So far, we only care about GetAll responses.
++  if (aResponse.type() != SyncOpResponse::TSyncGetAllResponse) {
++    return;
++  }
 +}
 +
 +/**
