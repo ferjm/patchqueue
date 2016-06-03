@@ -6,9 +6,6 @@ bug1217544.background.sync.part5.managerid.patch
 bug1217544.background.sync.part6.onlineobserver.patch
 bug1217544.background.sync.part7.service.patch
 debug.patch
-bug1217544.background.sync.part8.storage.patch
-bug1217544.background.sync.part5.syncstore.patch
-bug1217544.background.sync.part6.syncservice.patch
 bug1217544.background.sync.tests.patch
 bug1252573.mobileid.patch
 try-all

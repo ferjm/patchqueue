@@ -1,5 +1,0 @@
-# HG changeset patch
-# User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  3bd6a0dccce08ecd2a4608d2975e882f8e0256bd
-Bug 1217544 - Implement one-off BackgroundSync API. Part 8: StorageManager. r=baku
-
