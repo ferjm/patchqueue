@@ -4409,7 +4409,7 @@ diff --git a/dom/backgroundsync/StorageManagerId.cpp b/dom/backgroundsync/Storag
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/StorageManagerId.cpp
-@@ -0,0 +1,175 @@
+@@ -0,0 +1,214 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -4444,9 +4444,35 @@ new file mode 100644
 +  return factory.forget();
 +}
 +
++// static
++already_AddRefed<StorageManagerIdFactory>
++StorageManagerIdFactory::Create(Listener* aListener)
++{
++  AssertIsOnBackgroundThread();
++
++  RefPtr<StorageManagerIdFactory> factory =
++    new StorageManagerIdFactory(aListener);
++
++  MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(factory));
++
++  return factory.forget();
++}
++
 +StorageManagerIdFactory::StorageManagerIdFactory(
 +    Listener* aListener, const PrincipalInfo& aPrincipalInfo)
-+  : mPrincipalInfo(aPrincipalInfo)
++  : mUseSystemPrincipal(false)
++  , mPrincipalInfo(aPrincipalInfo)
++  , mInitiatingThread(NS_GetCurrentThread())
++{
++  AssertIsOnBackgroundThread();
++  MOZ_ASSERT(mInitiatingThread);
++  MOZ_ASSERT(aListener);
++
++  mListenerList.AppendElement(aListener);
++}
++
++StorageManagerIdFactory::StorageManagerIdFactory(Listener* aListener)
++  : mUseSystemPrincipal(true)
 +  , mInitiatingThread(NS_GetCurrentThread())
 +{
 +  AssertIsOnBackgroundThread();
@@ -4489,10 +4515,23 @@ new file mode 100644
 +  AssertIsOnMainThread();
 +
 +  nsresult rv;
-+  RefPtr<nsIPrincipal> principal = PrincipalInfoToPrincipal(mPrincipalInfo,
-+                                                            &rv);
-+  if (NS_WARN_IF(NS_FAILED(rv))) {
-+    return rv;
++  RefPtr<nsIPrincipal> principal;
++  if (mUseSystemPrincipal) {
++    nsCOMPtr<nsIScriptSecurityManager> secMan =
++      do_GetService(NS_SCRIPTSECURITYMANAGER_CONTRACTID, &rv);
++    if (NS_WARN_IF(NS_FAILED(rv))) {
++      return rv;
++    }
++
++    rv = secMan->GetSystemPrincipal(getter_AddRefs(principal));
++    if (NS_WARN_IF(NS_FAILED(rv))) {
++      return rv;
++    }
++  } else {
++    principal = PrincipalInfoToPrincipal(mPrincipalInfo, &rv);
++    if (NS_WARN_IF(NS_FAILED(rv))) {
++      return rv;
++    }
 +  }
 +
 +  rv = StorageManagerId::Create(principal, getter_AddRefs(mManagerId));
@@ -4589,7 +4628,7 @@ diff --git a/dom/backgroundsync/StorageManagerId.h b/dom/backgroundsync/StorageM
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/StorageManagerId.h
-@@ -0,0 +1,94 @@
+@@ -0,0 +1,99 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -4656,6 +4695,9 @@ new file mode 100644
 +  static already_AddRefed<StorageManagerIdFactory>
 +  Create(Listener* aListener, const PrincipalInfo& aPrincipalInfo);
 +
++  static already_AddRefed<StorageManagerIdFactory>
++  Create(Listener* aListener);
++
 +  void AddListener(Listener* aListener);
 +  // The Listener must call RemoveListener() when
 +  // OnStorageManagerIdCreated is called or when
@@ -4665,12 +4707,14 @@ new file mode 100644
 +private:
 +  StorageManagerIdFactory(Listener* aListener,
 +                          const PrincipalInfo& aPrincipalInfo);
++  StorageManagerIdFactory(Listener* aListener);
 +  virtual ~StorageManagerIdFactory();
 +
 +  // Weak reference cleared by RemoveListener().
 +  typedef nsTObserverArray<Listener*> ListenerList;
 +  ListenerList mListenerList;
 +
++  bool mUseSystemPrincipal;
 +  const PrincipalInfo mPrincipalInfo;
 +  RefPtr<nsIThread> mInitiatingThread;
 +  RefPtr<StorageManagerId> mManagerId;
