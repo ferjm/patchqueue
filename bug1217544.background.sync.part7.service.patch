@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  176e3a2a71871e93557a4a01a8fd82c214ed536c
+# Parent  23e1cb298c1feeca2f57bc31ec2cf3242dfae087
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: BackgroundSyncService. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/BackgroundSyncParent.cpp
@@ -211,7 +211,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncService.cpp
-@@ -0,0 +1,252 @@
+@@ -0,0 +1,254 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -308,6 +308,7 @@ new file mode 100644
 +
 +  nsresult rv = StorageManager::GetOrCreate(this,
 +                                            aManagerId,
++                                            StorageManager::StorageType::Chrome,
 +                                            getter_AddRefs(mSystemStorageManager));
 +  NS_WARN_IF(NS_FAILED(rv));
 +}
@@ -395,6 +396,7 @@ new file mode 100644
 +  RefPtr<StorageManager> manager;
 +  nsresult rv = StorageManager::GetOrCreate(this,
 +                                            aManagerId,
++                                            StorageManager::StorageType::Content,
 +                                            getter_AddRefs(manager));
 +  if (NS_WARN_IF(NS_FAILED(rv))) {
 +    return Response(aActorId, aRequestId,
@@ -573,7 +575,7 @@ new file mode 100644
 diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageManager.cpp
 --- a/dom/backgroundsync/StorageManager.cpp
 +++ b/dom/backgroundsync/StorageManager.cpp
-@@ -47,17 +47,18 @@ public:
+@@ -67,17 +67,18 @@ public:
  // Singleton class to track StorageManager instances and ensure there is only
  // one for each unique StorageManagerId.
  class StorageManager::Factory
@@ -585,6 +587,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
 -  GetOrCreate(StorageManagerId* aManagerId,
 +  GetOrCreate(BackgroundSyncService* aService,
 +              StorageManagerId* aManagerId,
+               StorageType aStorageType,
                StorageManager** aManagerOut)
    {
      AssertIsOnBackgroundThread();
@@ -592,8 +595,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
      // Ensure there is a factory instance. This forces the Get() call
      // below to use the same factory.
      nsresult rv = MaybeCreateInstance();
-     if (NS_WARN_IF(NS_FAILED(rv))) {
-@@ -68,17 +69,17 @@ public:
+@@ -89,17 +90,17 @@ public:
      if (!ref) {
        nsCOMPtr<nsIThread> ioThread;
        rv = NS_NewNamedThread("BSyncIOThread",
@@ -602,8 +604,8 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
          return rv;
        }
  
--      ref = new StorageManager(aManagerId, ioThread);
-+      ref = new StorageManager(aService, aManagerId, ioThread);
+-      ref = new StorageManager(aManagerId, ioThread, aStorageType);
++      ref = new StorageManager(aService, aManagerId, ioThread, aStorageType);
  
        // There may be an old manager for this origin in the process of
        // cleaning up.  We need to tell the new manager about this so
@@ -612,7 +614,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
        ref->Init(oldManager);
  
        MOZ_ASSERT(!sFactory->mManagerList.Contains(ref));
-@@ -331,25 +332,20 @@ public:
+@@ -352,25 +353,20 @@ public:
      NS_WARN_IF(NS_FAILED(rv));
      return rv;
    }
@@ -641,7 +643,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
  };
  
  // ---------------------------------------------------------------------------
-@@ -372,25 +368,20 @@ public:
+@@ -393,25 +389,20 @@ public:
      NS_WARN_IF(NS_FAILED(rv));
      return rv;
    }
@@ -670,7 +672,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
    nsTArray<nsString> mTags;
  };
  
-@@ -414,20 +405,17 @@ public:
+@@ -435,20 +426,17 @@ public:
    }
  
    virtual void
@@ -692,7 +694,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
  
  // ---------------------------------------------------------------------------
  
-@@ -451,20 +439,17 @@ public:
+@@ -472,20 +460,17 @@ public:
    }
  
    virtual void
@@ -714,7 +716,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
  
  // ---------------------------------------------------------------------------
  
-@@ -488,35 +473,33 @@ public:
+@@ -509,36 +494,34 @@ public:
    }
  
    virtual void
@@ -741,11 +743,12 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
 -StorageManager::GetOrCreate(StorageManagerId* aManagerId,
 +StorageManager::GetOrCreate(BackgroundSyncService* aService,
 +                            StorageManagerId* aManagerId,
+                             StorageType aStorageType,
                              StorageManager** aManagerOut)
  {
    AssertIsOnBackgroundThread();
--  return Factory::GetOrCreate(aManagerId, aManagerOut);
-+  return Factory::GetOrCreate(aService, aManagerId, aManagerOut);
+-  return Factory::GetOrCreate(aManagerId, aStorageType, aManagerOut);
++  return Factory::GetOrCreate(aService, aManagerId, aStorageType, aManagerOut);
  }
  
  // static
@@ -754,7 +757,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
  {
    mozilla::ipc::AssertIsOnBackgroundThread();
  
-@@ -533,34 +516,39 @@ StorageManager::ShutdownAll()
+@@ -555,36 +538,41 @@ StorageManager::ShutdownAll()
  void
  StorageManager::Abort(const nsACString& aOrigin)
  {
@@ -766,7 +769,8 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
 -StorageManager::StorageManager(StorageManagerId* aManagerId,
 +StorageManager::StorageManager(BackgroundSyncService* aService,
 +                               StorageManagerId* aManagerId,
-                                nsIThread* aIOThread)
+                                nsIThread* aIOThread,
+                                StorageType aStorageType)
 -  : mManagerId(aManagerId)
 +  : mService(aService)
 +  , mManagerId(aManagerId)
@@ -774,6 +778,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
    , mContext(nullptr)
    , mShuttingDown(false)
    , mState(Open)
+   , mStorageType(aStorageType)
  {
 +  MOZ_ASSERT(mService);
    MOZ_ASSERT(mManagerId);
@@ -796,7 +801,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
    MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(
          NewRunnableMethod(ioThread, &nsIThread::Shutdown)));*/
  }
-@@ -762,20 +750,30 @@ StorageManager::OnRequestComplete(const 
+@@ -791,20 +779,30 @@ StorageManager::OnRequestComplete(const 
    NS_ASSERT_OWNINGTHREAD(StorageManager);
    MOZ_ASSERT(mPendingRequests.Contains(aRequestId));
  
@@ -833,18 +838,19 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
 diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageManager.h
 --- a/dom/backgroundsync/StorageManager.h
 +++ b/dom/backgroundsync/StorageManager.h
-@@ -29,17 +29,18 @@ namespace backgroundsync {
-  * until that request is completed or the actor requesting it is destroyed.
-  */
- 
- class StorageManager final
- {
- public:
+@@ -35,17 +35,18 @@ public:
    NS_INLINE_DECL_REFCOUNTING(StorageManager)
+ 
+   enum StorageType
+   {
+     Content,
+     Chrome
+   };
  
 -  static nsresult GetOrCreate(StorageManagerId* aManagerId,
 +  static nsresult GetOrCreate(BackgroundSyncService* aService,
 +                              StorageManagerId* aManagerId,
+                               StorageType aStorageType,
                                StorageManager** aManagerOut);
  
    enum State
@@ -852,8 +858,7 @@ diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageMan
      Open,
      Closing
    };
- 
-@@ -74,32 +75,35 @@ private:
+@@ -81,34 +82,36 @@ private:
    class BaseAction;
    class ChangeStateAction;
    class Factory;
@@ -862,10 +867,11 @@ diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageMan
    class RegisterAction;
    class RemoveAction;
  
--  StorageManager(StorageManagerId* aManagerId, nsIThread* aIOThread);
+-  StorageManager(StorageManagerId* aManagerId,
 +  StorageManager(BackgroundSyncService* aService,
 +                 StorageManagerId* aManagerId,
-+                 nsIThread* aIOThread);
+                  nsIThread* aIOThread,
+                  StorageType aStorageType);
    ~StorageManager();
  
    void Init(StorageManager* aOldManager);
@@ -905,11 +911,11 @@ diff --git a/dom/backgroundsync/moz.build b/dom/backgroundsync/moz.build
      'BackgroundSyncChild.cpp',
      'BackgroundSyncParent.cpp',
 +    'BackgroundSyncService.cpp',
+     'ChromeDBSchema.cpp',
      'DBAction.cpp',
      'DBConnection.cpp',
      'DBSchema.cpp',
+     'DBSchemaUtils.cpp',
      'OnlineStateObserver.cpp',
      'QuotaClient.cpp',
      'StorageAction.cpp',
-     'StorageContext.cpp',
-     'StorageManager.cpp',
