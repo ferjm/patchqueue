@@ -954,7 +954,7 @@ new file mode 100644
 +
 +  // If we are closing here, then we must not have a transaction
 +  // open anywhere else. This should be guaranteed to succeed.
-+  MOZ_ALWAYS_SUCCEEDS(db::IncrementalVacuum(this));
++  MOZ_ALWAYS_SUCCEEDS(dbutils::IncrementalVacuum(this));
 +
 +  return mBase->Close();
 +}
@@ -3720,7 +3720,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/StorageManager.cpp
-@@ -0,0 +1,813 @@
+@@ -0,0 +1,781 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -3745,10 +3745,10 @@ new file mode 100644
 +// StorageActions that are executed when a StorageContext is first created.
 +// It ensures that the database is setup properly.
 +// This lets other actions not worry about these details.
-+class ContentSetupAction final : public SyncDBAction
++class SetupAction final : public SyncDBAction
 +{
 +public:
-+  ContentSetupAction()
++  SetupAction()
 +    : SyncDBAction(DBAction::Create)
 +  { }
 +
@@ -3758,25 +3758,6 @@ new file mode 100644
 +  {
 +    // Executes in its own transaction.
 +    nsresult rv = db::CreateOrMigrateSchema(aConn);
-+    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
-+
-+    return rv;
-+  }
-+};
-+
-+class ChromeSetupAction final : public SyncDBAction
-+{
-+public:
-+  ChromeSetupAction()
-+    : SyncDBAction(DBAction::Create)
-+  { }
-+
-+  virtual nsresult
-+  RunSyncOnTarget(const QuotaInfo& aQuotaInfo,
-+                  mozIStorageConnection* aConn) override
-+  {
-+    // Executes in its own transaction.
-+    nsresult rv = chromedb::CreateOrMigrateSchema(aConn);
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +    return rv;
@@ -3796,7 +3777,6 @@ new file mode 100644
 +
 +  static nsresult
 +  GetOrCreate(StorageManagerId* aManagerId,
-+              StorageType aStorageType,
 +              StorageManager** aManagerOut)
 +  {
 +    AssertIsOnBackgroundThread();
@@ -3811,16 +3791,12 @@ new file mode 100644
 +    RefPtr<StorageManager> ref = Get(aManagerId);
 +    if (!ref) {
 +      nsCOMPtr<nsIThread> ioThread;
-+      if (aStorageType == StorageType::Content) {
-+        rv = NS_NewNamedThread("BSyncIOThread", getter_AddRefs(ioThread));
-+      } else {
-+        rv = NS_NewNamedThread("BSyncChromeIOTh", getter_AddRefs(ioThread));
-+      }
++      rv = NS_NewNamedThread("BSyncIOThread", getter_AddRefs(ioThread));
 +      if (NS_WARN_IF(NS_FAILED(rv))) {
 +        return rv;
 +      }
 +
-+      ref = new StorageManager(aManagerId, ioThread, aStorageType);
++      ref = new StorageManager(aManagerId, ioThread);
 +
 +      // There may be an old manager for this origin in the process of
 +      // cleaning up.  We need to tell the new manager about this so
@@ -4255,11 +4231,10 @@ new file mode 100644
 +// static
 +nsresult
 +StorageManager::GetOrCreate(StorageManagerId* aManagerId,
-+                            StorageType aStorageType,
 +                            StorageManager** aManagerOut)
 +{
 +  AssertIsOnBackgroundThread();
-+  return Factory::GetOrCreate(aManagerId, aStorageType, aManagerOut);
++  return Factory::GetOrCreate(aManagerId, aManagerOut);
 +}
 +
 +// static
@@ -4287,14 +4262,12 @@ new file mode 100644
 +}
 +
 +StorageManager::StorageManager(StorageManagerId* aManagerId,
-+                               nsIThread* aIOThread,
-+                               StorageType aStorageType)
++                               nsIThread* aIOThread)
 +  : mManagerId(aManagerId)
 +  , mIOThread(aIOThread)
 +  , mContext(nullptr)
 +  , mShuttingDown(false)
 +  , mState(Open)
-+  , mStorageType(aStorageType)
 +{
 +  MOZ_ASSERT(mManagerId);
 +  MOZ_ASSERT(mIOThread);
@@ -4328,12 +4301,7 @@ new file mode 100644
 +  // Create the context immediately. Since there can at most be one
 +  // StorageContext per StorageManager, this lets us cleanly call
 +  // Factory::Remove() once the StorageContext goes away.
-+  RefPtr<StorageAction> setupAction;
-+  if (mStorageType == StorageType::Content) {
-+    setupAction = new ContentSetupAction();
-+  } else {
-+    setupAction = new ChromeSetupAction();
-+  }
++  RefPtr<StorageAction> setupAction = new SetupAction();
 +  RefPtr<StorageContext> ref = StorageContext::Create(this, mIOThread,
 +                                                      setupAction, oldContext);
 +  mContext = ref;
@@ -4538,7 +4506,7 @@ diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageMan
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/StorageManager.h
-@@ -0,0 +1,127 @@
+@@ -0,0 +1,117 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -4575,14 +4543,7 @@ new file mode 100644
 +public:
 +  NS_INLINE_DECL_REFCOUNTING(StorageManager)
 +
-+  enum StorageType
-+  {
-+    Content,
-+    Chrome
-+  };
-+
 +  static nsresult GetOrCreate(StorageManagerId* aManagerId,
-+                              StorageType aStorageType,
 +                              StorageManager** aManagerOut);
 +
 +  enum State
@@ -4628,8 +4589,7 @@ new file mode 100644
 +  class RemoveAction;
 +
 +  StorageManager(StorageManagerId* aManagerId,
-+                 nsIThread* aIOThread,
-+                 StorageType aStorageType);
++                 nsIThread* aIOThread);
 +  ~StorageManager();
 +
 +  void Init(StorageManager* aOldManager);
@@ -4655,8 +4615,6 @@ new file mode 100644
 +  bool mShuttingDown;
 +  State mState;
 +
-+  StorageType mStorageType;
-+
 +  // Keep a list of the request IDs coming from BackgroundSyncService.
 +  nsTArray<nsID> mPendingRequests;
 +};
@@ -4670,7 +4628,7 @@ diff --git a/dom/backgroundsync/StorageManagerId.cpp b/dom/backgroundsync/Storag
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/StorageManagerId.cpp
-@@ -0,0 +1,214 @@
+@@ -0,0 +1,175 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -4705,35 +4663,9 @@ new file mode 100644
 +  return factory.forget();
 +}
 +
-+// static
-+already_AddRefed<StorageManagerIdFactory>
-+StorageManagerIdFactory::Create(Listener* aListener)
-+{
-+  AssertIsOnBackgroundThread();
-+
-+  RefPtr<StorageManagerIdFactory> factory =
-+    new StorageManagerIdFactory(aListener);
-+
-+  MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(factory));
-+
-+  return factory.forget();
-+}
-+
 +StorageManagerIdFactory::StorageManagerIdFactory(
 +    Listener* aListener, const PrincipalInfo& aPrincipalInfo)
-+  : mUseSystemPrincipal(false)
-+  , mPrincipalInfo(aPrincipalInfo)
-+  , mInitiatingThread(NS_GetCurrentThread())
-+{
-+  AssertIsOnBackgroundThread();
-+  MOZ_ASSERT(mInitiatingThread);
-+  MOZ_ASSERT(aListener);
-+
-+  mListenerList.AppendElement(aListener);
-+}
-+
-+StorageManagerIdFactory::StorageManagerIdFactory(Listener* aListener)
-+  : mUseSystemPrincipal(true)
++  : mPrincipalInfo(aPrincipalInfo)
 +  , mInitiatingThread(NS_GetCurrentThread())
 +{
 +  AssertIsOnBackgroundThread();
@@ -4776,23 +4708,10 @@ new file mode 100644
 +  AssertIsOnMainThread();
 +
 +  nsresult rv;
-+  RefPtr<nsIPrincipal> principal;
-+  if (mUseSystemPrincipal) {
-+    nsCOMPtr<nsIScriptSecurityManager> secMan =
-+      do_GetService(NS_SCRIPTSECURITYMANAGER_CONTRACTID, &rv);
-+    if (NS_WARN_IF(NS_FAILED(rv))) {
-+      return rv;
-+    }
-+
-+    rv = secMan->GetSystemPrincipal(getter_AddRefs(principal));
-+    if (NS_WARN_IF(NS_FAILED(rv))) {
-+      return rv;
-+    }
-+  } else {
-+    principal = PrincipalInfoToPrincipal(mPrincipalInfo, &rv);
-+    if (NS_WARN_IF(NS_FAILED(rv))) {
-+      return rv;
-+    }
++  RefPtr<nsIPrincipal> principal =
++    PrincipalInfoToPrincipal(mPrincipalInfo, &rv);
++  if (NS_WARN_IF(NS_FAILED(rv))) {
++    return rv;
 +  }
 +
 +  rv = StorageManagerId::Create(principal, getter_AddRefs(mManagerId));
@@ -4889,7 +4808,7 @@ diff --git a/dom/backgroundsync/StorageManagerId.h b/dom/backgroundsync/StorageM
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/StorageManagerId.h
-@@ -0,0 +1,99 @@
+@@ -0,0 +1,94 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -4956,9 +4875,6 @@ new file mode 100644
 +  static already_AddRefed<StorageManagerIdFactory>
 +  Create(Listener* aListener, const PrincipalInfo& aPrincipalInfo);
 +
-+  static already_AddRefed<StorageManagerIdFactory>
-+  Create(Listener* aListener);
-+
 +  void AddListener(Listener* aListener);
 +  // The Listener must call RemoveListener() when
 +  // OnStorageManagerIdCreated is called or when
@@ -4968,14 +4884,12 @@ new file mode 100644
 +private:
 +  StorageManagerIdFactory(Listener* aListener,
 +                          const PrincipalInfo& aPrincipalInfo);
-+  StorageManagerIdFactory(Listener* aListener);
 +  virtual ~StorageManagerIdFactory();
 +
 +  // Weak reference cleared by RemoveListener().
 +  typedef nsTObserverArray<Listener*> ListenerList;
 +  ListenerList mListenerList;
 +
-+  bool mUseSystemPrincipal;
 +  const PrincipalInfo mPrincipalInfo;
 +  RefPtr<nsIThread> mInitiatingThread;
 +  RefPtr<StorageManagerId> mManagerId;
