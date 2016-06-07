@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  23e1cb298c1feeca2f57bc31ec2cf3242dfae087
+# Parent  efc4af4cadbe1f84c85a0789f7901551919e3cca
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: BackgroundSyncService. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/BackgroundSyncParent.cpp
@@ -595,11 +595,11 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
      // Ensure there is a factory instance. This forces the Get() call
      // below to use the same factory.
      nsresult rv = MaybeCreateInstance();
-@@ -89,17 +90,17 @@ public:
-     if (!ref) {
-       nsCOMPtr<nsIThread> ioThread;
-       rv = NS_NewNamedThread("BSyncIOThread",
-                              getter_AddRefs(ioThread));
+@@ -92,17 +93,17 @@ public:
+         rv = NS_NewNamedThread("BSyncIOThread", getter_AddRefs(ioThread));
+       } else {
+         rv = NS_NewNamedThread("BSyncChromeIOTh", getter_AddRefs(ioThread));
+       }
        if (NS_WARN_IF(NS_FAILED(rv))) {
          return rv;
        }
@@ -614,7 +614,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
        ref->Init(oldManager);
  
        MOZ_ASSERT(!sFactory->mManagerList.Contains(ref));
-@@ -352,25 +353,20 @@ public:
+@@ -355,25 +356,20 @@ public:
      NS_WARN_IF(NS_FAILED(rv));
      return rv;
    }
@@ -643,7 +643,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
  };
  
  // ---------------------------------------------------------------------------
-@@ -393,25 +389,20 @@ public:
+@@ -396,25 +392,20 @@ public:
      NS_WARN_IF(NS_FAILED(rv));
      return rv;
    }
@@ -672,7 +672,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
    nsTArray<nsString> mTags;
  };
  
-@@ -435,20 +426,17 @@ public:
+@@ -438,20 +429,17 @@ public:
    }
  
    virtual void
@@ -694,7 +694,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
  
  // ---------------------------------------------------------------------------
  
-@@ -472,20 +460,17 @@ public:
+@@ -475,20 +463,17 @@ public:
    }
  
    virtual void
@@ -716,7 +716,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
  
  // ---------------------------------------------------------------------------
  
-@@ -509,36 +494,34 @@ public:
+@@ -512,36 +497,34 @@ public:
    }
  
    virtual void
@@ -757,7 +757,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
  {
    mozilla::ipc::AssertIsOnBackgroundThread();
  
-@@ -555,36 +538,41 @@ StorageManager::ShutdownAll()
+@@ -558,36 +541,41 @@ StorageManager::ShutdownAll()
  void
  StorageManager::Abort(const nsACString& aOrigin)
  {
@@ -801,7 +801,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
    MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(
          NewRunnableMethod(ioThread, &nsIThread::Shutdown)));*/
  }
-@@ -791,20 +779,30 @@ StorageManager::OnRequestComplete(const 
+@@ -794,20 +782,30 @@ StorageManager::OnRequestComplete(const 
    NS_ASSERT_OWNINGTHREAD(StorageManager);
    MOZ_ASSERT(mPendingRequests.Contains(aRequestId));
  
