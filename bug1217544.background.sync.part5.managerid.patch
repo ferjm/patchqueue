@@ -1559,7 +1559,7 @@ diff --git a/dom/backgroundsync/DBSchemaUtils.cpp b/dom/backgroundsync/DBSchemaU
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/DBSchemaUtils.cpp
-@@ -0,0 +1,366 @@
+@@ -0,0 +1,368 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -1572,6 +1572,7 @@ new file mode 100644
 +#include "mozIStorageConnection.h"
 +#include "mozIStorageStatement.h"
 +#include "mozStorageHelper.h"
++#include "nsPrintfCString.h"
 +
 +namespace mozilla {
 +namespace dom {
@@ -1851,13 +1852,14 @@ new file mode 100644
 +  }
 +
 +#ifdef DEBUG
++  nsPrintfCString autoindex("sqlite_autoindex_%s_1", aExpectedTableName);
++
 +  Expect expect[] = {
 +    Expect(aExpectedTableName, "table", aExpectedTableSql),
 +    // auto-gen by sqlite.
 +    Expect("sqlite_sequence", "table"),
 +    // auto-gen by sqlite.
-+    Expect(strcat(strcat("sqlite_autoindex_", aExpectedTableName), "_1"),
-+           "index")
++    Expect(autoindex.get(), "index")
 +  };
 +
 +  const uint32_t expectLength = sizeof(expect) / sizeof(Expect);
