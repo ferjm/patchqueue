@@ -3718,7 +3718,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/StorageManager.cpp
-@@ -0,0 +1,810 @@
+@@ -0,0 +1,813 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -3809,8 +3809,11 @@ new file mode 100644
 +    RefPtr<StorageManager> ref = Get(aManagerId);
 +    if (!ref) {
 +      nsCOMPtr<nsIThread> ioThread;
-+      rv = NS_NewNamedThread("BSyncIOThread",
-+                             getter_AddRefs(ioThread));
++      if (aStorageType == StorageType::Content) {
++        rv = NS_NewNamedThread("BSyncIOThread", getter_AddRefs(ioThread));
++      } else {
++        rv = NS_NewNamedThread("BSyncChromeIOTh", getter_AddRefs(ioThread));
++      }
 +      if (NS_WARN_IF(NS_FAILED(rv))) {
 +        return rv;
 +      }
