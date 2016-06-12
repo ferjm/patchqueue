@@ -587,6 +587,134 @@ new file mode 100644
 +} // namespace mozilla
 +
 +#endif // mozilla_dom_ChromeDBSchema_h
+diff --git a/dom/backgroundsync/ChromeStorageManager.cpp b/dom/backgroundsync/ChromeStorageManager.cpp
+new file mode 100644
+--- /dev/null
++++ b/dom/backgroundsync/ChromeStorageManager.cpp
+@@ -0,0 +1,69 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#include "ChromeDBSchema.h"
++#include "ChromeStorageManager.h"
++
++#include "nsAppDirectoryServiceDefs.h"
++
++namespace mozilla {
++namespace dom {
++namespace backgroundsync {
++
++using mozilla::ipc::AssertIsOnBackgroundThread;
++
++namespace {
++  ChromeStorageManager* sInstance = nullptr;
++} // namespace
++
++ChromeStorageManager::ChromeStorageManager()
++{}
++
++ChromeStorageManager::~ChromeStorageManager()
++{
++  if (mDBConn) {
++    mDBConn->Close();
++  }
++  mDBConn = nullptr;
++}
++
++// static
++already_AddRefed<ChromeStorageManager>
++ChromeStorageManager::GetOrCreate()
++{
++  AssertIsOnBackgroundThread();
++
++  RefPtr<ChromeStorageManager> instance = sInstance;
++  if (!instance) {
++    instance = new ChromeStorageManager();
++    instance->Init();
++  }
++  return instance.forget();
++}
++
++void
++ChromeStorageManager::Init()
++{
++  nsCOMPtr<nsIFile> dbFile;
++  nsresult rv = NS_GetSpecialDirectory(NS_APP_USER_PROFILE_50_DIR,
++                                       getter_AddRefs(dbFile));
++  if (NS_WARN_IF(NS_FAILED(rv))) { return; }
++
++  rv = dbFile->AppendNative(NS_LITERAL_CSTRING("backgroundsync"));
++  if (NS_WARN_IF(NS_FAILED(rv))) { return; }
++
++  rv = OpenDatabase(dbFile);
++  if (NS_WARN_IF(NS_FAILED(rv))) { return; }
++
++  MOZ_ASSERT(mDBConn);
++
++  chromedb::CreateOrMigrateSchema(mDBConn);
++  NS_WARN_IF(NS_FAILED(rv));
++}
++
++} // namespace backgroundsync
++} // namespace dom
++} // namespace mozilla
+diff --git a/dom/backgroundsync/ChromeStorageManager.h b/dom/backgroundsync/ChromeStorageManager.h
+new file mode 100644
+--- /dev/null
++++ b/dom/backgroundsync/ChromeStorageManager.h
+@@ -0,0 +1,49 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
++ * You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#ifndef mozilla_dom_ChromeStorageManager_h
++#define mozilla_dom_ChromeStorageManager_h
++
++/**
++ * This singleton object is kept alive by the BackgroundSyncService. While a
++ * content related storage request is on going, this object should be kept
++ * alive. If no pending storage requests are in place, this object can be
++ * released.
++ **
++ * It manages the chrome database that stores the origins that have pending
++ * sync registrations.
++ */
++
++
++#include "mozilla/ipc/BackgroundParent.h"
++#include "nsISupportsImpl.h"
++
++namespace mozilla {
++namespace dom {
++namespace backgroundsync {
++
++class ChromeStorageManager final
++{
++public:
++  NS_INLINE_DECL_REFCOUNTING(ChromeStorageManager)
++
++  static already_AddRefed<ChromeStorageManager> GetOrCreate();
++
++private:
++  ChromeStorageManager();
++  ~ChromeStorageManager();
++
++  void Init();
++  nsresult OpenDatabase(nsIFile* permissionsFile);
++
++  nsCOMPtr<mozIStorageConnection> mDBConn;
++};
++
++} // namespace backgroundsync
++} // namespace dom
++} // namespace mozilla
++
++#endif // mozilla_dom_ChromeStorageManager_h
 diff --git a/dom/backgroundsync/DBAction.cpp b/dom/backgroundsync/DBAction.cpp
 new file mode 100644
 --- /dev/null
@@ -4906,7 +5034,7 @@ new file mode 100644
 diff --git a/dom/backgroundsync/moz.build b/dom/backgroundsync/moz.build
 --- a/dom/backgroundsync/moz.build
 +++ b/dom/backgroundsync/moz.build
-@@ -1,21 +1,33 @@
+@@ -1,21 +1,34 @@
  # vim: set filetype=python:
  # This Source Code Form is subject to the terms of the Mozilla Public
  # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -4925,6 +5053,7 @@ diff --git a/dom/backgroundsync/moz.build b/dom/backgroundsync/moz.build
 -    'BackgroundSyncParent.cpp'
 +    'BackgroundSyncParent.cpp',
 +    'ChromeDBSchema.cpp',
++    'ChromeStorageManager.cpp',
 +    'DBAction.cpp',
 +    'DBConnection.cpp',
 +    'DBSchema.cpp',
