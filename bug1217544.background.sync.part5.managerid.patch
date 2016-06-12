@@ -591,7 +591,7 @@ diff --git a/dom/backgroundsync/ChromeStorageManager.cpp b/dom/backgroundsync/Ch
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/ChromeStorageManager.cpp
-@@ -0,0 +1,69 @@
+@@ -0,0 +1,73 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -649,7 +649,11 @@ new file mode 100644
 +  rv = dbFile->AppendNative(NS_LITERAL_CSTRING("backgroundsync"));
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return; }
 +
-+  rv = OpenDatabase(dbFile);
++  nsCOMPtr<mozIStorageService> storage =
++    do_GetService(MOZ_STORAGE_SERVICE_CONTRACTID);
++  if (NS_WARN_IF(!storage)) { return; }
++
++  rv = storage->OpenDatabase(dbFile, getter_AddRefs(mDBConn));
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return; }
 +
 +  MOZ_ASSERT(mDBConn);
@@ -665,7 +669,7 @@ diff --git a/dom/backgroundsync/ChromeStorageManager.h b/dom/backgroundsync/Chro
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/ChromeStorageManager.h
-@@ -0,0 +1,49 @@
+@@ -0,0 +1,48 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -685,8 +689,8 @@ new file mode 100644
 + * sync registrations.
 + */
 +
-+
 +#include "mozilla/ipc/BackgroundParent.h"
++#include "mozilla/storage.h"
 +#include "nsISupportsImpl.h"
 +
 +namespace mozilla {
@@ -705,7 +709,6 @@ new file mode 100644
 +  ~ChromeStorageManager();
 +
 +  void Init();
-+  nsresult OpenDatabase(nsIFile* permissionsFile);
 +
 +  nsCOMPtr<mozIStorageConnection> mDBConn;
 +};
