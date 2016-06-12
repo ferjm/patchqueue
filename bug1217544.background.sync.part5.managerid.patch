@@ -610,7 +610,7 @@ new file mode 100644
 +using mozilla::ipc::AssertIsOnBackgroundThread;
 +
 +namespace {
-+  ChromeStorageManager* sInstance = nullptr;
++  ChromeStorageManager* csmInstance = nullptr;
 +} // namespace
 +
 +ChromeStorageManager::ChromeStorageManager()
@@ -630,7 +630,7 @@ new file mode 100644
 +{
 +  AssertIsOnBackgroundThread();
 +
-+  RefPtr<ChromeStorageManager> instance = sInstance;
++  RefPtr<ChromeStorageManager> instance = csmInstance;
 +  if (!instance) {
 +    instance = new ChromeStorageManager();
 +    instance->Init();
