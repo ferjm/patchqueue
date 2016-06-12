@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  bab1d81880e56c9079fbbda97331c60b29ee2f55
+# Parent  80c6c8df905f620ac6e78bfaa98360838d308a1d
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: BackgroundSyncService. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/BackgroundSyncParent.cpp
@@ -867,10 +867,10 @@ diff --git a/dom/backgroundsync/moz.build b/dom/backgroundsync/moz.build
      'BackgroundSyncParent.cpp',
 +    'BackgroundSyncService.cpp',
      'ChromeDBSchema.cpp',
+     'ChromeStorageManager.cpp',
      'DBAction.cpp',
      'DBConnection.cpp',
      'DBSchema.cpp',
      'DBSchemaUtils.cpp',
      'OnlineStateObserver.cpp',
      'QuotaClient.cpp',
-     'StorageAction.cpp',
