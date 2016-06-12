@@ -646,7 +646,7 @@ new file mode 100644
 +                                       getter_AddRefs(dbFile));
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return; }
 +
-+  rv = dbFile->AppendNative(NS_LITERAL_CSTRING("backgroundsync"));
++  rv = dbFile->AppendNative(NS_LITERAL_CSTRING("backgroundsync.sqlite"));
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return; }
 +
 +  nsCOMPtr<mozIStorageService> storage =
