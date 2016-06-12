@@ -591,7 +591,7 @@ diff --git a/dom/backgroundsync/ChromeStorageManager.cpp b/dom/backgroundsync/Ch
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/ChromeStorageManager.cpp
-@@ -0,0 +1,73 @@
+@@ -0,0 +1,125 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -613,11 +613,76 @@ new file mode 100644
 +  ChromeStorageManager* csmInstance = nullptr;
 +} // namespace
 +
++//-----------------------------------------------------------------------------
++// IO thread
++
++class InitRunnable final : public nsIRunnable,
++                           public nsICancelableRunnable
++{
++public:
++  NS_DECL_THREADSAFE_ISUPPORTS
++
++  InitRunnable(mozIStorageConnection* aConn)
++    : mDBConn(aConn)
++    , mInitiatingThread(do_GetCurrentThread())
++  {
++  }
++
++  NS_IMETHODIMP
++  Run() override
++  {
++    nsCOMPtr<nsIFile> dbFile;
++    nsresult rv = NS_GetSpecialDirectory(NS_APP_USER_PROFILE_50_DIR,
++                                         getter_AddRefs(dbFile));
++    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++    rv = dbFile->AppendNative(NS_LITERAL_CSTRING("backgroundsync.sqlite"));
++    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++    nsCOMPtr<mozIStorageService> storage =
++      do_GetService(MOZ_STORAGE_SERVICE_CONTRACTID);
++    if (NS_WARN_IF(!storage)) { return rv; }
++
++    rv = storage->OpenDatabase(dbFile, getter_AddRefs(mDBConn));
++    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++    MOZ_ASSERT(mDBConn);
++
++    chromedb::CreateOrMigrateSchema(mDBConn);
++    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++    return NS_OK;
++  }
++
++  NS_IMETHODIMP
++  Cancel() override
++  {
++    return NS_OK;
++  }
++
++private:
++  ~InitRunnable() {};
++
++  nsCOMPtr<mozIStorageConnection> mDBConn;
++  nsCOMPtr<nsIThread> mInitiatingThread;
++};
++
++NS_IMPL_ISUPPORTS(InitRunnable, nsICancelableRunnable, nsIRunnable)
++
++//-----------------------------------------------------------------------------
++// PBackground thread
++
 +ChromeStorageManager::ChromeStorageManager()
-+{}
++{
++  AssertIsOnBackgroundThread();
++
++  Init();
++}
 +
 +ChromeStorageManager::~ChromeStorageManager()
 +{
++  AssertIsOnBackgroundThread();
++
 +  if (mDBConn) {
 +    mDBConn->Close();
 +  }
@@ -633,7 +698,6 @@ new file mode 100644
 +  RefPtr<ChromeStorageManager> instance = csmInstance;
 +  if (!instance) {
 +    instance = new ChromeStorageManager();
-+    instance->Init();
 +  }
 +  return instance.forget();
 +}
@@ -641,25 +705,13 @@ new file mode 100644
 +void
 +ChromeStorageManager::Init()
 +{
-+  nsCOMPtr<nsIFile> dbFile;
-+  nsresult rv = NS_GetSpecialDirectory(NS_APP_USER_PROFILE_50_DIR,
-+                                       getter_AddRefs(dbFile));
++  AssertIsOnBackgroundThread();
++
++  nsresult rv = NS_NewNamedThread("BSyncChIOThread", getter_AddRefs(mIOThread));
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return; }
 +
-+  rv = dbFile->AppendNative(NS_LITERAL_CSTRING("backgroundsync.sqlite"));
-+  if (NS_WARN_IF(NS_FAILED(rv))) { return; }
-+
-+  nsCOMPtr<mozIStorageService> storage =
-+    do_GetService(MOZ_STORAGE_SERVICE_CONTRACTID);
-+  if (NS_WARN_IF(!storage)) { return; }
-+
-+  rv = storage->OpenDatabase(dbFile, getter_AddRefs(mDBConn));
-+  if (NS_WARN_IF(NS_FAILED(rv))) { return; }
-+
-+  MOZ_ASSERT(mDBConn);
-+
-+  chromedb::CreateOrMigrateSchema(mDBConn);
-+  NS_WARN_IF(NS_FAILED(rv));
++  RefPtr<InitRunnable> runnable = new InitRunnable(mDBConn);
++  mIOThread->Dispatch(runnable, nsIThread::DISPATCH_NORMAL);
 +}
 +
 +} // namespace backgroundsync
@@ -669,7 +721,7 @@ diff --git a/dom/backgroundsync/ChromeStorageManager.h b/dom/backgroundsync/Chro
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/ChromeStorageManager.h
-@@ -0,0 +1,48 @@
+@@ -0,0 +1,49 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -710,6 +762,7 @@ new file mode 100644
 +
 +  void Init();
 +
++  nsCOMPtr<nsIThread> mIOThread;
 +  nsCOMPtr<mozIStorageConnection> mDBConn;
 +};
 +
