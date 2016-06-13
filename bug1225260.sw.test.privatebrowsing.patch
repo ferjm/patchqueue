@@ -1,0 +1,140 @@
+# HG changeset patch
+# User Fernando Jimenez <ferjmoreno@gmail.com>
+# Parent  894ebb2becdaf474abb0e7b2f94e610e2ec4c311
+Write dom/workers/test/serviceworkers/test_privateBrowsing.html version for B2G. r=bkelly
+
+diff --git a/dom/workers/test/serviceworkers/file_privateBrowsing_browserElement.html b/dom/workers/test/serviceworkers/file_privateBrowsing_browserElement.html
+new file mode 100644
+--- /dev/null
++++ b/dom/workers/test/serviceworkers/file_privateBrowsing_browserElement.html
+@@ -0,0 +1,11 @@
++<html>
++<body>
++<script>
++  alert(
++    navigator.serviceWorker ?
++    "service worker available" :
++    "service worker NOT available"
++  );
++</script>
++</body>
++</html>
+diff --git a/dom/workers/test/serviceworkers/mochitest.ini b/dom/workers/test/serviceworkers/mochitest.ini
+--- a/dom/workers/test/serviceworkers/mochitest.ini
++++ b/dom/workers/test/serviceworkers/mochitest.ini
+@@ -187,16 +187,17 @@ support-files =
+   redirect_post.sjs
+   xslt_worker.js
+   xslt/*
+   unresolved_fetch_worker.js
+   header_checker.sjs
+   openWindow_worker.js
+   redirect.sjs
+   open_window/client.html
++  file_privateBrowsing_browserElement.html
+ 
+ [test_app_protocol.html]
+ skip-if = release_build
+ [test_bug1151916.html]
+ [test_claim.html]
+ [test_claim_fetch.html]
+ [test_claim_oninstall.html]
+ [test_close.html]
+@@ -286,8 +287,10 @@ skip-if = toolkit == "android" || toolki
+ skip-if = e10s # Bug 1214305
+ [test_csp_upgrade-insecure_intercept.html]
+ skip-if = e10s # Bug 1214305
+ [test_serviceworker_header.html]
+ [test_openWindow.html]
+ skip-if = toolkit == "android" || toolkit == "gonk"
+ [test_imagecache.html]
+ [test_imagecache_max_age.html]
++[test_privateBrowsing_browserElement.html]
++skip-if = buildapp == 'mulet' || (buildapp == 'b2g' && (toolkit != 'gonk' || debug)) || e10s
+diff --git a/dom/workers/test/serviceworkers/test_privateBrowsing_browserElement.html b/dom/workers/test/serviceworkers/test_privateBrowsing_browserElement.html
+new file mode 100644
+--- /dev/null
++++ b/dom/workers/test/serviceworkers/test_privateBrowsing_browserElement.html
+@@ -0,0 +1,82 @@
++<!--
++  Any copyright is dedicated to the Public Domain.
++  http://creativecommons.org/publicdomain/zero/1.0/
++-->
++<!DOCTYPE HTML>
++<html>
++<head>
++  <title></title>
++  <script type="text/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
++  <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
++</head>
++<body>
++<p id="display"></p>
++<div id="content" style="display: none"></div>
++<pre id="test"></pre>
++<script class="testbody" type="text/javascript">
++
++"use strict";
++
++SimpleTest.waitForExplicitFinish();
++
++function setPreferences() {
++  return new Promise(resolve => {
++    SpecialPowers.pushPrefEnv({"set": [
++      ['dom.mozBrowserFramesEnabled', true],
++      ['dom.serviceWorkers.exemptFromPerDomainMax', true],
++      ["dom.serviceWorkers.interception.enabled", true],
++      ['dom.serviceWorkers.enabled', true],
++      ['dom.serviceWorkers.testing.enabled', true],
++      ['dom.caches.enabled', true],
++    ]}, resolve);
++  });
++}
++
++function setPermissions() {
++  return new Promise(resolve => {
++    SpecialPowers.pushPermissions([
++      { 'type': 'webapps-manage', 'allow': 1, 'context': document },
++      { 'type': 'browser', 'allow': 1, 'context': document },
++      { 'type': 'embed-apps', 'allow': 1, 'context': document }
++    ], resolve);
++  });
++}
++
++function createFrame(aIsPrivate) {
++  var iframe = document.createElement("iframe");
++  iframe.setAttribute('mozbrowser', 'true');
++  if (aIsPrivate) {
++    iframe.setAttribute("mozprivatebrowsing", "true");
++  }
++  return iframe;
++}
++
++function createTest(aIsPrivate, aExpected) {
++  info(`createTest ${aIsPrivate} ${aExpected}`);
++  return new Promise(resolve => {
++    var iframe = createFrame(aIsPrivate);
++    document.body.appendChild(iframe);
++
++    iframe.addEventListener("mozbrowsershowmodalprompt", e => {
++      is(e.detail.message, aExpected, `${e.detail.message} == ${aExpected}`);
++      resolve();
++    });
++
++    SpecialPowers.wrap(iframe.contentWindow).location =
++      "file_privateBrowsing_browserElement.html";
++  });
++}
++
++setPreferences().then(() => {
++  return setPermissions();
++}).then(() => {
++  return createTest(false /* not private */, "service worker available");
++}).then(() => {
++  return createTest(true /* private */, "service worker NOT available");
++}).then(() => {
++  SimpleTest.finish();
++});
++
++</script>
++</body>
++</html>

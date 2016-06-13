@@ -1,0 +1,1423 @@
+# HG changeset patch
+# User Fernando Jimenez <ferjmoreno@gmail.com>
+# Parent  2b7f287e269a7880e79d4564cf68f4535a659f58
+
+diff --git a/dom/workers/test/serviceworkers/mochitest.ini b/dom/workers/test/serviceworkers/mochitest.ini
+--- a/dom/workers/test/serviceworkers/mochitest.ini
++++ b/dom/workers/test/serviceworkers/mochitest.ini
+@@ -1,10 +1,9 @@
+ [DEFAULT]
+-skip-if = buildapp == 'b2g'
+ support-files =
+   worker.js
+   worker2.js
+   worker3.js
+   fetch_event_worker.js
+   parse_error_worker.js
+   activate_event_error_worker.js
+   install_event_worker.js
+diff --git a/dom/workers/test/serviceworkers/test_app_protocol.html b/dom/workers/test/serviceworkers/test_app_protocol.html
+--- a/dom/workers/test/serviceworkers/test_app_protocol.html
++++ b/dom/workers/test/serviceworkers/test_app_protocol.html
+@@ -20,16 +20,17 @@ SimpleTest.waitForExplicitFinish();
+ const appManifestURL =
+   'http://mochi.test:8888/tests/dom/workers/test/serviceworkers/app-protocol/update.webapp';
+ let gApp;
+ 
+ function setup() {
+   return new Promise((resolve, reject) => {
+     SpecialPowers.setAllAppsLaunchable(true);
+     SpecialPowers.pushPrefEnv({'set': [
++      ["network.disable.ipc.security", true],
+       ['dom.mozBrowserFramesEnabled', true],
+       ['dom.serviceWorkers.exemptFromPerDomainMax', true],
+       ["dom.serviceWorkers.interception.enabled", true],
+       ['dom.serviceWorkers.enabled', true],
+       ['dom.serviceWorkers.testing.enabled', true],
+       ['dom.caches.enabled', true],
+     ]}, () => {
+       SpecialPowers.pushPermissions([
+diff --git a/dom/workers/test/serviceworkers/test_bug1151916.html b/dom/workers/test/serviceworkers/test_bug1151916.html
+--- a/dom/workers/test/serviceworkers/test_bug1151916.html
++++ b/dom/workers/test/serviceworkers/test_bug1151916.html
+@@ -88,16 +88,17 @@
+       .then(unregister)
+       .catch(function(e) {
+         ok(false, "Some test failed with error " + e);
+       }).then(SimpleTest.finish);
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   SpecialPowers.pushPrefEnv({"set": [
++    ["network.disable.ipc.security pref", true],
+     ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+     ["dom.serviceWorkers.interception.enabled", true],
+     ["dom.serviceWorkers.enabled", true],
+     ["dom.serviceWorkers.testing.enabled", true],
+     ["dom.caches.enabled", true],
+   ]}, runTest);
+ </script>
+ </pre>
+diff --git a/dom/workers/test/serviceworkers/test_claim.html b/dom/workers/test/serviceworkers/test_claim.html
+--- a/dom/workers/test/serviceworkers/test_claim.html
++++ b/dom/workers/test/serviceworkers/test_claim.html
+@@ -156,16 +156,17 @@
+       .then(function() { return unregister(registration_2); })
+       .catch(function(e) {
+         ok(false, "Some test failed with error " + e);
+       }).then(SimpleTest.finish);
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   SpecialPowers.pushPrefEnv({"set": [
++    ["network.disable.ipc.security", true],
+     ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+     ["dom.serviceWorkers.interception.enabled", true],
+     ["dom.serviceWorkers.enabled", true],
+     ["dom.serviceWorkers.testing.enabled", true]
+   ]}, runTest);
+ </script>
+ </pre>
+ </body>
+diff --git a/dom/workers/test/serviceworkers/test_claim_fetch.html b/dom/workers/test/serviceworkers/test_claim_fetch.html
+--- a/dom/workers/test/serviceworkers/test_claim_fetch.html
++++ b/dom/workers/test/serviceworkers/test_claim_fetch.html
+@@ -82,16 +82,17 @@
+       .then(unregister)
+       .catch(function(e) {
+         ok(false, "Some test failed with error " + e);
+       }).then(SimpleTest.finish);
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   SpecialPowers.pushPrefEnv({"set": [
++    ["network.disable.ipc.security", true],
+     ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+     ["dom.serviceWorkers.interception.enabled", true],
+     ["dom.serviceWorkers.enabled", true],
+     ["dom.serviceWorkers.testing.enabled", true]
+   ]}, runTest);
+ </script>
+ </pre>
+ </body>
+diff --git a/dom/workers/test/serviceworkers/test_claim_oninstall.html b/dom/workers/test/serviceworkers/test_claim_oninstall.html
+--- a/dom/workers/test/serviceworkers/test_claim_oninstall.html
++++ b/dom/workers/test/serviceworkers/test_claim_oninstall.html
+@@ -57,16 +57,17 @@
+       .then(unregister)
+       .catch(function(e) {
+         ok(false, "Some test failed with error " + e);
+       }).then(SimpleTest.finish);
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   SpecialPowers.pushPrefEnv({"set": [
++    ["network.disable.ipc.security", true],
+     ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+     ["dom.serviceWorkers.interception.enabled", true],
+     ["dom.serviceWorkers.enabled", true],
+     ["dom.serviceWorkers.testing.enabled", true]
+   ]}, runTest);
+ </script>
+ </pre>
+ </body>
+diff --git a/dom/workers/test/serviceworkers/test_close.html b/dom/workers/test/serviceworkers/test_close.html
+--- a/dom/workers/test/serviceworkers/test_close.html
++++ b/dom/workers/test/serviceworkers/test_close.html
+@@ -48,16 +48,17 @@
+         });
+       }
+     };
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   onload = function() {
+     SpecialPowers.pushPrefEnv({"set": [
++      ["network.disable.ipc.security", true],
+       ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+       ["dom.serviceWorkers.interception.enabled", true],
+       ["dom.serviceWorkers.enabled", true],
+       ["dom.serviceWorkers.testing.enabled", true],
+     ]}, runTest);
+   };
+ </script>
+ </pre>
+diff --git a/dom/workers/test/serviceworkers/test_controller.html b/dom/workers/test/serviceworkers/test_controller.html
+--- a/dom/workers/test/serviceworkers/test_controller.html
++++ b/dom/workers/test/serviceworkers/test_controller.html
+@@ -68,16 +68,17 @@
+       }).catch(function(e) {
+         ok(false, "Some test failed with error " + e);
+         SimpleTest.finish();
+       });
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   SpecialPowers.pushPrefEnv({"set": [
++    ["network.disable.ipc.security", true],
+     ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+     ["dom.serviceWorkers.interception.enabled", true],
+     ["dom.serviceWorkers.enabled", true],
+     ["dom.serviceWorkers.testing.enabled", true]
+   ]}, runTest);
+ </script>
+ </pre>
+ </body>
+diff --git a/dom/workers/test/serviceworkers/test_cross_origin_url_after_redirect.html b/dom/workers/test/serviceworkers/test_cross_origin_url_after_redirect.html
+--- a/dom/workers/test/serviceworkers/test_cross_origin_url_after_redirect.html
++++ b/dom/workers/test/serviceworkers/test_cross_origin_url_after_redirect.html
+@@ -34,16 +34,17 @@
+         SimpleTest.finish();
+       }
+     };
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   onload = function() {
+     SpecialPowers.pushPrefEnv({"set": [
++      ["network.disable.ipc.security", true],
+       ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+       ["dom.serviceWorkers.interception.enabled", true],
+       ["dom.serviceWorkers.enabled", true],
+       ["dom.serviceWorkers.testing.enabled", true],
+     ]}, runTest);
+   };
+ </script>
+ </pre>
+diff --git a/dom/workers/test/serviceworkers/test_csp_upgrade-insecure_intercept.html b/dom/workers/test/serviceworkers/test_csp_upgrade-insecure_intercept.html
+--- a/dom/workers/test/serviceworkers/test_csp_upgrade-insecure_intercept.html
++++ b/dom/workers/test/serviceworkers/test_csp_upgrade-insecure_intercept.html
+@@ -36,16 +36,17 @@
+         SimpleTest.finish();
+       }
+     };
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   onload = function() {
+     SpecialPowers.pushPrefEnv({"set": [
++      ["network.disable.ipc.security", true],
+       ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+       ["dom.serviceWorkers.enabled", true],
+       ["dom.serviceWorkers.testing.enabled", true],
+       ["dom.serviceWorkers.interception.enabled", true],
+       // This is needed so that we can test upgrading a non-secure load inside an https iframe.
+       ["security.mixed_content.block_active_content", false],
+       ["security.mixed_content.block_display_content", false],
+     ]}, runTest);
+diff --git a/dom/workers/test/serviceworkers/test_empty_serviceworker.html b/dom/workers/test/serviceworkers/test_empty_serviceworker.html
+--- a/dom/workers/test/serviceworkers/test_empty_serviceworker.html
++++ b/dom/workers/test/serviceworkers/test_empty_serviceworker.html
+@@ -30,16 +30,17 @@
+       dump("Unregistering the SW failed with " + e + "\n");
+       SimpleTest.finish();
+     });
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   onload = function() {
+     SpecialPowers.pushPrefEnv({"set": [
++      ["network.disable.ipc.security", true],
+       ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+       ["dom.serviceWorkers.interception.enabled", true],
+       ["dom.serviceWorkers.enabled", true],
+       ["dom.serviceWorkers.testing.enabled", true]
+     ]}, runTest);
+   };
+ </script>
+ </pre>
+diff --git a/dom/workers/test/serviceworkers/test_escapedSlashes.html b/dom/workers/test/serviceworkers/test_escapedSlashes.html
+--- a/dom/workers/test/serviceworkers/test_escapedSlashes.html
++++ b/dom/workers/test/serviceworkers/test_escapedSlashes.html
+@@ -86,16 +86,17 @@ function runTest() {
+       }
+     })
+     .then(runTest);
+ }
+ 
+ SimpleTest.waitForExplicitFinish();
+ onload = function() {
+   SpecialPowers.pushPrefEnv({"set": [
++    ["network.disable.ipc.security", true],
+     ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+     ["dom.serviceWorkers.testing.enabled", true],
+     ["dom.serviceWorkers.enabled", true],
+   ]}, runTest);
+ };
+ 
+ </script>
+ </body>
+diff --git a/dom/workers/test/serviceworkers/test_eval_allowed.html b/dom/workers/test/serviceworkers/test_eval_allowed.html
+--- a/dom/workers/test/serviceworkers/test_eval_allowed.html
++++ b/dom/workers/test/serviceworkers/test_eval_allowed.html
+@@ -34,16 +34,17 @@
+       }).catch(function(e) {
+         ok(false, "Some test failed with error " + e);
+         SimpleTest.finish();
+       });
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   SpecialPowers.pushPrefEnv({"set": [
++    ["network.disable.ipc.security", true],
+     ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+     ["dom.serviceWorkers.enabled", true],
+     ["dom.serviceWorkers.testing.enabled", true],
+     ['dom.serviceWorkers.interception.enabled', true],
+   ]}, runTest);
+ </script>
+ </pre>
+ </body>
+diff --git a/dom/workers/test/serviceworkers/test_eventsource_intercept.html b/dom/workers/test/serviceworkers/test_eventsource_intercept.html
+--- a/dom/workers/test/serviceworkers/test_eventsource_intercept.html
++++ b/dom/workers/test/serviceworkers/test_eventsource_intercept.html
+@@ -87,16 +87,17 @@
+       .catch(function(e) {
+         ok(false, "Some test failed with error " + e);
+         SimpleTest.finish();
+       });
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   SpecialPowers.pushPrefEnv({"set": [
++    ["network.disable.ipc.security", true],
+     ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+     ["dom.serviceWorkers.enabled", true],
+     ["dom.serviceWorkers.testing.enabled", true],
+     ["dom.serviceWorkers.interception.enabled", true],
+     ["dom.serviceWorkers.interception.opaque.enabled", true],
+     ["dom.caches.enabled", true],
+   ]}, runTest);
+ </script>
+diff --git a/dom/workers/test/serviceworkers/test_fetch_event.html b/dom/workers/test/serviceworkers/test_fetch_event.html
+--- a/dom/workers/test/serviceworkers/test_fetch_event.html
++++ b/dom/workers/test/serviceworkers/test_fetch_event.html
+@@ -67,16 +67,17 @@
+       }).catch(function(e) {
+         ok(false, "Some test failed with error " + e);
+         SimpleTest.finish();
+       });
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   SpecialPowers.pushPrefEnv({"set": [
++    ["network.disable.ipc.security", true],
+     ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+     ["dom.serviceWorkers.interception.enabled", true],
+     ["dom.serviceWorkers.interception.opaque.enabled", true],
+     ["dom.serviceWorkers.enabled", true],
+     ["dom.serviceWorkers.testing.enabled", true],
+   ]}, runTest);
+ </script>
+ </pre>
+diff --git a/dom/workers/test/serviceworkers/test_file_blob_upload.html b/dom/workers/test/serviceworkers/test_file_blob_upload.html
+--- a/dom/workers/test/serviceworkers/test_file_blob_upload.html
++++ b/dom/workers/test/serviceworkers/test_file_blob_upload.html
+@@ -129,16 +129,17 @@
+       .then(unregister)
+       .catch(function(e) {
+         ok(false, "Some test failed with error " + e);
+       }).then(SimpleTest.finish);
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   SpecialPowers.pushPrefEnv({"set": [
++    ["network.disable.ipc.security", true],
+     ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+     ["dom.serviceWorkers.interception.enabled", true],
+     ["dom.serviceWorkers.enabled", true],
+     ["dom.serviceWorkers.testing.enabled", true]
+   ]}, runTest);
+ </script>
+ </pre>
+ </body>
+diff --git a/dom/workers/test/serviceworkers/test_force_refresh.html b/dom/workers/test/serviceworkers/test_force_refresh.html
+--- a/dom/workers/test/serviceworkers/test_force_refresh.html
++++ b/dom/workers/test/serviceworkers/test_force_refresh.html
+@@ -68,16 +68,17 @@
+       .then(unregister)
+       .catch(function(e) {
+         ok(false, "Some test failed with error " + e);
+       }).then(SimpleTest.finish);
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   SpecialPowers.pushPrefEnv({"set": [
++    ["network.disable.ipc.security", true],
+     ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+     ["dom.serviceWorkers.interception.enabled", true],
+     ["dom.serviceWorkers.enabled", true],
+     ["dom.serviceWorkers.testing.enabled", true],
+     ["dom.caches.enabled", true],
+   ]}, runTest);
+ </script>
+ </pre>
+diff --git a/dom/workers/test/serviceworkers/test_gzip_redirect.html b/dom/workers/test/serviceworkers/test_gzip_redirect.html
+--- a/dom/workers/test/serviceworkers/test_gzip_redirect.html
++++ b/dom/workers/test/serviceworkers/test_gzip_redirect.html
+@@ -69,16 +69,17 @@
+       .then(unregister)
+       .catch(function(e) {
+         ok(false, "Some test failed with error " + e);
+       }).then(SimpleTest.finish);
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   SpecialPowers.pushPrefEnv({"set": [
++    ["network.disable.ipc.security", true],
+     ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+     ["dom.serviceWorkers.enabled", true],
+     ["dom.serviceWorkers.testing.enabled", true],
+     ['dom.serviceWorkers.interception.enabled', true],
+   ]}, runTest);
+ </script>
+ </pre>
+ </body>
+diff --git a/dom/workers/test/serviceworkers/test_hsts_upgrade_intercept.html b/dom/workers/test/serviceworkers/test_hsts_upgrade_intercept.html
+--- a/dom/workers/test/serviceworkers/test_hsts_upgrade_intercept.html
++++ b/dom/workers/test/serviceworkers/test_hsts_upgrade_intercept.html
+@@ -46,16 +46,17 @@
+         SimpleTest.finish();
+       }
+     };
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   onload = function() {
+     SpecialPowers.pushPrefEnv({"set": [
++      ["network.disable.ipc.security", true],
+       ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+       ["dom.serviceWorkers.enabled", true],
+       ["dom.serviceWorkers.testing.enabled", true],
+       ["dom.serviceWorkers.interception.enabled", true],
+       // This is needed so that we can test upgrading a non-secure load inside an https iframe.
+       ["security.mixed_content.block_active_content", false],
+       ["security.mixed_content.block_display_content", false],
+     ]}, runTest);
+diff --git a/dom/workers/test/serviceworkers/test_https_fetch.html b/dom/workers/test/serviceworkers/test_https_fetch.html
+--- a/dom/workers/test/serviceworkers/test_https_fetch.html
++++ b/dom/workers/test/serviceworkers/test_https_fetch.html
+@@ -45,16 +45,17 @@
+         SimpleTest.finish();
+       }
+     };
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   onload = function() {
+     SpecialPowers.pushPrefEnv({"set": [
++      ["network.disable.ipc.security", true],
+       ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+       ["dom.serviceWorkers.interception.enabled", true],
+       ["dom.serviceWorkers.enabled", true],
+       ["dom.serviceWorkers.testing.enabled", true],
+       ["dom.caches.enabled", true]
+     ]}, runTest);
+   };
+ </script>
+diff --git a/dom/workers/test/serviceworkers/test_https_fetch_cloned_response.html b/dom/workers/test/serviceworkers/test_https_fetch_cloned_response.html
+--- a/dom/workers/test/serviceworkers/test_https_fetch_cloned_response.html
++++ b/dom/workers/test/serviceworkers/test_https_fetch_cloned_response.html
+@@ -39,16 +39,17 @@
+         SimpleTest.finish();
+       }
+     };
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   onload = function() {
+     SpecialPowers.pushPrefEnv({"set": [
++      ["network.disable.ipc.security", true],
+       ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+       ["dom.serviceWorkers.interception.enabled", true],
+       ["dom.serviceWorkers.enabled", true],
+       ["dom.serviceWorkers.testing.enabled", true],
+       ["dom.caches.enabled", true]
+     ]}, runTest);
+   };
+ </script>
+diff --git a/dom/workers/test/serviceworkers/test_https_origin_after_redirect.html b/dom/workers/test/serviceworkers/test_https_origin_after_redirect.html
+--- a/dom/workers/test/serviceworkers/test_https_origin_after_redirect.html
++++ b/dom/workers/test/serviceworkers/test_https_origin_after_redirect.html
+@@ -40,16 +40,17 @@
+         SimpleTest.finish();
+       }
+     };
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   onload = function() {
+     SpecialPowers.pushPrefEnv({"set": [
++      ["network.disable.ipc.security", true],
+       ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+       ["dom.serviceWorkers.enabled", true],
+       ["dom.serviceWorkers.testing.enabled", true],
+       ['dom.serviceWorkers.interception.enabled', true],
+       ["dom.caches.enabled", true],
+     ]}, runTest);
+   };
+ </script>
+diff --git a/dom/workers/test/serviceworkers/test_https_origin_after_redirect_cached.html b/dom/workers/test/serviceworkers/test_https_origin_after_redirect_cached.html
+--- a/dom/workers/test/serviceworkers/test_https_origin_after_redirect_cached.html
++++ b/dom/workers/test/serviceworkers/test_https_origin_after_redirect_cached.html
+@@ -40,16 +40,17 @@
+         SimpleTest.finish();
+       }
+     };
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   onload = function() {
+     SpecialPowers.pushPrefEnv({"set": [
++      ["network.disable.ipc.security", true],
+       ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+       ["dom.serviceWorkers.enabled", true],
+       ["dom.serviceWorkers.testing.enabled", true],
+       ['dom.serviceWorkers.interception.enabled', true],
+       ["dom.caches.enabled", true],
+     ]}, runTest);
+   };
+ </script>
+diff --git a/dom/workers/test/serviceworkers/test_https_synth_fetch_from_cached_sw.html b/dom/workers/test/serviceworkers/test_https_synth_fetch_from_cached_sw.html
+--- a/dom/workers/test/serviceworkers/test_https_synth_fetch_from_cached_sw.html
++++ b/dom/workers/test/serviceworkers/test_https_synth_fetch_from_cached_sw.html
+@@ -52,16 +52,17 @@
+         SimpleTest.finish();
+       }
+     };
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   onload = function() {
+     SpecialPowers.pushPrefEnv({"set": [
++      ["network.disable.ipc.security", true],
+       ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+       ["dom.serviceWorkers.interception.enabled", true],
+       ["dom.serviceWorkers.enabled", true],
+       ["dom.serviceWorkers.testing.enabled", true],
+       ["dom.caches.enabled", true]
+     ]}, runTest);
+   };
+ </script>
+diff --git a/dom/workers/test/serviceworkers/test_imagecache.html b/dom/workers/test/serviceworkers/test_imagecache.html
+--- a/dom/workers/test/serviceworkers/test_imagecache.html
++++ b/dom/workers/test/serviceworkers/test_imagecache.html
+@@ -39,16 +39,17 @@
+         SimpleTest.finish();
+       }
+     };
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   onload = function() {
+     SpecialPowers.pushPrefEnv({"set": [
++      ["network.disable.ipc.security", true],
+       ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+       ["dom.serviceWorkers.interception.enabled", true],
+       ["dom.serviceWorkers.enabled", true],
+       ["dom.serviceWorkers.testing.enabled", true],
+     ]}, runTest);
+   };
+ </script>
+ </pre>
+diff --git a/dom/workers/test/serviceworkers/test_imagecache_max_age.html b/dom/workers/test/serviceworkers/test_imagecache_max_age.html
+--- a/dom/workers/test/serviceworkers/test_imagecache_max_age.html
++++ b/dom/workers/test/serviceworkers/test_imagecache_max_age.html
+@@ -55,16 +55,17 @@
+       }
+     };
+   }
+ 
+   SimpleTest.requestFlakyTimeout("This test needs to simulate the passing of time");
+   SimpleTest.waitForExplicitFinish();
+   onload = function() {
+     SpecialPowers.pushPrefEnv({"set": [
++      ["network.disable.ipc.security", true],
+       ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+       ["dom.serviceWorkers.enabled", true],
+       ["dom.serviceWorkers.testing.enabled", true],
+       ["dom.serviceWorkers.interception.enabled", true],
+     ]}, runTest);
+   };
+ </script>
+ </pre>
+diff --git a/dom/workers/test/serviceworkers/test_importscript.html b/dom/workers/test/serviceworkers/test_importscript.html
+--- a/dom/workers/test/serviceworkers/test_importscript.html
++++ b/dom/workers/test/serviceworkers/test_importscript.html
+@@ -57,16 +57,17 @@
+       .then(unregister)
+       .catch(function(e) {
+         ok(false, "Some test failed with error " + e);
+       }).then(SimpleTest.finish);
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   SpecialPowers.pushPrefEnv({"set": [
++    ["network.disable.ipc.security", true],
+     ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+     ["dom.serviceWorkers.interception.enabled", true],
+     ["dom.serviceWorkers.enabled", true],
+     ["dom.serviceWorkers.testing.enabled", true]
+   ]}, runTest);
+ </script>
+ </pre>
+ </body>
+diff --git a/dom/workers/test/serviceworkers/test_install_event.html b/dom/workers/test/serviceworkers/test_install_event.html
+--- a/dom/workers/test/serviceworkers/test_install_event.html
++++ b/dom/workers/test/serviceworkers/test_install_event.html
+@@ -115,16 +115,17 @@
+       }).catch(function(e) {
+         ok(false, "Some test failed with error " + e);
+         SimpleTest.finish();
+       });
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   SpecialPowers.pushPrefEnv({"set": [
++    ["network.disable.ipc.security", true],
+     ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+     ["dom.serviceWorkers.interception.enabled", true],
+     ["dom.serviceWorkers.enabled", true],
+     ["dom.serviceWorkers.testing.enabled", true]
+   ]}, runTest);
+ </script>
+ </pre>
+ </body>
+diff --git a/dom/workers/test/serviceworkers/test_installation_simple.html b/dom/workers/test/serviceworkers/test_installation_simple.html
+--- a/dom/workers/test/serviceworkers/test_installation_simple.html
++++ b/dom/workers/test/serviceworkers/test_installation_simple.html
+@@ -195,16 +195,17 @@
+       }).catch(function(e) {
+         ok(false, "Some test failed with error " + e);
+         SimpleTest.finish();
+       });
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   SpecialPowers.pushPrefEnv({"set": [
++    ["network.disable.ipc.security", true],
+     ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+     ["dom.serviceWorkers.interception.enabled", true],
+     ["dom.serviceWorkers.enabled", true],
+     ["dom.serviceWorkers.testing.enabled", true],
+     ["dom.caches.testing.enabled", true],
+   ]}, runTest);
+ </script>
+ </pre>
+diff --git a/dom/workers/test/serviceworkers/test_interception_featuredetect.html b/dom/workers/test/serviceworkers/test_interception_featuredetect.html
+--- a/dom/workers/test/serviceworkers/test_interception_featuredetect.html
++++ b/dom/workers/test/serviceworkers/test_interception_featuredetect.html
+@@ -79,16 +79,17 @@
+       }).catch(function(e) {
+         ok(false, "Some test failed with error " + e);
+         SimpleTest.finish();
+       });
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   SpecialPowers.pushPrefEnv({"set": [
++    ["network.disable.ipc.security", true],
+     ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+     ["dom.serviceWorkers.interception.enabled", false],
+     ["dom.serviceWorkers.enabled", true],
+     ["dom.serviceWorkers.testing.enabled", true]
+   ]}, runTest);
+ </script>
+ </pre>
+ </body>
+diff --git a/dom/workers/test/serviceworkers/test_match_all.html b/dom/workers/test/serviceworkers/test_match_all.html
+--- a/dom/workers/test/serviceworkers/test_match_all.html
++++ b/dom/workers/test/serviceworkers/test_match_all.html
+@@ -64,16 +64,17 @@
+       }).then(function() {
+         ok(true, "Didn't crash on resolving matchAll promises while worker shuts down.");
+         SimpleTest.finish();
+       });
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   SpecialPowers.pushPrefEnv({"set": [
++    ["network.disable.ipc.security", true],
+     ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+     ["dom.serviceWorkers.interception.enabled", true],
+     ["dom.serviceWorkers.enabled", true],
+     ["dom.serviceWorkers.testing.enabled", true]
+   ]}, runTest);
+ </script>
+ </pre>
+ </body>
+diff --git a/dom/workers/test/serviceworkers/test_match_all_advanced.html b/dom/workers/test/serviceworkers/test_match_all_advanced.html
+--- a/dom/workers/test/serviceworkers/test_match_all_advanced.html
++++ b/dom/workers/test/serviceworkers/test_match_all_advanced.html
+@@ -84,16 +84,17 @@
+       }).then(function() {
+         SimpleTest.finish();
+       });
+ 
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   SpecialPowers.pushPrefEnv({"set": [
++    ["network.disable.ipc.security", true],
+     ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+     ["dom.serviceWorkers.interception.enabled", true],
+     ["dom.serviceWorkers.enabled", true],
+     ["dom.serviceWorkers.testing.enabled", true]
+   ]}, runTest);
+ </script>
+ </pre>
+ </body>
+diff --git a/dom/workers/test/serviceworkers/test_match_all_client_id.html b/dom/workers/test/serviceworkers/test_match_all_client_id.html
+--- a/dom/workers/test/serviceworkers/test_match_all_client_id.html
++++ b/dom/workers/test/serviceworkers/test_match_all_client_id.html
+@@ -75,16 +75,17 @@
+       .then(unregister)
+       .catch(function(e) {
+         ok(false, "Some test failed with error " + e);
+       }).then(SimpleTest.finish);
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   SpecialPowers.pushPrefEnv({"set": [
++    ["network.disable.ipc.security", true],
+     ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+     ["dom.serviceWorkers.interception.enabled", true],
+     ["dom.serviceWorkers.enabled", true],
+     ["dom.serviceWorkers.testing.enabled", true]
+   ]}, runTest);
+ </script>
+ </pre>
+ </body>
+diff --git a/dom/workers/test/serviceworkers/test_match_all_client_properties.html b/dom/workers/test/serviceworkers/test_match_all_client_properties.html
+--- a/dom/workers/test/serviceworkers/test_match_all_client_properties.html
++++ b/dom/workers/test/serviceworkers/test_match_all_client_properties.html
+@@ -82,16 +82,17 @@
+       .then(unregister)
+       .catch(function(e) {
+         ok(false, "Some test failed with error " + e);
+       }).then(SimpleTest.finish);
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   SpecialPowers.pushPrefEnv({"set": [
++    ["network.disable.ipc.security", true],
+     ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+     ["dom.serviceWorkers.interception.enabled", true],
+     ["dom.serviceWorkers.enabled", true],
+     ["dom.serviceWorkers.testing.enabled", true]
+   ]}, runTest);
+ </script>
+ </pre>
+ </body>
+diff --git a/dom/workers/test/serviceworkers/test_navigator.html b/dom/workers/test/serviceworkers/test_navigator.html
+--- a/dom/workers/test/serviceworkers/test_navigator.html
++++ b/dom/workers/test/serviceworkers/test_navigator.html
+@@ -22,16 +22,17 @@
+     ok(typeof navigator.serviceWorker.getRegistrations === "function", "navigator.serviceWorker.getAll() should be a function.");
+     ok(navigator.serviceWorker.ready instanceof Promise, "navigator.serviceWorker.ready should be a Promise.");
+     ok(navigator.serviceWorker.controller === null, "There should be no controller worker for an uncontrolled document.");
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+ 
+   SpecialPowers.pushPrefEnv({"set": [
++    ["network.disable.ipc.security", true],
+     ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+     ["dom.serviceWorkers.interception.enabled", true],
+     ["dom.serviceWorkers.enabled", true]
+   ]}, function() {
+     checkEnabled();
+     SimpleTest.finish();
+   });
+ </script>
+diff --git a/dom/workers/test/serviceworkers/test_not_intercept_plugin.html b/dom/workers/test/serviceworkers/test_not_intercept_plugin.html
+--- a/dom/workers/test/serviceworkers/test_not_intercept_plugin.html
++++ b/dom/workers/test/serviceworkers/test_not_intercept_plugin.html
+@@ -61,16 +61,17 @@
+       }).catch(function(e) {
+         ok(false, "Some test failed with error " + e);
+         SimpleTest.finish();
+       });
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   SpecialPowers.pushPrefEnv({"set": [
++    ["network.disable.ipc.security", true],
+     ["dom.requestcontext.enabled", true],
+     ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+     ["dom.serviceWorkers.interception.enabled", true],
+     ["dom.serviceWorkers.interception.opaque.enabled", true],
+     ["dom.serviceWorkers.enabled", true],
+     ["dom.serviceWorkers.testing.enabled", true],
+   ]}, runTest);
+ </script>
+diff --git a/dom/workers/test/serviceworkers/test_notification_constructor_error.html b/dom/workers/test/serviceworkers/test_notification_constructor_error.html
+--- a/dom/workers/test/serviceworkers/test_notification_constructor_error.html
++++ b/dom/workers/test/serviceworkers/test_notification_constructor_error.html
+@@ -35,16 +35,17 @@
+         ok(false, "Some test failed with error " + e);
+         MockServices.unregister();
+         SimpleTest.finish();
+       });
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   SpecialPowers.pushPrefEnv({"set": [
++    ["network.disable.ipc.security", true],
+     ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+     ["dom.serviceWorkers.enabled", true],
+     ["dom.serviceWorkers.testing.enabled", true],
+     ["notification.prompt.testing", true],
+   ]}, runTest);
+ </script>
+ </pre>
+ </body>
+diff --git a/dom/workers/test/serviceworkers/test_notification_get.html b/dom/workers/test/serviceworkers/test_notification_get.html
+--- a/dom/workers/test/serviceworkers/test_notification_get.html
++++ b/dom/workers/test/serviceworkers/test_notification_get.html
+@@ -138,16 +138,17 @@
+         return waitForSWTests(reg, 'do-not-create');
+       });
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+ 
+   MockServices.register();
+   SpecialPowers.pushPrefEnv({"set": [
++    ["network.disable.ipc.security", true],
+     ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+     ["dom.serviceWorkers.enabled", true],
+     ["dom.serviceWorkers.testing.enabled", true],
+     ["dom.webnotifications.workers.enabled", true],
+     ["dom.webnotifications.serviceworker.enabled", true],
+     ["notification.prompt.testing", true],
+   ]}, function() {
+     registerSW()
+diff --git a/dom/workers/test/serviceworkers/test_notificationclick.html b/dom/workers/test/serviceworkers/test_notificationclick.html
+--- a/dom/workers/test/serviceworkers/test_notificationclick.html
++++ b/dom/workers/test/serviceworkers/test_notificationclick.html
+@@ -40,16 +40,17 @@ https://bugzilla.mozilla.org/show_bug.cg
+     navigator.serviceWorker.register("notificationclick.js", { scope: "notificationclick.html" }).then(function(reg) {
+     }, function(e) {
+       ok(false, "registration should have passed!");
+     });
+   };
+ 
+   SimpleTest.waitForExplicitFinish();
+   SpecialPowers.pushPrefEnv({"set": [
++    ["network.disable.ipc.security", true],
+     ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+     ["dom.serviceWorkers.enabled", true],
+     ["dom.serviceWorkers.testing.enabled", true],
+     ["dom.webnotifications.workers.enabled", true],
+     ["dom.webnotifications.serviceworker.enabled", true],
+     ['dom.serviceWorkers.interception.enabled', true],
+     ["notification.prompt.testing", true],
+   ]}, runTest);
+diff --git a/dom/workers/test/serviceworkers/test_notificationclick_focus.html b/dom/workers/test/serviceworkers/test_notificationclick_focus.html
+--- a/dom/workers/test/serviceworkers/test_notificationclick_focus.html
++++ b/dom/workers/test/serviceworkers/test_notificationclick_focus.html
+@@ -40,16 +40,17 @@ https://bugzilla.mozilla.org/show_bug.cg
+     navigator.serviceWorker.register("notificationclick_focus.js", { scope: "notificationclick_focus.html" }).then(function(reg) {
+     }, function(e) {
+       ok(false, "registration should have passed!");
+     });
+   };
+ 
+   SimpleTest.waitForExplicitFinish();
+   SpecialPowers.pushPrefEnv({"set": [
++    ["network.disable.ipc.security", true],
+     ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+     ["dom.serviceWorkers.enabled", true],
+     ["dom.serviceWorkers.testing.enabled", true],
+     ["dom.webnotifications.workers.enabled", true],
+     ["dom.webnotifications.serviceworker.enabled", true],
+     ["notification.prompt.testing", true],
+     ["dom.disable_open_click_delay", 1000],
+   ]}, runTest);
+diff --git a/dom/workers/test/serviceworkers/test_opaque_intercept.html b/dom/workers/test/serviceworkers/test_opaque_intercept.html
+--- a/dom/workers/test/serviceworkers/test_opaque_intercept.html
++++ b/dom/workers/test/serviceworkers/test_opaque_intercept.html
+@@ -69,16 +69,17 @@
+       .then(unregister)
+       .catch(function(e) {
+         ok(false, "Some test failed with error " + e);
+       }).then(SimpleTest.finish);
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   SpecialPowers.pushPrefEnv({"set": [
++    ["network.disable.ipc.security", true],
+     ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+     ["dom.serviceWorkers.enabled", true],
+     ["dom.serviceWorkers.testing.enabled", true],
+     ['dom.serviceWorkers.interception.enabled', true],
+     ["dom.serviceWorkers.interception.opaque.enabled", true],
+     ["dom.caches.enabled", true],
+   ]}, runTest);
+ </script>
+diff --git a/dom/workers/test/serviceworkers/test_origin_after_redirect.html b/dom/workers/test/serviceworkers/test_origin_after_redirect.html
+--- a/dom/workers/test/serviceworkers/test_origin_after_redirect.html
++++ b/dom/workers/test/serviceworkers/test_origin_after_redirect.html
+@@ -40,16 +40,17 @@
+         SimpleTest.finish();
+       }
+     };
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   onload = function() {
+     SpecialPowers.pushPrefEnv({"set": [
++      ["network.disable.ipc.security", true],
+       ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+       ["dom.serviceWorkers.enabled", true],
+       ["dom.serviceWorkers.testing.enabled", true],
+       ['dom.serviceWorkers.interception.enabled', true],
+       ["dom.caches.enabled", true],
+     ]}, runTest);
+   };
+ </script>
+diff --git a/dom/workers/test/serviceworkers/test_origin_after_redirect_cached.html b/dom/workers/test/serviceworkers/test_origin_after_redirect_cached.html
+--- a/dom/workers/test/serviceworkers/test_origin_after_redirect_cached.html
++++ b/dom/workers/test/serviceworkers/test_origin_after_redirect_cached.html
+@@ -40,16 +40,17 @@
+         SimpleTest.finish();
+       }
+     };
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   onload = function() {
+     SpecialPowers.pushPrefEnv({"set": [
++      ["network.disable.ipc.security", true],
+       ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+       ["dom.serviceWorkers.enabled", true],
+       ["dom.serviceWorkers.testing.enabled", true],
+       ['dom.serviceWorkers.interception.enabled', true],
+       ["dom.caches.enabled", true],
+     ]}, runTest);
+   };
+ </script>
+diff --git a/dom/workers/test/serviceworkers/test_origin_after_redirect_to_https.html b/dom/workers/test/serviceworkers/test_origin_after_redirect_to_https.html
+--- a/dom/workers/test/serviceworkers/test_origin_after_redirect_to_https.html
++++ b/dom/workers/test/serviceworkers/test_origin_after_redirect_to_https.html
+@@ -40,16 +40,17 @@
+         SimpleTest.finish();
+       }
+     };
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   onload = function() {
+     SpecialPowers.pushPrefEnv({"set": [
++      ["network.disable.ipc.security", true],
+       ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+       ["dom.serviceWorkers.enabled", true],
+       ["dom.serviceWorkers.testing.enabled", true],
+       ['dom.serviceWorkers.interception.enabled', true],
+       ["dom.caches.enabled", true],
+     ]}, runTest);
+   };
+ </script>
+diff --git a/dom/workers/test/serviceworkers/test_origin_after_redirect_to_https_cached.html b/dom/workers/test/serviceworkers/test_origin_after_redirect_to_https_cached.html
+--- a/dom/workers/test/serviceworkers/test_origin_after_redirect_to_https_cached.html
++++ b/dom/workers/test/serviceworkers/test_origin_after_redirect_to_https_cached.html
+@@ -40,16 +40,17 @@
+         SimpleTest.finish();
+       }
+     };
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   onload = function() {
+     SpecialPowers.pushPrefEnv({"set": [
++      ["network.disable.ipc.security", true],
+       ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+       ["dom.serviceWorkers.enabled", true],
+       ["dom.serviceWorkers.testing.enabled", true],
+       ['dom.serviceWorkers.interception.enabled', true],
+       ["dom.caches.enabled", true],
+     ]}, runTest);
+   };
+ </script>
+diff --git a/dom/workers/test/serviceworkers/test_post_message.html b/dom/workers/test/serviceworkers/test_post_message.html
+--- a/dom/workers/test/serviceworkers/test_post_message.html
++++ b/dom/workers/test/serviceworkers/test_post_message.html
+@@ -63,16 +63,17 @@
+       .then(unregister)
+       .catch(function(e) {
+         ok(false, "Some test failed with error " + e);
+       }).then(SimpleTest.finish);
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   SpecialPowers.pushPrefEnv({"set": [
++    ["network.disable.ipc.security", true],
+     ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+     ["dom.serviceWorkers.interception.enabled", true],
+     ["dom.serviceWorkers.enabled", true],
+     ["dom.serviceWorkers.testing.enabled", true]
+   ]}, runTest);
+ </script>
+ </pre>
+ </body>
+diff --git a/dom/workers/test/serviceworkers/test_post_message_advanced.html b/dom/workers/test/serviceworkers/test_post_message_advanced.html
+--- a/dom/workers/test/serviceworkers/test_post_message_advanced.html
++++ b/dom/workers/test/serviceworkers/test_post_message_advanced.html
+@@ -92,16 +92,17 @@
+       .then(unregister)
+       .catch(function(e) {
+         ok(false, "Some test failed with error " + e);
+       }).then(SimpleTest.finish);
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   SpecialPowers.pushPrefEnv({"set": [
++    ["network.disable.ipc.security", true],
+     ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+     ["dom.serviceWorkers.interception.enabled", true],
+     ["dom.serviceWorkers.enabled", true],
+     ["dom.serviceWorkers.testing.enabled", true]
+   ]}, runTest);
+ </script>
+ </pre>
+ </body>
+diff --git a/dom/workers/test/serviceworkers/test_post_message_source.html b/dom/workers/test/serviceworkers/test_post_message_source.html
+--- a/dom/workers/test/serviceworkers/test_post_message_source.html
++++ b/dom/workers/test/serviceworkers/test_post_message_source.html
+@@ -51,16 +51,17 @@
+       .then(unregister)
+       .catch(function(e) {
+         ok(false, "Some test failed with error " + e);
+       }).then(SimpleTest.finish);
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   SpecialPowers.pushPrefEnv({"set": [
++    ["network.disable.ipc.security", true],
+     ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+     ["dom.serviceWorkers.interception.enabled", true],
+     ["dom.serviceWorkers.enabled", true],
+     ["dom.serviceWorkers.testing.enabled", true]
+   ]}, runTest);
+ </script>
+ </pre>
+ </body>
+diff --git a/dom/workers/test/serviceworkers/test_register_base.html b/dom/workers/test/serviceworkers/test_register_base.html
+--- a/dom/workers/test/serviceworkers/test_register_base.html
++++ b/dom/workers/test/serviceworkers/test_register_base.html
+@@ -26,15 +26,16 @@
+         is(err.name, "SecurityError", "Registration should fail with SecurityError");
+         SimpleTest.finish();
+       });
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   onload = function() {
+     SpecialPowers.pushPrefEnv({"set": [
++      ["network.disable.ipc.security", true],
+       ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+       ["dom.serviceWorkers.enabled", true],
+     ]}, runTest);
+   };
+ </script>
+ </body>
+ </html>
+diff --git a/dom/workers/test/serviceworkers/test_register_https_in_http.html b/dom/workers/test/serviceworkers/test_register_https_in_http.html
+--- a/dom/workers/test/serviceworkers/test_register_https_in_http.html
++++ b/dom/workers/test/serviceworkers/test_register_https_in_http.html
+@@ -31,15 +31,16 @@
+         break;
+       }
+     };
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   onload = function() {
+     SpecialPowers.pushPrefEnv({"set": [
++      ["network.disable.ipc.security", true],
+       ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+       ["dom.serviceWorkers.enabled", true],
+     ]}, runTest);
+   };
+ </script>
+ </body>
+ </html>
+diff --git a/dom/workers/test/serviceworkers/test_request_context.js b/dom/workers/test/serviceworkers/test_request_context.js
+--- a/dom/workers/test/serviceworkers/test_request_context.js
++++ b/dom/workers/test/serviceworkers/test_request_context.js
+@@ -57,16 +57,17 @@ function runTest() {
+       SimpleTest.finish();
+     }
+   };
+ }
+ 
+ SimpleTest.waitForExplicitFinish();
+ onload = function() {
+   SpecialPowers.pushPrefEnv({"set": [
++    ["network.disable.ipc.security", true],
+     ["beacon.enabled", true],
+     ["browser.send_pings", true],
+     ["browser.send_pings.max_per_link", -1],
+     ["dom.caches.enabled", true],
+     ["dom.image.picture.enabled", true],
+     ["dom.image.srcset.enabled", true],
+     ["dom.requestcontext.enabled", true],
+     ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+diff --git a/dom/workers/test/serviceworkers/test_sandbox_intercept.html b/dom/workers/test/serviceworkers/test_sandbox_intercept.html
+--- a/dom/workers/test/serviceworkers/test_sandbox_intercept.html
++++ b/dom/workers/test/serviceworkers/test_sandbox_intercept.html
+@@ -34,16 +34,17 @@
+         SimpleTest.finish();
+       }
+     };
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   onload = function() {
+     SpecialPowers.pushPrefEnv({"set": [
++      ["network.disable.ipc.security", true],
+       ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+       ["dom.serviceWorkers.interception.enabled", true],
+       ["dom.serviceWorkers.enabled", true],
+       ["dom.serviceWorkers.testing.enabled", true],
+     ]}, runTest);
+   };
+ </script>
+ </pre>
+diff --git a/dom/workers/test/serviceworkers/test_sanitize.html b/dom/workers/test/serviceworkers/test_sanitize.html
+--- a/dom/workers/test/serviceworkers/test_sanitize.html
++++ b/dom/workers/test/serviceworkers/test_sanitize.html
+@@ -69,16 +69,17 @@
+ 
+   function registerSW() {
+     return testFrame("sanitize/register.html");
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+ 
+   SpecialPowers.pushPrefEnv({"set": [
++    ["network.disable.ipc.security", true],
+     ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+     ["dom.serviceWorkers.interception.enabled", true],
+     ["dom.serviceWorkers.enabled", true],
+     ["dom.serviceWorkers.testing.enabled", true],
+   ]}, function() {
+     start();
+   });
+ </script>
+diff --git a/dom/workers/test/serviceworkers/test_sanitize_domain.html b/dom/workers/test/serviceworkers/test_sanitize_domain.html
+--- a/dom/workers/test/serviceworkers/test_sanitize_domain.html
++++ b/dom/workers/test/serviceworkers/test_sanitize_domain.html
+@@ -72,16 +72,17 @@
+               // Register for prefixexample.com and then ensure it does not get unregistered.
+               return testFrame("http://prefixexample.com/tests/dom/workers/test/serviceworkers/sanitize/register.html");
+             });
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+ 
+   SpecialPowers.pushPrefEnv({"set": [
++    ["network.disable.ipc.security", true],
+     ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+     ["dom.serviceWorkers.interception.enabled", true],
+     ["dom.serviceWorkers.enabled", true],
+     ["dom.serviceWorkers.testing.enabled", true],
+   ]}, function() {
+     start();
+   });
+ </script>
+diff --git a/dom/workers/test/serviceworkers/test_scopes.html b/dom/workers/test/serviceworkers/test_scopes.html
+--- a/dom/workers/test/serviceworkers/test_scopes.html
++++ b/dom/workers/test/serviceworkers/test_scopes.html
+@@ -105,16 +105,17 @@
+       }).catch(function(e) {
+         ok(false, "Some test failed with error " + e);
+         SimpleTest.finish();
+       });
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   SpecialPowers.pushPrefEnv({"set": [
++    ["network.disable.ipc.security", true],
+     ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+     ["dom.serviceWorkers.interception.enabled", true],
+     ["dom.serviceWorkers.enabled", true],
+     ["dom.serviceWorkers.testing.enabled", true]
+   ]}, runTest);
+ </script>
+ </pre>
+ </body>
+diff --git a/dom/workers/test/serviceworkers/test_service_worker_allowed.html b/dom/workers/test/serviceworkers/test_service_worker_allowed.html
+--- a/dom/workers/test/serviceworkers/test_service_worker_allowed.html
++++ b/dom/workers/test/serviceworkers/test_service_worker_allowed.html
+@@ -59,16 +59,17 @@
+     }, (x) => {
+       ok(false, "Registration should not succeed, but it did");
+       SimpleTest.finish();
+     });
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   SpecialPowers.pushPrefEnv({"set": [
++    ["network.disable.ipc.security", true],
+     ["dom.serviceWorkers.enabled", true],
+     ["dom.serviceWorkers.testing.enabled", true],
+     ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+     ["dom.serviceWorkers.interception.enabled", true],
+   ]}, runTest);
+ </script>
+ </pre>
+ </body>
+diff --git a/dom/workers/test/serviceworkers/test_serviceworker_header.html b/dom/workers/test/serviceworkers/test_serviceworker_header.html
+--- a/dom/workers/test/serviceworkers/test_serviceworker_header.html
++++ b/dom/workers/test/serviceworkers/test_serviceworker_header.html
+@@ -26,16 +26,17 @@
+         ok(false, "Register should not fail");
+         SimpleTest.finish();
+       });
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   onload = function() {
+     SpecialPowers.pushPrefEnv({"set": [
++      ["network.disable.ipc.security", true],
+       ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+       ["dom.serviceWorkers.testing.enabled", true],
+       ["dom.serviceWorkers.enabled", true],
+     ]}, runTest);
+   };
+ </script>
+ </body>
+ </html>
+diff --git a/dom/workers/test/serviceworkers/test_serviceworker_interfaces.html b/dom/workers/test/serviceworkers/test_serviceworker_interfaces.html
+--- a/dom/workers/test/serviceworkers/test_serviceworker_interfaces.html
++++ b/dom/workers/test/serviceworkers/test_serviceworker_interfaces.html
+@@ -98,16 +98,17 @@
+     // want to happen is that Cache is always enabled in service workers.  So
+     // if service workers are disabled by default we want to force on both
+     // service workers and "dom.caches.enabled".  But if service workers are
+     // enabled by default, we do not want to mess with the "dom.caches.enabled"
+     // value, since that would defeat the purpose of the test.  Use a subframe
+     // to decide whether service workers are enabled by default, so we don't
+     // force creation of our own Navigator object before our prefs are set.
+     var prefs = [
++      ["network.disable.ipc.security", true],
+       ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+       ["dom.serviceWorkers.interception.enabled", true],
+       ["dom.serviceWorkers.enabled", true],
+       ["dom.serviceWorkers.testing.enabled", true],
+     ];
+ 
+     var subframe = document.createElement("iframe");
+     document.body.appendChild(subframe);
+diff --git a/dom/workers/test/serviceworkers/test_serviceworker_not_sharedworker.html b/dom/workers/test/serviceworkers/test_serviceworker_not_sharedworker.html
+--- a/dom/workers/test/serviceworkers/test_serviceworker_not_sharedworker.html
++++ b/dom/workers/test/serviceworkers/test_serviceworker_not_sharedworker.html
+@@ -50,16 +50,17 @@
+       };
+       sw.postMessage({msg: "whoareyou"});
+     };
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   onload = function() {
+     SpecialPowers.pushPrefEnv({"set": [
++      ["network.disable.ipc.security", true],
+       ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+       ["dom.serviceWorkers.interception.enabled", true],
+       ["dom.serviceWorkers.enabled", true],
+       ["dom.serviceWorkers.testing.enabled", true]
+     ]}, runTest);
+   };
+ </script>
+ </pre>
+diff --git a/dom/workers/test/serviceworkers/test_skip_waiting.html b/dom/workers/test/serviceworkers/test_skip_waiting.html
+--- a/dom/workers/test/serviceworkers/test_skip_waiting.html
++++ b/dom/workers/test/serviceworkers/test_skip_waiting.html
+@@ -80,16 +80,17 @@
+       .then(clean)
+       .catch(function(e) {
+         ok(false, "Some test failed with error " + e);
+       }).then(SimpleTest.finish);
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   SpecialPowers.pushPrefEnv({"set": [
++    ["network.disable.ipc.security", true],
+     ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+     ["dom.serviceWorkers.interception.enabled", true],
+     ["dom.serviceWorkers.enabled", true],
+     ["dom.serviceWorkers.testing.enabled", true]
+   ]}, runTest);
+ </script>
+ </pre>
+ </body>
+diff --git a/dom/workers/test/serviceworkers/test_strict_mode_warning.html b/dom/workers/test/serviceworkers/test_strict_mode_warning.html
+--- a/dom/workers/test/serviceworkers/test_strict_mode_warning.html
++++ b/dom/workers/test/serviceworkers/test_strict_mode_warning.html
+@@ -23,16 +23,17 @@
+         ok(true, "Registration should not fail for warnings");
+         SimpleTest.finish();
+       });
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   onload = function() {
+     SpecialPowers.pushPrefEnv({"set": [
++      ["network.disable.ipc.security", true],
+       ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+       ["dom.serviceWorkers.interception.enabled", true],
+       ["dom.serviceWorkers.enabled", true],
+       ["dom.serviceWorkers.testing.enabled", true],
+     ]}, runTest);
+   };
+ </script>
+ </pre>
+diff --git a/dom/workers/test/serviceworkers/test_third_party_iframes.html b/dom/workers/test/serviceworkers/test_third_party_iframes.html
+--- a/dom/workers/test/serviceworkers/test_third_party_iframes.html
++++ b/dom/workers/test/serviceworkers/test_third_party_iframes.html
+@@ -136,16 +136,17 @@ function testShouldNotIntercept(done) {
+ 
+ const COOKIE_BEHAVIOR_ACCEPT        = 0;
+ const COOKIE_BEHAVIOR_REJECTFOREIGN = 1;
+ const COOKIE_BEHAVIOR_REJECT        = 2;
+ const COOKIE_BEHAVIOR_LIMITFOREIGN  = 3;
+ 
+ let steps = [() => {
+   SpecialPowers.pushPrefEnv({"set": [
++    ["network.disable.ipc.security", true],
+     ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+     ["dom.serviceWorkers.enabled", true],
+     ["dom.serviceWorkers.testing.enabled", true],
+     ["dom.serviceWorkers.interception.enabled", true],
+     ["browser.dom.window.dump.enabled", true],
+     ["network.cookie.cookieBehavior", COOKIE_BEHAVIOR_ACCEPT]
+   ]}, next);
+ }, () => {
+diff --git a/dom/workers/test/serviceworkers/test_unregister.html b/dom/workers/test/serviceworkers/test_unregister.html
+--- a/dom/workers/test/serviceworkers/test_unregister.html
++++ b/dom/workers/test/serviceworkers/test_unregister.html
+@@ -122,16 +122,17 @@
+       }).catch(function(e) {
+         ok(false, "Some test failed with error " + e);
+         SimpleTest.finish();
+       });
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   SpecialPowers.pushPrefEnv({"set": [
++    ["network.disable.ipc.security", true],
+     ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+     ["dom.serviceWorkers.interception.enabled", true],
+     ["dom.serviceWorkers.enabled", true],
+     ["dom.serviceWorkers.testing.enabled", true]
+   ]}, runTest);
+ </script>
+ </pre>
+ </body>
+diff --git a/dom/workers/test/serviceworkers/test_unresolved_fetch_interception.html b/dom/workers/test/serviceworkers/test_unresolved_fetch_interception.html
+--- a/dom/workers/test/serviceworkers/test_unresolved_fetch_interception.html
++++ b/dom/workers/test/serviceworkers/test_unresolved_fetch_interception.html
+@@ -77,16 +77,17 @@
+       .then(testFetch)
+       .then(unregister)
+       .catch(function(e) {
+         ok(false, "Some test failed with error " + e)
+       }).then(SimpleTest.finish);
+   }
+ 
+   SpecialPowers.pushPrefEnv({"set": [
++    ["network.disable.ipc.security", true],
+     ["dom.serviceWorkers.idle_timeout", 0],
+     ["dom.serviceWorkers.idle_extended_timeout", 299999],
+     ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+     ["dom.serviceWorkers.enabled", true],
+     ["dom.serviceWorkers.testing.enabled", true],
+     ["dom.serviceWorkers.interception.enabled", true]
+     ]}, runTest);
+   SimpleTest.waitForExplicitFinish();
+diff --git a/dom/workers/test/serviceworkers/test_workerUnregister.html b/dom/workers/test/serviceworkers/test_workerUnregister.html
+--- a/dom/workers/test/serviceworkers/test_workerUnregister.html
++++ b/dom/workers/test/serviceworkers/test_workerUnregister.html
+@@ -66,16 +66,17 @@
+       ok(false, "Something went wrong.");
+     }).then(function() {
+       SimpleTest.finish();
+     });
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   SpecialPowers.pushPrefEnv({"set": [
++    ["network.disable.ipc.security", true],
+     ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+     ["dom.serviceWorkers.interception.enabled", true],
+     ["dom.serviceWorkers.enabled", true],
+     ["dom.serviceWorkers.testing.enabled", true]
+   ]}, runTest);
+ </script>
+ </pre>
+ </body>
+diff --git a/dom/workers/test/serviceworkers/test_workerUpdate.html b/dom/workers/test/serviceworkers/test_workerUpdate.html
+--- a/dom/workers/test/serviceworkers/test_workerUpdate.html
++++ b/dom/workers/test/serviceworkers/test_workerUpdate.html
+@@ -42,16 +42,17 @@
+       ok(false, "Something went wrong.");
+     }).then(function() {
+       SimpleTest.finish();
+     });
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   SpecialPowers.pushPrefEnv({"set": [
++    ["network.disable.ipc.security", true],
+     ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+     ["dom.serviceWorkers.interception.enabled", true],
+     ["dom.serviceWorkers.enabled", true],
+     ["dom.serviceWorkers.testing.enabled", true]
+   ]}, runTest);
+ </script>
+ </pre>
+ </body>
+diff --git a/dom/workers/test/serviceworkers/test_workerupdatefoundevent.html b/dom/workers/test/serviceworkers/test_workerupdatefoundevent.html
+--- a/dom/workers/test/serviceworkers/test_workerupdatefoundevent.html
++++ b/dom/workers/test/serviceworkers/test_workerupdatefoundevent.html
+@@ -69,16 +69,17 @@
+       .then(unregister)
+       .catch(function(e) {
+         ok(false, "Some test failed with error " + e);
+       }).then(SimpleTest.finish);
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   SpecialPowers.pushPrefEnv({"set": [
++    ["network.disable.ipc.security", true],
+     ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+     ["dom.serviceWorkers.interception.enabled", true],
+     ["dom.serviceWorkers.enabled", true],
+     ["dom.serviceWorkers.testing.enabled", true],
+   ]}, runTest);
+ </script>
+ </pre>
+ </body>
+diff --git a/dom/workers/test/serviceworkers/test_xslt.html b/dom/workers/test/serviceworkers/test_xslt.html
+--- a/dom/workers/test/serviceworkers/test_xslt.html
++++ b/dom/workers/test/serviceworkers/test_xslt.html
+@@ -96,16 +96,17 @@
+       .then(unregister)
+       .catch(function(e) {
+         ok(false, "Some test failed with error " + e);
+       }).then(SimpleTest.finish);
+   }
+ 
+   SimpleTest.waitForExplicitFinish();
+   SpecialPowers.pushPrefEnv({"set": [
++    ["network.disable.ipc.security", true],
+     ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+     ["dom.serviceWorkers.interception.enabled", true],
+     ["dom.serviceWorkers.enabled", true],
+     ["dom.serviceWorkers.testing.enabled", true],
+   ]}, runTest);
+ </script>
+ </pre>
+ </body>

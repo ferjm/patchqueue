@@ -1,0 +1,407 @@
+
+# HG changeset patch
+# User Fernando Jimenez <ferjmoreno@gmail.com>
+# Date 1448390328 -3600
+# Node ID 94ac8462f12422760091070377787553cf9a647d
+# Parent  9689a552174cec7353f698ee3ebe9c9cc60e8ac2
+Bug 1225121 - [B2G] All the rest of content processes crash if user tries to run app that uses Service Workers after restart. r=baku
+
+diff --git a/dom/workers/ServiceWorkerManagerParent.cpp b/dom/workers/ServiceWorkerManagerParent.cpp
+--- a/dom/workers/ServiceWorkerManagerParent.cpp
++++ b/dom/workers/ServiceWorkerManagerParent.cpp
+@@ -145,26 +145,38 @@ private:
+   nsCOMPtr<nsIThread> mBackgroundThread;
+ };
+ 
+ } // namespace
+ 
+ ServiceWorkerManagerParent::ServiceWorkerManagerParent()
+   : mService(ServiceWorkerManagerService::GetOrCreate())
+   , mID(++sServiceWorkerManagerParentID)
++  , mActorDestroyed(false)
+ {
+   AssertIsOnBackgroundThread();
+   mService->RegisterActor(this);
+ }
+ 
+ ServiceWorkerManagerParent::~ServiceWorkerManagerParent()
+ {
+   AssertIsOnBackgroundThread();
+ }
+ 
++already_AddRefed<ContentParent>
++ServiceWorkerManagerParent::GetContentParent() const
++{
++  AssertIsOnBackgroundThread();
++
++  // This object must be released on main-thread.
++  RefPtr<ContentParent> parent =
++    BackgroundParent::GetContentParent(Manager());
++  return parent.forget();
++}
++
+ bool
+ ServiceWorkerManagerParent::RecvRegister(
+                                      const ServiceWorkerRegistrationData& aData)
+ {
+   AssertIsInMainProcess();
+   AssertIsOnBackgroundThread();
+ 
+   // Basic validation.
+@@ -301,16 +313,18 @@ ServiceWorkerManagerParent::RecvShutdown
+   return true;
+ }
+ 
+ void
+ ServiceWorkerManagerParent::ActorDestroy(ActorDestroyReason aWhy)
+ {
+   AssertIsOnBackgroundThread();
+ 
++  mActorDestroyed = true;
++
+   if (mService) {
+     // This object is about to be released and with it, also mService will be
+     // released too.
+     mService->UnregisterActor(this);
+   }
+ }
+ 
+ } // namespace workers
+diff --git a/dom/workers/ServiceWorkerManagerParent.h b/dom/workers/ServiceWorkerManagerParent.h
+--- a/dom/workers/ServiceWorkerManagerParent.h
++++ b/dom/workers/ServiceWorkerManagerParent.h
+@@ -22,21 +22,29 @@ namespace workers {
+ 
+ class ServiceWorkerManagerService;
+ 
+ class ServiceWorkerManagerParent final : public PServiceWorkerManagerParent
+ {
+   friend class mozilla::ipc::BackgroundParentImpl;
+ 
+ public:
++  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(ServiceWorkerManagerParent)
++
++  bool ActorDestroyed() const
++  {
++    return mActorDestroyed;
++  }
++
+   uint64_t ID() const
+   {
+     return mID;
+   }
+ 
++  already_AddRefed<ContentParent> GetContentParent() const;
+ private:
+   ServiceWorkerManagerParent();
+   ~ServiceWorkerManagerParent();
+ 
+   virtual bool RecvRegister(
+                            const ServiceWorkerRegistrationData& aData) override;
+ 
+   virtual bool RecvUnregister(const PrincipalInfo& aPrincipalInfo,
+@@ -56,15 +64,17 @@ private:
+ 
+   virtual void ActorDestroy(ActorDestroyReason aWhy) override;
+ 
+   RefPtr<ServiceWorkerManagerService> mService;
+ 
+   // We use this ID in the Service in order to avoid the sending of messages to
+   // ourself.
+   uint64_t mID;
++
++  bool mActorDestroyed;
+ };
+ 
+ } // namespace workers
+ } // namespace dom
+ } // namespace mozilla
+ 
+ #endif // mozilla_dom_ServiceWorkerManagerParent_h
+diff --git a/dom/workers/ServiceWorkerManagerService.cpp b/dom/workers/ServiceWorkerManagerService.cpp
+--- a/dom/workers/ServiceWorkerManagerService.cpp
++++ b/dom/workers/ServiceWorkerManagerService.cpp
+@@ -2,30 +2,109 @@
+ /* vim: set ts=8 sts=2 et sw=2 tw=80: */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "ServiceWorkerManagerService.h"
+ #include "ServiceWorkerManagerParent.h"
+ #include "ServiceWorkerRegistrar.h"
++#include "mozilla/dom/TabParent.h"
+ #include "mozilla/ipc/BackgroundParent.h"
+ #include "mozilla/unused.h"
+ 
+ namespace mozilla {
+ 
+ using namespace ipc;
+ 
+ namespace dom {
+ namespace workers {
+ 
+ namespace {
+ 
+ ServiceWorkerManagerService* sInstance = nullptr;
+ 
++struct NotifySoftUpdateData
++{
++  RefPtr<ServiceWorkerManagerParent> mParent;
++  RefPtr<ContentParent> mContentParent;
++
++  ~NotifySoftUpdateData()
++  {
++    MOZ_ASSERT(!mContentParent);
++  }
++};
++
++class NotifySoftUpdateIfPrincipalOkRunnable final : public nsRunnable
++{
++public:
++  NotifySoftUpdateIfPrincipalOkRunnable(
++      nsAutoPtr<nsTArray<NotifySoftUpdateData>>& aData,
++      const OriginAttributes& aOriginAttributes,
++      const nsAString& aScope)
++    : mData(aData)
++    , mOriginAttributes(aOriginAttributes)
++    , mScope(aScope)
++    , mBackgroundThread(NS_GetCurrentThread())
++  {
++    AssertIsInMainProcess();
++    AssertIsOnBackgroundThread();
++
++    MOZ_ASSERT(mData && !aData);
++    MOZ_ASSERT(mBackgroundThread);
++  }
++
++  NS_IMETHODIMP
++  Run() override
++  {
++    if (NS_IsMainThread()) {
++      for (uint32_t i = 0; i < mData->Length(); ++i) {
++        NotifySoftUpdateData& data = mData->ElementAt(i);
++        nsTArray<TabContext> contextArray =
++          data.mContentParent->GetManagedTabContext();
++        // mContentParent needs to be released in the main thread.
++        data.mContentParent = nullptr;
++        // We only send the notification about the soft update to the
++        // tabs/apps with the same appId and inBrowser values.
++        // Sending a notification to the wrong process will make the process
++        // to be killed.
++        for (uint32_t j = 0; j < contextArray.Length(); ++j) {
++          if ((contextArray[j].OwnOrContainingAppId() == mOriginAttributes.mAppId) &&
++              (contextArray[j].IsBrowserElement() == mOriginAttributes.mInBrowser)) {
++            continue;
++          }
++          // Array entries with no mParent won't receive any notification.
++          data.mParent = nullptr;
++        }
++      }
++      nsresult rv = mBackgroundThread->Dispatch(this, NS_DISPATCH_NORMAL);
++      MOZ_ALWAYS_TRUE(NS_SUCCEEDED(rv));
++      return NS_OK;
++    }
++
++    AssertIsOnBackgroundThread();
++
++    for (uint32_t i = 0; i < mData->Length(); ++i) {
++      NotifySoftUpdateData& data = mData->ElementAt(i);
++      MOZ_ASSERT(!(data.mContentParent));
++      ServiceWorkerManagerParent* parent = data.mParent;
++      if (parent && !parent->ActorDestroyed()) {
++        Unused << parent->SendNotifySoftUpdate(mOriginAttributes, mScope);
++      }
++    }
++    return NS_OK;
++  }
++
++private:
++  nsAutoPtr<nsTArray<NotifySoftUpdateData>> mData;
++  OriginAttributes mOriginAttributes;
++  nsString mScope;
++  nsCOMPtr<nsIThread> mBackgroundThread;
++};
++
+ } // namespace
+ 
+ ServiceWorkerManagerService::ServiceWorkerManagerService()
+ {
+   AssertIsOnBackgroundThread();
+ 
+   // sInstance is a raw ServiceWorkerManagerService*.
+   MOZ_ASSERT(!sInstance);
+@@ -86,17 +165,17 @@ void
+ ServiceWorkerManagerService::PropagateRegistration(
+                                            uint64_t aParentID,
+                                            ServiceWorkerRegistrationData& aData)
+ {
+   AssertIsOnBackgroundThread();
+ 
+   DebugOnly<bool> parentFound = false;
+   for (auto iter = mAgents.Iter(); !iter.Done(); iter.Next()) {
+-    ServiceWorkerManagerParent* parent = iter.Get()->GetKey();
++    RefPtr<ServiceWorkerManagerParent> parent = iter.Get()->GetKey();
+     MOZ_ASSERT(parent);
+ 
+     if (parent->ID() != aParentID) {
+       Unused << parent->SendNotifyRegister(aData);
+ #ifdef DEBUG
+     } else {
+       parentFound = true;
+ #endif
+@@ -111,31 +190,54 @@ ServiceWorkerManagerService::PropagateRe
+ void
+ ServiceWorkerManagerService::PropagateSoftUpdate(
+                                       uint64_t aParentID,
+                                       const OriginAttributes& aOriginAttributes,
+                                       const nsAString& aScope)
+ {
+   AssertIsOnBackgroundThread();
+ 
++  nsAutoPtr<nsTArray<NotifySoftUpdateData>> notifySoftUpdateDataArray(
++      new nsTArray<NotifySoftUpdateData>());
+   DebugOnly<bool> parentFound = false;
+   for (auto iter = mAgents.Iter(); !iter.Done(); iter.Next()) {
+-    ServiceWorkerManagerParent* parent = iter.Get()->GetKey();
++    RefPtr<ServiceWorkerManagerParent> parent = iter.Get()->GetKey();
+     MOZ_ASSERT(parent);
+ 
+-    nsString scope(aScope);
+-    Unused << parent->SendNotifySoftUpdate(aOriginAttributes,
+-                                           scope);
+ #ifdef DEBUG
+     if (parent->ID() == aParentID) {
+       parentFound = true;
+     }
+ #endif
++
++    RefPtr<ContentParent> contentParent = parent->GetContentParent();
++
++    // If the ContentParent is null we are dealing with a same-process actor.
++    if (!contentParent) {
++      Unused << parent->SendNotifySoftUpdate(aOriginAttributes,
++                                             nsString(aScope));
++      continue;
++    }
++
++    NotifySoftUpdateData* data = notifySoftUpdateDataArray->AppendElement();
++    data->mContentParent.swap(contentParent);
++    data->mParent.swap(parent);
+   }
+ 
++  if (notifySoftUpdateDataArray->IsEmpty()) {
++    return;
++  }
++
++  RefPtr<NotifySoftUpdateIfPrincipalOkRunnable> runnable =
++    new NotifySoftUpdateIfPrincipalOkRunnable(notifySoftUpdateDataArray,
++                                              aOriginAttributes, aScope);
++  MOZ_ASSERT(!notifySoftUpdateDataArray);
++  nsresult rv = NS_DispatchToMainThread(runnable);
++  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(rv));
++
+ #ifdef DEBUG
+   MOZ_ASSERT(parentFound);
+ #endif
+ }
+ 
+ void
+ ServiceWorkerManagerService::PropagateUnregister(
+                                             uint64_t aParentID,
+@@ -150,17 +252,17 @@ ServiceWorkerManagerService::PropagateUn
+ 
+   // It's possible that we don't have any ServiceWorkerManager managing this
+   // scope but we still need to unregister it from the ServiceWorkerRegistrar.
+   service->UnregisterServiceWorker(aPrincipalInfo,
+                                    NS_ConvertUTF16toUTF8(aScope));
+ 
+   DebugOnly<bool> parentFound = false;
+   for (auto iter = mAgents.Iter(); !iter.Done(); iter.Next()) {
+-    ServiceWorkerManagerParent* parent = iter.Get()->GetKey();
++    RefPtr<ServiceWorkerManagerParent> parent = iter.Get()->GetKey();
+     MOZ_ASSERT(parent);
+ 
+     if (parent->ID() != aParentID) {
+       nsString scope(aScope);
+       Unused << parent->SendNotifyUnregister(aPrincipalInfo, scope);
+ #ifdef DEBUG
+     } else {
+       parentFound = true;
+@@ -176,17 +278,17 @@ ServiceWorkerManagerService::PropagateUn
+ void
+ ServiceWorkerManagerService::PropagateRemove(uint64_t aParentID,
+                                              const nsACString& aHost)
+ {
+   AssertIsOnBackgroundThread();
+ 
+   DebugOnly<bool> parentFound = false;
+   for (auto iter = mAgents.Iter(); !iter.Done(); iter.Next()) {
+-    ServiceWorkerManagerParent* parent = iter.Get()->GetKey();
++    RefPtr<ServiceWorkerManagerParent> parent = iter.Get()->GetKey();
+     MOZ_ASSERT(parent);
+ 
+     if (parent->ID() != aParentID) {
+       nsCString host(aHost);
+       Unused << parent->SendNotifyRemove(host);
+ #ifdef DEBUG
+     } else {
+       parentFound = true;
+@@ -207,17 +309,17 @@ ServiceWorkerManagerService::PropagateRe
+   RefPtr<dom::ServiceWorkerRegistrar> service =
+     dom::ServiceWorkerRegistrar::Get();
+   MOZ_ASSERT(service);
+ 
+   service->RemoveAll();
+ 
+   DebugOnly<bool> parentFound = false;
+   for (auto iter = mAgents.Iter(); !iter.Done(); iter.Next()) {
+-    ServiceWorkerManagerParent* parent = iter.Get()->GetKey();
++    RefPtr<ServiceWorkerManagerParent> parent = iter.Get()->GetKey();
+     MOZ_ASSERT(parent);
+ 
+     if (parent->ID() != aParentID) {
+       Unused << parent->SendNotifyRemoveAll();
+ #ifdef DEBUG
+     } else {
+       parentFound = true;
+ #endif
+diff --git a/ipc/glue/BackgroundParentImpl.cpp b/ipc/glue/BackgroundParentImpl.cpp
+--- a/ipc/glue/BackgroundParentImpl.cpp
++++ b/ipc/glue/BackgroundParentImpl.cpp
+@@ -551,28 +551,32 @@ BackgroundParentImpl::DeallocPBroadcastC
+ }
+ 
+ mozilla::dom::PServiceWorkerManagerParent*
+ BackgroundParentImpl::AllocPServiceWorkerManagerParent()
+ {
+   AssertIsInMainProcess();
+   AssertIsOnBackgroundThread();
+ 
+-  return new ServiceWorkerManagerParent();
++  RefPtr<dom::workers::ServiceWorkerManagerParent> agent =
++    new dom::workers::ServiceWorkerManagerParent();
++  return agent.forget().take();
+ }
+ 
+ bool
+ BackgroundParentImpl::DeallocPServiceWorkerManagerParent(
+                                             PServiceWorkerManagerParent* aActor)
+ {
+   AssertIsInMainProcess();
+   AssertIsOnBackgroundThread();
+   MOZ_ASSERT(aActor);
+ 
+-  delete static_cast<ServiceWorkerManagerParent*>(aActor);
++  RefPtr<dom::workers::ServiceWorkerManagerParent> parent =
++    dont_AddRef(static_cast<dom::workers::ServiceWorkerManagerParent*>(aActor));
++  MOZ_ASSERT(parent);
+   return true;
+ }
+ 
+ bool
+ BackgroundParentImpl::RecvShutdownServiceWorkerRegistrar()
+ {
+   AssertIsInMainProcess();
+   AssertIsOnBackgroundThread();
+

@@ -1,0 +1,564 @@
+# HG changeset patch
+# User Fernando Jimenez <ferjmoreno@gmail.com>
+# Parent  4c82ee66b1f8e13464f5cb902bc63ea26fe74706
+Bug 1223781 - New settings added to settings.json should be applied after OTA without requiring to bump settings DB version. r=gwagner
+
+diff --git a/dom/settings/SettingsDB.jsm b/dom/settings/SettingsDB.jsm
+--- a/dom/settings/SettingsDB.jsm
++++ b/dom/settings/SettingsDB.jsm
+@@ -3,20 +3,26 @@
+  * You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ "use strict";
+ 
+ var Cc = Components.classes;
+ var Ci = Components.interfaces;
+ var Cu = Components.utils;
+ 
+-Cu.importGlobalProperties(['Blob', 'File']);
++Cu.importGlobalProperties(["Blob", "File"]);
+ Cu.import("resource://gre/modules/Services.jsm");
++Cu.import("resource://gre/modules/AppsUtils.jsm");
+ 
+-this.EXPORTED_SYMBOLS = ["SettingsDB", "SETTINGSDB_NAME", "SETTINGSSTORE_NAME"];
++this.EXPORTED_SYMBOLS = [
++  "SettingsDB",
++  "SETTINGSDB_NAME",
++  "SETTINGSSTORE_NAME",
++  "SETTINGSDB_VERSION"
++];
+ 
+ var DEBUG = false;
+ var VERBOSE = false;
+ 
+ try {
+   DEBUG   =
+     Services.prefs.getBoolPref("dom.mozSettings.SettingsDB.debug.enabled");
+   VERBOSE =
+@@ -48,99 +54,38 @@ Cu.import("resource://gre/modules/FileUt
+ Cu.import("resource://gre/modules/NetUtil.jsm");
+ 
+ this.SettingsDB = function SettingsDB() {}
+ 
+ SettingsDB.prototype = {
+ 
+   __proto__: IndexedDBHelper.prototype,
+ 
+-  upgradeSchema: function upgradeSchema(aTransaction, aDb, aOldVersion, aNewVersion) {
++  _dbVersion: SETTINGSDB_VERSION,
++
++  upgradeSchema(aTransaction, aDb, aOldVersion, aNewVersion) {
++    if (DEBUG) debug("Upgrade schema ", aOldVersion, aNewVersion);
+     let objectStore;
+     if (aOldVersion == 0) {
+       objectStore = aDb.createObjectStore(SETTINGSSTORE_NAME, { keyPath: "settingName" });
+       if (VERBOSE) debug("Created object stores");
+     } else if (aOldVersion == 1) {
+       if (VERBOSE) debug("Get object store for upgrade and remove old index");
+       objectStore = aTransaction.objectStore(SETTINGSSTORE_NAME);
+       objectStore.deleteIndex("settingValue");
+     } else {
+       if (VERBOSE) debug("Get object store for upgrade");
+       objectStore = aTransaction.objectStore(SETTINGSSTORE_NAME);
+     }
+ 
+-    // Loading resource://app/defaults/settings.json doesn't work because
+-    // settings.json is not in the omnijar.
+-    // So we look for the app dir instead and go from here...
+-    let settingsFile = FileUtils.getFile("DefRt", ["settings.json"], false);
+-    if (!settingsFile || (settingsFile && !settingsFile.exists())) {
+-      // On b2g desktop builds the settings.json file is moved in the
+-      // profile directory by the build system.
+-      settingsFile = FileUtils.getFile("ProfD", ["settings.json"], false);
+-      if (!settingsFile || (settingsFile && !settingsFile.exists())) {
+-        return;
+-      }
+-    }
+-
+-    let chan = NetUtil.newChannel({
+-      uri: NetUtil.newURI(settingsFile),
+-      loadUsingSystemPrincipal: true});
+-    let stream = chan.open();
+-    // Obtain a converter to read from a UTF-8 encoded input stream.
+-    let converter = Cc["@mozilla.org/intl/scriptableunicodeconverter"]
+-                    .createInstance(Ci.nsIScriptableUnicodeConverter);
+-    converter.charset = "UTF-8";
+-    let rawstr = converter.ConvertToUnicode(NetUtil.readInputStreamToString(
+-                                            stream,
+-                                            stream.available()) || "");
+-    let settings;
+-    try {
+-      settings = JSON.parse(rawstr);
+-    } catch(e) {
+-      if (DEBUG) debug("Error parsing " + settingsFile.path + " : " + e);
+-      return;
+-    }
+-    stream.close();
+-
+-    objectStore.openCursor().onsuccess = function(event) {
+-      let cursor = event.target.result;
+-      if (cursor) {
+-        let value = cursor.value;
+-        if (value.settingName in settings) {
+-          if (VERBOSE) debug("Upgrade " +settings[value.settingName]);
+-          value.defaultValue = this.prepareValue(settings[value.settingName]);
+-          delete settings[value.settingName];
+-          if ("settingValue" in value) {
+-            value.userValue = this.prepareValue(value.settingValue);
+-            delete value.settingValue;
+-          }
+-          cursor.update(value);
+-        } else if ("userValue" in value || "settingValue" in value) {
+-          value.defaultValue = undefined;
+-          if (aOldVersion == 1 && value.settingValue) {
+-            value.userValue = this.prepareValue(value.settingValue);
+-            delete value.settingValue;
+-          }
+-          cursor.update(value);
+-        } else {
+-          cursor.delete();
+-        }
+-        cursor.continue();
+-      } else {
+-        for (let name in settings) {
+-          let value = this.prepareValue(settings[name]);
+-          if (VERBOSE) debug("Set new:" + name +", " + value);
+-          objectStore.add({ settingName: name, defaultValue: value, userValue: undefined });
+-        }
+-      }
+-    }.bind(this);
++    this.loadDefaultSettings(objectStore, aOldVersion);
+   },
+ 
+   // If the value is a data: uri, convert it to a Blob.
+-  convertDataURIToBlob: function(aValue) {
++  convertDataURIToBlob(aValue) {
+     /* base64 to ArrayBuffer decoding, from
+        https://developer.mozilla.org/en-US/docs/Web/JavaScript/Base64_encoding_and_decoding
+     */
+     function b64ToUint6 (nChr) {
+       return nChr > 64 && nChr < 91 ?
+           nChr - 65
+         : nChr > 96 && nChr < 123 ?
+           nChr - 71
+@@ -194,17 +139,17 @@ SettingsDB.prototype = {
+                         { type: mimeType });
+       } catch(e) {
+         dump(e);
+       }
+     }
+     return aValue
+   },
+ 
+-  getObjectKind: function(aObject) {
++  getObjectKind(aObject) {
+     if (aObject === null || aObject === undefined) {
+       return "primitive";
+     } else if (Array.isArray(aObject)) {
+       return "array";
+     } else if (aObject instanceof File) {
+       return "file";
+     } else if (aObject instanceof Ci.nsIDOMBlob) {
+       return "blob";
+@@ -215,17 +160,17 @@ SettingsDB.prototype = {
+     } else if (typeof aObject == "object") {
+       return "object";
+     } else {
+       return "primitive";
+     }
+   },
+ 
+   // Makes sure any property that is a data: uri gets converted to a Blob.
+-  prepareValue: function(aObject) {
++  prepareValue(aObject) {
+     let kind = this.getObjectKind(aObject);
+     if (kind == "array") {
+       let res = [];
+       aObject.forEach(function(aObj) {
+         res.push(this.prepareValue(aObj));
+       }, this);
+       return res;
+     } else if (kind == "file" || kind == "blob" || kind == "date") {
+@@ -237,13 +182,123 @@ SettingsDB.prototype = {
+     // Fall-through, we now have a dictionary object.
+     let res = {};
+     for (let prop in aObject) {
+       res[prop] = this.prepareValue(aObject[prop]);
+     }
+     return res;
+   },
+ 
+-  init: function init() {
+-    this.initDBHelper(SETTINGSDB_NAME, SETTINGSDB_VERSION,
++  loadDefaultSettings(aObjectStore, aOldVersion) {
++    // Loading resource://app/defaults/settings.json doesn't work because
++    // settings.json is not in the omnijar.
++    // So we look for the app dir instead and go from here...
++    let settingsFile = FileUtils.getFile("DefRt", ["settings.json"], false);
++    if (!settingsFile || (settingsFile && !settingsFile.exists())) {
++      // On b2g desktop builds the settings.json file is moved in the
++      // profile directory by the build system.
++      settingsFile = FileUtils.getFile("ProfD", ["settings.json"], false);
++      if (!settingsFile || (settingsFile && !settingsFile.exists())) {
++        return;
++      }
++    }
++
++    let chan = NetUtil.newChannel({
++      uri: NetUtil.newURI(settingsFile),
++      loadUsingSystemPrincipal: true
++    });
++    let stream = chan.open();
++    // Obtain a converter to read from a UTF-8 encoded input stream.
++    let converter = Cc["@mozilla.org/intl/scriptableunicodeconverter"]
++                    .createInstance(Ci.nsIScriptableUnicodeConverter);
++    converter.charset = "UTF-8";
++    let rawstr = converter.ConvertToUnicode(
++      NetUtil.readInputStreamToString(stream, stream.available()) || ""
++    );
++    let settings;
++    try {
++      settings = JSON.parse(rawstr);
++    } catch(e) {
++      if (DEBUG) debug("Error parsing " + settingsFile.path + " : " + e);
++      return;
++    }
++    stream.close();
++
++    aObjectStore.openCursor().onsuccess = event => {
++      let cursor = event.target.result;
++      if (cursor) {
++        let value = cursor.value;
++        if (value.settingName in settings) {
++          if (VERBOSE) {
++            debug("Upgrade " + value.settingName + " " +
++                  settings[value.settingName]);
++          }
++          value.defaultValue = this.prepareValue(settings[value.settingName]);
++          delete settings[value.settingName];
++          if ("settingValue" in value) {
++            value.userValue = this.prepareValue(value.settingValue);
++            delete value.settingValue;
++          }
++          cursor.update(value);
++        } else if ("userValue" in value || "settingValue" in value) {
++          value.defaultValue = undefined;
++          if (aOldVersion !== undefined &&
++              aOldVersion == 1 && value.settingValue) {
++            value.userValue = this.prepareValue(value.settingValue);
++            delete value.settingValue;
++          }
++          cursor.update(value);
++        } else {
++          cursor.delete();
++        }
++        cursor.continue();
++      } else {
++        for (let name in settings) {
++          let value = this.prepareValue(settings[name]);
++          if (VERBOSE) debug("Set new:" + name +", " + value);
++          aObjectStore.add({
++            settingName: name,
++            defaultValue: value,
++            userValue: undefined
++          });
++        }
++      }
++    };
++  },
++
++  /**
++   * Only for testing purposes.
++   */
++  set dbVersion(version) {
++    this._dbVersion = SETTINGSDB_VERSION || version;
++  },
++
++  init() {
++    this.initDBHelper(SETTINGSDB_NAME, this._dbVersion,
+                       [SETTINGSSTORE_NAME]);
++
++    // We need to store the db version to avoid reading the setting.json
++    // file twice on the very first run and after an OTA update where
++    // the db version was bumped.
++    // upgradeSchema already takes care of loading and applying the
++    // setting.json content in these two scenarios.
++    const dbVersionPref = "settings.api.db.version";
++    let oldDbVersion = 0;
++    try {
++      oldDbVersion = Services.prefs.getIntPref(dbVersionPref);
++    } catch(e) {}
++    Services.prefs.setIntPref(dbVersionPref, this._dbVersion);
++
++    if (!AppsUtils.isFirstRun(Services.prefs) ||
++        oldDbVersion != this._dbVersion) {
++      return;
++    }
++
++    // We get there in case of a first run after an OTA update where
++    // the settings db version was not bumped. In this case, we need to
++    // load and apply the content of the settings.json file.
++    this.newTxn("readwrite", SETTINGSSTORE_NAME, (txn, store) => {
++      this.loadDefaultSettings(store);
++    }, null, error => {
++      dump("*** WARNING *** Settings DB initialization error " + error + "\n");
++    });
+   }
+ }
+diff --git a/dom/settings/tests/chrome.ini b/dom/settings/tests/chrome.ini
+--- a/dom/settings/tests/chrome.ini
++++ b/dom/settings/tests/chrome.ini
+@@ -1,10 +1,12 @@
+ [DEFAULT]
+ skip-if = buildapp != 'b2g'
+ support-files =
++  test_settings_db.js
+   test_settings_service.js
+   test_settings_service_callback.js
+ 
+ 
+ [test_settings_service.xul]
+ skip-if= buildapp == 'mulet'
+ [test_settings_service_callback.xul]
++[test_settings_db.xul]
+diff --git a/dom/settings/tests/test_settings_db.js b/dom/settings/tests/test_settings_db.js
+new file mode 100644
+--- /dev/null
++++ b/dom/settings/tests/test_settings_db.js
+@@ -0,0 +1,148 @@
++/* Any copyright is dedicated to the Public Domain.
++   http://creativecommons.org/publicdomain/zero/1.0/ */
++
++"use strict";
++
++const Cu = Components.utils;
++
++Cu.import("resource://gre/modules/AppsUtils.jsm");
++Cu.import("resource://gre/modules/FileUtils.jsm");
++Cu.import("resource://gre/modules/Services.jsm");
++Cu.import("resource://gre/modules/SettingsDB.jsm");
++
++SimpleTest.waitForExplicitFinish();
++
++let settings = {
++  "setting1": "value1"
++};
++
++let settingsDB;
++
++const saveTestSettingsJson = () => {
++  let file = FileUtils.getFile("ProfD", ["settings.json"], false);
++  let foStream = FileUtils.openFileOutputStream(file);
++  let json = JSON.stringify(settings);
++  foStream.write(json, json.length);
++  foStream.close();
++};
++
++const getSettings = () => {
++  return new Promise((resolve, reject) => {
++    settingsDB.newTxn("readonly", SETTINGSSTORE_NAME, (txn, store) => {
++      txn.onabort = reject;
++      txn.onerror = reject;
++      let req = store.getAll();
++      req.onsuccess = () => {
++        resolve(req.result);
++      };
++      req.onerror = reject;
++    }, null, reject);
++  });
++};
++
++const checkSettings = expected => {
++  return getSettings().then(settings => {
++    settings.forEach(setting => {
++      if (expected.has(setting.settingName)) {
++        let value = expected.get(setting.settingName);
++        ok(value == setting.defaultValue,
++           `${setting.defaultValue} should be ${value}`);
++        expected.delete(setting.settingName);
++      }
++    });
++    ok(expected.size == 0, `should remove all expected settings`);
++  });
++};
++
++const setFirstRun = () => {
++  let promises = [];
++  promises.push(new Promise(resolve => {
++    SpecialPowers.pushPrefEnv({
++      "set": [["gecko.mstone", ""]]
++    }, resolve);
++  }));
++  promises.push(new Promise(resolve => {
++    SpecialPowers.pushPrefEnv({
++      "set": [["gecko.buildID", ""]]
++    }, resolve);
++  }));
++
++  return Promise.all(promises);
++};
++
++const cleanup = () => {
++  settingsDB.close();
++  settingsDB = null;
++  next();
++};
++
++const tests = [() => {
++  // Create dummy settings.json in the profile dir.
++  saveTestSettingsJson();
++  ok(true, "should create settings.json");
++  next();
++}, () => {
++  // settings.json should be applied on first boot.
++  settingsDB = new SettingsDB();
++  settingsDB.init();
++  let expected = new Map();
++  expected.set("setting1", "value1");
++  checkSettings(expected).then(next);
++}, () => {
++  cleanup();
++}, () => {
++  // Modifying settings.json but not updating the platform should not
++  // apply the changes to settings.json.
++  settings["setting1"] = "modifiedValue1";
++  settings["setting2"] = "value2";
++  saveTestSettingsJson();
++  settingsDB = new SettingsDB();
++  settingsDB.init();
++  let expected = new Map();
++  expected.set("setting1", "value1");
++  checkSettings(expected).then(next);
++}, () => {
++  cleanup();
++}, () => {
++  setFirstRun().then(next);
++}, () => {
++  // Updating the platform should apply changes to settings.json.
++  settingsDB = new SettingsDB();
++  settingsDB.init();
++  let expected = new Map();
++  expected.set("setting1", "modifiedValue1");
++  expected.set("setting2", "value2");
++  checkSettings(expected).then(next);
++}, () => {
++  cleanup();
++}, () => {
++  setFirstRun().then(next);
++}, () => {
++  // Updating the platform and bumping DB version should also apply changes
++  // to settings.json
++  settings["setting2"] = "modifiedValue2";
++  saveTestSettingsJson();
++  settingsDB = new SettingsDB();
++  SettingsDB.dbVersion = SETTINGSDB_VERSION + 1;
++  settingsDB.init();
++  let expected = new Map();
++  expected.set("setting1", "modifiedValue1");
++  expected.set("setting2", "modifiedValue2");
++  checkSettings(expected).then(next);
++}, () => {
++  cleanup();
++}];
++
++const next = () => {
++  let step = tests.shift();
++  if (!step) {
++    return SimpleTest.finish();
++  }
++  try {
++    step();
++  } catch(e) {
++    ok(false, "Test threw: " + e);
++  }
++}
++
++SpecialPowers.pushPrefEnv({"set":[["settings.api.db.version", 0]]}, next);
+diff --git a/dom/settings/tests/test_settings_db.xul b/dom/settings/tests/test_settings_db.xul
+new file mode 100644
+--- /dev/null
++++ b/dom/settings/tests/test_settings_db.xul
+@@ -0,0 +1,19 @@
++<?xml version="1.0"?>
++<?xml-stylesheet type="text/css" href="chrome://global/skin"?>
++<?xml-stylesheet type="text/css" href="/tests/SimpleTest/test.css"?>
++<!--
++https://bugzilla.mozilla.org/show_bug.cgi?id=1223781
++-->
++<window title="Mozilla Bug 1223781"
++        xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul">
++  <script type="application/javascript"
++          src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
++
++  <!-- test results are displayed in the html:body -->
++  <body xmlns="http://www.w3.org/1999/xhtml">
++  <a href="https://bugzilla.mozilla.org/show_bug.cgi?id=1223781"
++     target="_blank">Mozilla Bug 1223781</a>
++  </body>
++
++  <script type="application/javascript;version=1.7" src="test_settings_db.js" />
++</window>
+diff --git a/dom/settings/tests/unit/test_settingsrequestmanager_messages.js b/dom/settings/tests/unit/test_settingsrequestmanager_messages.js
+--- a/dom/settings/tests/unit/test_settingsrequestmanager_messages.js
++++ b/dom/settings/tests/unit/test_settingsrequestmanager_messages.js
+@@ -1,21 +1,57 @@
+ "use strict";
+ 
+-var Cu = Components.utils;
++const Cu = Components.utils;
++const Ci = Components.interfaces;
+ 
+ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+ Cu.import("resource://gre/modules/Services.jsm");
+ 
+ XPCOMUtils.defineLazyServiceGetter(this, "cpmm",
+                                    "@mozilla.org/childprocessmessagemanager;1",
+                                    "nsIMessageSender");
+ 
+-var principal = Services.scriptSecurityManager.getSystemPrincipal();
+-var lockID = "{435d2192-4f21-48d4-90b7-285f147a56be}";
++let principal = Services.scriptSecurityManager.getSystemPrincipal();
++let lockID = "{435d2192-4f21-48d4-90b7-285f147a56be}";
++
++// AppsUtils.isFirstRun uses Services.appinfo.platformVersion and
++// Services.appinfo.platformBuildID
++let XULRuntime = Components.classesByID["{95d89e3e-a169-41a3-8e56-719978e15b12}"]
++                           .getService(Ci.nsIXULRuntime);
++
++let XULAppInfo = {
++  vendor: "Mozilla",
++  name: "XPCShell",
++  ID: "xpcshell@test.mozilla.org",
++  version: "5",
++  appBuildID: "2007010101",
++  platformVersion: "1.9",
++  platformBuildID: "2007010101",
++  inSafeMode: false,
++  logConsoleErrors: true,
++  OS: XULRuntime.OS,
++  XPCOMABI: "noarch-spidermonkey",
++  processType: XULRuntime.processType,
++  QueryInterface: XPCOMUtils.generateQI([Ci.nsIXULAppInfo, Ci.nsIXULRuntime,
++                                         Ci.nsISupports])
++};
++
++let XULAppInfoFactory = {
++  createInstance: function (outer, iid) {
++    if (outer != null)
++      throw Cr.NS_ERROR_NO_AGGREGATION;
++    return XULAppInfo.QueryInterface(iid);
++  }
++};
++
++Components.manager.QueryInterface(Ci.nsIComponentRegistrar)
++          .registerFactory(Components.ID("{ecff8849-cee8-40a7-bd4a-3f4fdfeddb5c}"),
++                           "XULAppInfo", "@mozilla.org/xre/app-info;1",
++                           XULAppInfoFactory);
+ 
+ // Helper to start the Settings Request Manager
+ function startSettingsRequestManager() {
+   Cu.import("resource://gre/modules/SettingsRequestManager.jsm");
+ }
+ 
+ function handlerHelper(reply, callback, runNext = true) {
+   let handler = {
