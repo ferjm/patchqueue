@@ -174,6 +174,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsyn
  {
 -  bool mSuccess;
 +  nsString mOrigin;
++  bool mFirstRegistration;
  };
  
  struct SyncGetTagsResponse
@@ -228,7 +229,6 @@ diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsyn
 +struct SyncRemoveArgs
 +{
 +  nsString mId;
-+  nsString mOrigin;
 +};
 +
 +union SyncInternalOpArgs
@@ -1726,7 +1726,7 @@ diff --git a/dom/backgroundsync/DBSchema.cpp b/dom/backgroundsync/DBSchema.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/DBSchema.cpp
-@@ -0,0 +1,283 @@
+@@ -0,0 +1,304 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -1797,61 +1797,84 @@ new file mode 100644
 +
 +nsresult
 +Register(mozIStorageConnection* aConn,
-+         const SyncRegisterArgs& aArgs)
++         const SyncRegisterArgs& aArgs,
++         bool& firstRegistrationForOrigin)
 +{
 +  MOZ_ASSERT(!NS_IsMainThread());
 +  MOZ_ASSERT(aConn);
 +
 +  nsresult rv = NS_OK;
 +
++  {
++    nsCOMPtr<mozIStorageStatement> state;
++    rv = aConn->CreateStatement(NS_LITERAL_CSTRING(
++      "INSERT INTO registrations ("
++        "id, "
++        "origin, "
++        "scope, "
++        "tag, "
++        "state, "
++        "lastChance "
++      ") VALUES ("
++        ":id, "
++        ":origin, "
++        ":scope, "
++        ":tag, "
++        ":state, "
++        ":lastChance "
++      ");"
++    ), getter_AddRefs(state));
++    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++    nsString id;
++    GetId(aArgs.mScope(), aArgs.mTag(), id);
++
++    rv = state->BindStringByName(NS_LITERAL_CSTRING("id"), id);
++    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++    rv = state->BindStringByName(NS_LITERAL_CSTRING("origin"),
++                                 aArgs.mOrigin());
++    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++    rv = state->BindStringByName(NS_LITERAL_CSTRING("scope"),
++                                 aArgs.mScope());
++    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++    rv = state->BindStringByName(NS_LITERAL_CSTRING("tag"),
++                                 aArgs.mTag());
++    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++    rv = state->BindInt32ByName(NS_LITERAL_CSTRING("state"),
++                                RegistrationState::PENDING);
++    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++    // By default new registrations are not flagged as last chance.
++    rv = state->BindInt32ByName(NS_LITERAL_CSTRING("lastChance"), 0);
++    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++    rv = state->Execute();
++    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++  }
++
++  // After inserting the new registration we check if this is the first
++  // registration for this origin. In that case, we need to register the
++  // origin in the 'origins' DB.
 +  nsCOMPtr<mozIStorageStatement> state;
 +  rv = aConn->CreateStatement(NS_LITERAL_CSTRING(
-+    "INSERT INTO registrations ("
-+      "id, "
-+      "origin, "
-+      "scope, "
-+      "tag, "
-+      "state, "
-+      "lastChance "
-+    ") VALUES ("
-+      ":id, "
-+      ":origin, "
-+      ":scope, "
-+      ":tag, "
-+      ":state, "
-+      ":lastChance "
-+    ");"
++    "SELECT COUNT(*) FROM (SELECT id FROM registrations WHERE origin=:origin);"
 +  ), getter_AddRefs(state));
++
++  rv = state->BindStringByName(NS_LITERAL_CSTRING("origin"), aArgs.mOrigin());
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
-+  nsString id;
-+  GetId(aArgs.mScope(), aArgs.mTag(), id);
++  bool hasMoreData = false;
++  NS_SUCCEEDED(state->ExecuteStep(&hasMoreData));
++  NS_WARN_IF(hasMoreData);
 +
-+  rv = state->BindStringByName(NS_LITERAL_CSTRING("id"), id);
++  int32_t count;
++  rv = state->GetInt32(0, &count);
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
-+
-+  rv = state->BindStringByName(NS_LITERAL_CSTRING("origin"),
-+                               aArgs.mOrigin());
-+  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
-+
-+  rv = state->BindStringByName(NS_LITERAL_CSTRING("scope"),
-+                               aArgs.mScope());
-+  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
-+
-+  rv = state->BindStringByName(NS_LITERAL_CSTRING("tag"),
-+                               aArgs.mTag());
-+  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
-+
-+  rv = state->BindInt32ByName(NS_LITERAL_CSTRING("state"),
-+                              RegistrationState::PENDING);
-+  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
-+
-+  // By default new registrations are not flagged as last chance.
-+  rv = state->BindInt32ByName(NS_LITERAL_CSTRING("lastChance"), 0);
-+  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
-+
-+  rv = state->Execute();
-+  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++  firstRegistrationForOrigin = (count == 1);
 +
 +  return rv;
 +}
@@ -1932,7 +1955,6 @@ new file mode 100644
 +nsresult
 +Remove(mozIStorageConnection* aConn,
 +       const SyncRemoveArgs& aArgs,
-+       bool aRemoveOrigin,
 +       nsAString& aOrigin)
 +{
 +  MOZ_ASSERT(!NS_IsMainThread());
@@ -1960,8 +1982,7 @@ new file mode 100644
 +      continue;
 +    }
 +
-+    nsString origin;
-+    rv = getOriginState->GetString(0, origin);
++    rv = getOriginState->GetString(0, aOrigin);
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +  }
 +
@@ -2014,7 +2035,7 @@ diff --git a/dom/backgroundsync/DBSchema.h b/dom/backgroundsync/DBSchema.h
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/DBSchema.h
-@@ -0,0 +1,65 @@
+@@ -0,0 +1,67 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -2047,7 +2068,8 @@ new file mode 100644
 +
 +nsresult
 +Register(mozIStorageConnection* aConn,
-+         const SyncRegisterArgs& aArgs);
++         const SyncRegisterArgs& aArgs,
++         bool& firstRegistrationForOrigin);
 +
 +nsresult
 +GetTags(mozIStorageConnection* aConn,
@@ -2060,7 +2082,8 @@ new file mode 100644
 +
 +nsresult
 +Remove(mozIStorageConnection* aConn,
-+       const SyncRemoveArgs& aArgs);
++       const SyncRemoveArgs& aArgs,
++       nsString& aOrigin);
 +
 +nsresult
 +ChangeState(mozIStorageConnection* aConn,
@@ -4245,7 +4268,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/StorageManager.cpp
-@@ -0,0 +1,767 @@
+@@ -0,0 +1,770 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -4569,13 +4592,14 @@ new file mode 100644
 +                 const SyncRegisterArgs& aRegisterArgs)
 +    : BaseAction(aRequestId, aManager)
 +    , mArgs(aRegisterArgs)
++    , mFirstRegistration(true)
 +  {}
 +
 +  virtual nsresult
 +  RunSyncOnTarget(const QuotaInfo& aQuotaInfo,
 +                  mozIStorageConnection* aConn) override
 +  {
-+    nsresult rv = db::Register(aConn, mArgs);
++    nsresult rv = db::Register(aConn, mArgs, mFirstRegistration);
 +    NS_WARN_IF(NS_FAILED(rv));
 +    return rv;
 +  }
@@ -4588,12 +4612,13 @@ new file mode 100644
 +        SyncOpError(static_cast<uint32_t>(aRv)));
 +    } else {
 +      mManager->OnRequestComplete(mRequestId,
-+          SyncRegisterResponse(mArgs.mOrigin()));
++          SyncRegisterResponse(mArgs.mOrigin(), mFirstRegistration));
 +    }
 +  }
 +
 +private:
 +  SyncRegisterArgs mArgs;
++  bool mFirstRegistration;
 +};
 +
 +// ---------------------------------------------------------------------------
@@ -4683,7 +4708,7 @@ new file mode 100644
 +  RunSyncOnTarget(const QuotaInfo& aQuotaInfo,
 +                  mozIStorageConnection* aConn) override
 +  {
-+    nsresult rv = db::Remove(aConn, mArgs);
++    nsresult rv = db::Remove(aConn, mArgs, mOrigin);
 +    NS_WARN_IF(NS_FAILED(rv));
 +    return rv;
 +  }
@@ -4695,11 +4720,12 @@ new file mode 100644
 +    // We need to remove the reference to the request independently of
 +    // its result so we can close the context.
 +    mManager->OnRequestComplete(mRequestId,
-+      SyncRemoveResponse(mArgs.mOrigin()));
++      SyncRemoveResponse(mOrigin));
 +  }
 +
 +private:
 +  SyncRemoveArgs mArgs;
++  nsString mOrigin;
 +};
 +
 +// ---------------------------------------------------------------------------
