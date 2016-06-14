@@ -60,13 +60,13 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
 +  if (NS_WARN_IF(NS_FAILED(rv))) {
 +    // XXX create and reject promise
 +  }
-+  nsAutoCString originSuffix;
-+  rv = principal->GetOriginSuffix(originSuffix);
++  nsAutoCString origin;
++  rv = principal->GetOrigin(origin);
 +  if (NS_WARN_IF(NS_FAILED(rv))) {
 +    // XXX create and reject promise
 +  }
 +
-+  const SyncRegisterArgs args(NS_ConvertUTF8toUTF16(originSuffix),
++  const SyncRegisterArgs args(NS_ConvertUTF8toUTF16(origin),
 +                              mScope, (nsString(aTag)));
    return ExecuteOp(SyncOpArgs(args), aRv);
  }
@@ -148,7 +148,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsyn
  
  struct SyncRegisterArgs
  {
-+  nsString mOriginSuffix;
++  nsString mOrigin;
    nsString mScope;
    nsString mTag;
  };
@@ -173,7 +173,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsyn
  struct SyncRegisterResponse
  {
 -  bool mSuccess;
-+  nsString mOriginSuffix;
++  nsString mOrigin;
  };
  
  struct SyncGetTagsResponse
@@ -184,7 +184,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsyn
 +struct Registration
 +{
 +  nsString mId;
-+  nsString mOriginSuffix;
++  nsString mOrigin;
 +  nsString mScope;
 +  nsString mTag;
 +  RegistrationState mState;
@@ -222,7 +222,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsyn
 +struct SyncRemoveArgs
 +{
 +  nsString mId;
-+  nsString mOriginSuffix;
++  nsString mOrigin;
 +};
 +
 +union SyncInternalOpArgs
@@ -1825,7 +1825,7 @@ new file mode 100644
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +  rv = state->BindStringByName(NS_LITERAL_CSTRING("origin"),
-+                               aArgs.mOriginSuffix());
++                               aArgs.mOrigin());
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +  rv = state->BindStringByName(NS_LITERAL_CSTRING("scope"),
@@ -1894,8 +1894,8 @@ new file mode 100644
 +    rv = state->GetString(0, id);
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
-+    nsString originSuffix;
-+    rv = state->GetString(1, originSuffix);
++    nsString origin;
++    rv = state->GetString(1, origin);
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +    nsString scope;
@@ -1914,7 +1914,7 @@ new file mode 100644
 +    rv = state->GetInt32(5, &lastChance);
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
-+    Registration registration(id, originSuffix, scope, tag,
++    Registration registration(id, origin, scope, tag,
 +      static_cast<RegistrationState>(registrationState),
 +      lastChance);
 +    aRegistrations.AppendElement(registration);
@@ -4585,7 +4585,7 @@ new file mode 100644
 +    } else {
 +      mManager->OnRequestComplete<SyncOpResponse>(
 +          mRequestId,
-+          SyncRegisterResponse()
++          SyncRegisterResponse(mArgs.mOrigin())
 +      );
 +    }
 +  }
