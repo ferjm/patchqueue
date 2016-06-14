@@ -716,7 +716,7 @@ diff --git a/dom/backgroundsync/ChromeStorageManager.cpp b/dom/backgroundsync/Ch
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/ChromeStorageManager.cpp
-@@ -0,0 +1,288 @@
+@@ -0,0 +1,324 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -844,6 +844,38 @@ new file mode 100644
 +
 +NS_IMPL_ISUPPORTS(InitRunnable, nsICancelableRunnable, nsIRunnable)
 +
++class ShutdownRunnable : public nsIRunnable,
++                         public nsICancelableRunnable
++{
++public:
++  NS_DECL_THREADSAFE_ISUPPORTS
++
++  ShutdownRunnable(mozIStorageConnection* aConn)
++    : mDBConn(aConn)
++  {}
++
++  NS_IMETHODIMP
++  Run() override
++  {
++    MOZ_ASSERT(mDBConn);
++
++    return mDBConn->Close();
++  }
++
++  NS_IMETHODIMP
++  Cancel() override
++  {
++    return NS_OK;
++  }
++
++private:
++  ~ShutdownRunnable();
++
++  nsCOMPtr<mozIStorageConnection> mDBConn;
++};
++
++NS_IMPL_ISUPPORTS(ShutdownRunnable, nsICancelableRunnable, nsIRunnable)
++
 +class StorageActionRunnable : public nsIRunnable,
 +                              public nsICancelableRunnable
 +{
@@ -908,8 +940,12 @@ new file mode 100644
 +{
 +  AssertIsOnBackgroundThread();
 +
-+  MOZ_ALWAYS_SUCCEEDS(mDBConn->Close());
-+  mDBConn = nullptr;
++  if (mDBConn) {
++    RefPtr<ShutdownRunnable> runnable = new ShutdownRunnable(mDBConn);
++    mIOThread->Dispatch(runnable, nsIThread::DISPATCH_NORMAL);
++    mDBConn = nullptr;
++  }
++
 +
 +  mPendingActions.Clear();
 +
