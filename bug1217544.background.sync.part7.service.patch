@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  947693c778b1adb67a3200d6af9796ed6a9971d7
+# Parent  fb785a78d378d5d91bd0628a355e49ad9d70b61a
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: BackgroundSyncService. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/BackgroundSyncParent.cpp
@@ -211,7 +211,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncService.cpp
-@@ -0,0 +1,246 @@
+@@ -0,0 +1,250 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -410,12 +410,16 @@ new file mode 100644
 +{
 +  switch (aResponse.type()) {
 +    case SyncOpResponse::TSyncRegisterResponse:
-+      mChromeStorageManager->Register(
-+          aResponse.get_SyncRegisterResponse().mOrigin());
++      if (aResponse.get_SyncRegisterResponse().mFirstRegistration()) {
++        mChromeStorageManager->Register(
++            aResponse.get_SyncRegisterResponse().mOrigin());
++      }
 +      break;
 +    case SyncOpResponse::TSyncRemoveResponse:
-+      mChromeStorageManager->Unregister(
-+          aResponse.get_SyncRemoveResponse().mOrigin());
++      nsString origin = aResponse.get_SyncRemoveResponse().mOrigin();
++      if (origin.Length()) {
++        mChromeStorageManager->Unregister(origin);
++      }
 +      break;
 +  }
 +
@@ -591,7 +595,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
        ref->Init(oldManager);
  
        MOZ_ASSERT(!sFactory->mManagerList.Contains(ref));
-@@ -476,33 +477,33 @@ public:
+@@ -479,33 +480,33 @@ public:
    }
  
    virtual void
@@ -629,7 +633,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
  {
    mozilla::ipc::AssertIsOnBackgroundThread();
  
-@@ -519,34 +520,39 @@ StorageManager::ShutdownAll()
+@@ -522,34 +523,39 @@ StorageManager::ShutdownAll()
  void
  StorageManager::Abort(const nsACString& aOrigin)
  {
@@ -671,7 +675,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
    MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(
          NewRunnableMethod(ioThread, &nsIThread::Shutdown)));*/
  }
-@@ -748,20 +754,30 @@ StorageManager::OnRequestComplete(const 
+@@ -751,20 +757,30 @@ StorageManager::OnRequestComplete(const 
    NS_ASSERT_OWNINGTHREAD(StorageManager);
    MOZ_ASSERT(mPendingRequests.Contains(aRequestId));
  
