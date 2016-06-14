@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  fb785a78d378d5d91bd0628a355e49ad9d70b61a
+# Parent  f674d820b624318e3faf856e1c6a122ee171f368
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: BackgroundSyncService. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/BackgroundSyncParent.cpp
@@ -211,7 +211,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncService.cpp
-@@ -0,0 +1,250 @@
+@@ -0,0 +1,252 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -417,6 +417,8 @@ new file mode 100644
 +      break;
 +    case SyncOpResponse::TSyncRemoveResponse:
 +      nsString origin = aResponse.get_SyncRemoveResponse().mOrigin();
++      // We only get the origin value when there are no more registrations for
++      // this origin.
 +      if (origin.Length()) {
 +        mChromeStorageManager->Unregister(origin);
 +      }
