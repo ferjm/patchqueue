@@ -132,7 +132,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncChild.h b/dom/backgroundsync/Backg
 diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh
 --- a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh
 +++ b/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh
-@@ -1,55 +1,106 @@
+@@ -1,55 +1,112 @@
  /* This Source Code Form is subject to the terms of the Mozilla Public
   * License, v. 2.0. If a copy of the MPL was not distributed with this
   * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -196,6 +196,11 @@ diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsyn
 +  Registration[] mRegistrations;
 +};
 +
++struct SyncRemoveResponse
++{
++  nsString mOrigin;
++};
++
  struct SyncOpError
  {
    uint32_t mCode;
@@ -207,6 +212,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsyn
    SyncRegisterResponse;
    SyncGetTagsResponse;
 +  SyncGetAllResponse;
++  SyncRemoveResponse;
    SyncOpError;
  };
  
@@ -4239,7 +4245,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/StorageManager.cpp
-@@ -0,0 +1,779 @@
+@@ -0,0 +1,767 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -4578,10 +4584,8 @@ new file mode 100644
 +  Complete(nsresult aRv) override
 +  {
 +    if (NS_FAILED(aRv)) {
-+      mManager->OnRequestComplete<SyncOpResponse>(
-+        mRequestId,
-+        SyncOpError(static_cast<uint32_t>(aRv))
-+      );
++      mManager->OnRequestComplete(mRequestId,
++        SyncOpError(static_cast<uint32_t>(aRv)));
 +    } else {
 +      mManager->OnRequestComplete(mRequestId,
 +          SyncRegisterResponse(mArgs.mOrigin()));
@@ -4617,15 +4621,11 @@ new file mode 100644
 +  Complete(nsresult aRv) override
 +  {
 +    if (NS_FAILED(aRv)) {
-+      mManager->OnRequestComplete<SyncOpResponse>(
-+        mRequestId,
-+        SyncOpError(static_cast<uint32_t>(aRv))
-+      );
++      mManager->OnRequestComplete(mRequestId,
++        SyncOpError(static_cast<uint32_t>(aRv)));
 +    } else {
-+      mManager->OnRequestComplete<SyncOpResponse>(
-+          mRequestId,
-+          SyncGetTagsResponse(mTags)
-+      );
++      mManager->OnRequestComplete(mRequestId,
++        SyncGetTagsResponse(mTags));
 +    }
 +  }
 +
@@ -4659,10 +4659,8 @@ new file mode 100644
 +    NS_WARN_IF(NS_FAILED(aRv));
 +    // We need to remove the reference to the request independently of
 +    // its result so we can close the context.
-+    mManager->OnRequestComplete<SyncOpResponse>(
-+        mRequestId,
-+        SyncGetAllResponse(mRegistrations)
-+    );
++    mManager->OnRequestComplete(mRequestId,
++      SyncGetAllResponse(mRegistrations));
 +  }
 +
 +private:
@@ -4696,10 +4694,8 @@ new file mode 100644
 +    NS_WARN_IF(NS_FAILED(aRv));
 +    // We need to remove the reference to the request independently of
 +    // its result so we can close the context.
-+    mManager->OnRequestComplete<SyncOpResponse>(
-+        mRequestId,
-+        SyncOpResponse(void_t())
-+    );
++    mManager->OnRequestComplete(mRequestId,
++      SyncRemoveResponse(mArgs.mOrigin()));
 +  }
 +
 +private:
@@ -4733,10 +4729,8 @@ new file mode 100644
 +    NS_WARN_IF(NS_FAILED(aRv));
 +    // We need to remove the reference to the request independently of
 +    // its result so we can close the context.
-+    mManager->OnRequestComplete<SyncOpResponse>(
-+        mRequestId,
-+        SyncOpResponse(void_t())
-+    );
++    mManager->OnRequestComplete(mRequestId,
++      SyncOpResponse(void_t()));
 +  }
 +
 +private:
