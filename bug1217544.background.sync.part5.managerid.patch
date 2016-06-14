@@ -44,6 +44,38 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
      RefPtr<SyncOpRunnable> runnable = mPendingOperations[i];
      MOZ_ASSERT(runnable);
      runnable->SetActor(mActor);
+@@ -422,17 +422,30 @@ BackgroundSync::ExecuteOp(const SyncOpAr
+ 
+ // WebIDL interface methods.
+ 
+ already_AddRefed<Promise>
+ BackgroundSync::Register(const nsAString& aTag, ErrorResult& aRv)
+ {
+   MOZ_ASSERT(IsBackgroundSyncThread());
+ 
+-  const SyncRegisterArgs args(mScope, (nsString(aTag)));
++  nsresult rv;
++  nsCOMPtr<nsIPrincipal> principal =
++    PrincipalInfoToPrincipal(*mPrincipalInfo, &rv);
++  if (NS_WARN_IF(NS_FAILED(rv))) {
++    // XXX create and reject promise
++  }
++  nsAutoCString originSuffix;
++  rv = principal->GetOriginSuffix(originSuffix);
++  if (NS_WARN_IF(NS_FAILED(rv))) {
++    // XXX create and reject promise
++  }
++
++  const SyncRegisterArgs args(NS_ConvertUTF8toUTF16(originSuffix),
++                              mScope, (nsString(aTag)));
+   return ExecuteOp(SyncOpArgs(args), aRv);
+ }
+ 
+ already_AddRefed<Promise>
+ BackgroundSync::GetTags(ErrorResult& aRv)
+ {
+   MOZ_ASSERT(IsBackgroundSyncThread());
+ 
 diff --git a/dom/backgroundsync/BackgroundSync.h b/dom/backgroundsync/BackgroundSync.h
 --- a/dom/backgroundsync/BackgroundSync.h
 +++ b/dom/backgroundsync/BackgroundSync.h
@@ -100,7 +132,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncChild.h b/dom/backgroundsync/Backg
 diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh
 --- a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh
 +++ b/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh
-@@ -1,55 +1,102 @@
+@@ -1,55 +1,106 @@
  /* This Source Code Form is subject to the terms of the Mozilla Public
   * License, v. 2.0. If a copy of the MPL was not distributed with this
   * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -116,6 +148,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsyn
  
  struct SyncRegisterArgs
  {
++  nsString mOriginSuffix;
    nsString mScope;
    nsString mTag;
  };
@@ -140,6 +173,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsyn
  struct SyncRegisterResponse
  {
 -  bool mSuccess;
++  nsString mOriginSuffix;
  };
  
  struct SyncGetTagsResponse
@@ -150,6 +184,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsyn
 +struct Registration
 +{
 +  nsString mId;
++  nsString mOriginSuffix;
 +  nsString mScope;
 +  nsString mTag;
 +  RegistrationState mState;
@@ -187,6 +222,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsyn
 +struct SyncRemoveArgs
 +{
 +  nsString mId;
++  nsString mOriginSuffix;
 +};
 +
 +union SyncInternalOpArgs
@@ -1684,7 +1720,7 @@ diff --git a/dom/backgroundsync/DBSchema.cpp b/dom/backgroundsync/DBSchema.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/DBSchema.cpp
-@@ -0,0 +1,243 @@
+@@ -0,0 +1,283 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -1714,6 +1750,7 @@ new file mode 100644
 +const char* const kTableRegistrations =
 +  "CREATE TABLE registrations ("
 +    "id TEXT NOT NULL PRIMARY KEY, " // Concatenation of scope + tag
++    "origin TEXT NOT NULL, "
 +    "scope TEXT NOT NULL, "
 +    "tag TEXT NOT NULL, "
 +    "state INTEGER NOT NULL, "
@@ -1765,12 +1802,14 @@ new file mode 100644
 +  rv = aConn->CreateStatement(NS_LITERAL_CSTRING(
 +    "INSERT INTO registrations ("
 +      "id, "
++      "origin, "
 +      "scope, "
 +      "tag, "
 +      "state, "
 +      "lastChance "
 +    ") VALUES ("
 +      ":id, "
++      ":origin, "
 +      ":scope, "
 +      ":tag, "
 +      ":state, "
@@ -1783,6 +1822,10 @@ new file mode 100644
 +  GetId(aArgs.mScope(), aArgs.mTag(), id);
 +
 +  rv = state->BindStringByName(NS_LITERAL_CSTRING("id"), id);
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  rv = state->BindStringByName(NS_LITERAL_CSTRING("origin"),
++                               aArgs.mOriginSuffix());
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +  rv = state->BindStringByName(NS_LITERAL_CSTRING("scope"),
@@ -1851,23 +1894,27 @@ new file mode 100644
 +    rv = state->GetString(0, id);
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
++    nsString originSuffix;
++    rv = state->GetString(1, originSuffix);
++    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
 +    nsString scope;
-+    rv = state->GetString(1, scope);
++    rv = state->GetString(2, scope);
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +    nsString tag;
-+    rv = state->GetString(2, tag);
++    rv = state->GetString(3, tag);
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +    int32_t registrationState;
-+    rv = state->GetInt32(3, &registrationState);
++    rv = state->GetInt32(4, &registrationState);
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +    int32_t lastChance;
-+    rv = state->GetInt32(4, &lastChance);
++    rv = state->GetInt32(5, &lastChance);
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
-+    Registration registration(id, scope, tag,
++    Registration registration(id, originSuffix, scope, tag,
 +      static_cast<RegistrationState>(registrationState),
 +      lastChance);
 +    aRegistrations.AppendElement(registration);
@@ -1878,13 +1925,42 @@ new file mode 100644
 +
 +nsresult
 +Remove(mozIStorageConnection* aConn,
-+       const SyncRemoveArgs& aArgs)
++       const SyncRemoveArgs& aArgs,
++       bool aRemoveOrigin,
++       nsAString& aOrigin)
 +{
 +  MOZ_ASSERT(!NS_IsMainThread());
 +  MOZ_ASSERT(aConn);
 +
-+  nsCOMPtr<mozIStorageStatement> state;
++  // Get the origin value before removing the entry from the 'registrations'
++  // DB so we can remove the entry from the 'origins' DB in case that there are
++  // no more sync registrations for that origin.
++  nsCOMPtr<mozIStorageStatement> getOriginState;
 +  nsresult rv = aConn->CreateStatement(NS_LITERAL_CSTRING(
++    "SELECT origin FROM registrations WHERE id=:id;"
++  ), getter_AddRefs(getOriginState));
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  rv = getOriginState->BindStringByName(NS_LITERAL_CSTRING("id"), aArgs.mId());
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  bool hasMoreData = false;
++  while (NS_SUCCEEDED(getOriginState->ExecuteStep(&hasMoreData))
++         && hasMoreData) {
++    // We only get the origin if there's one registration. If there are
++    // more than one, we just bail out.
++    if (hasMoreData) {
++      hasMoreData = false;
++      continue;
++    }
++
++    nsString origin;
++    rv = getOriginState->GetString(0, origin);
++    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++  }
++
++  nsCOMPtr<mozIStorageStatement> state;
++  rv = aConn->CreateStatement(NS_LITERAL_CSTRING(
 +    "DELETE FROM registrations WHERE id=:id;"
 +  ), getter_AddRefs(state));
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
