@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  7b35207699c057ddd80cf9c5a0f623e75231f98d
+# Parent  d3e6e958b9575c6e60025ae8cf7fcf176b2e4a83
 Bug 1217544 - Implement one-off BackgroundSync API. Part 5: Storage. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
@@ -481,7 +481,7 @@ diff --git a/dom/backgroundsync/ChromeDBSchema.cpp b/dom/backgroundsync/ChromeDB
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/ChromeDBSchema.cpp
-@@ -0,0 +1,81 @@
+@@ -0,0 +1,132 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -537,20 +537,71 @@ new file mode 100644
 +Register(mozIStorageConnection* aConn,
 +         const nsAString& aOrigin)
 +{
-+  return NS_OK;
++  MOZ_ASSERT(!NS_IsMainThread());
++  MOZ_ASSERT(aConn);
++
++  nsCOMPtr<mozIStorageStatement> state;
++  nsresult rv = aConn->CreateStatement(NS_LITERAL_CSTRING(
++    "INSERT INTO origins ("
++      "origin "
++    ") VALUES ("
++      ":origin "
++    ");"
++  ), getter_AddRefs(state));
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  nsString origin;
++  rv = state->BindStringByName(NS_LITERAL_CSTRING("origin"), aOrigin);
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  rv = state->Execute();
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  return rv;
 +}
 +
 +nsresult
 +Unregister(mozIStorageConnection* aConn,
 +           const nsAString& aOrigin)
 +{
-+  return NS_OK;
++  MOZ_ASSERT(!NS_IsMainThread());
++  MOZ_ASSERT(aConn);
++
++  nsCOMPtr<mozIStorageStatement> state;
++  nsresult rv = aConn->CreateStatement(NS_LITERAL_CSTRING(
++    "DELETE FROM origins WHERE origin=:origin;"
++  ), getter_AddRefs(state));
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  rv = state->Execute();
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  return rv;
 +}
 +
 +nsresult
 +GetAll(mozIStorageConnection* aConn,
 +       nsTArray<nsString>& aOrigins)
 +{
++  MOZ_ASSERT(!NS_IsMainThread());
++  MOZ_ASSERT(aConn);
++
++  nsCOMPtr<mozIStorageStatement> state;
++  nsresult rv = aConn->CreateStatement(NS_LITERAL_CSTRING(
++    "SELECT * FROM origins;"
++  ), getter_AddRefs(state));
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  bool hasMoreData = false;
++  while (NS_SUCCEEDED(state->ExecuteStep(&hasMoreData)) && hasMoreData) {
++    nsString origin;
++    rv = state->GetString(0, origin);
++    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++    aOrigins.AppendElement(origin);
++  }
++
++  return rv;
 +}
 +
 +nsresult
