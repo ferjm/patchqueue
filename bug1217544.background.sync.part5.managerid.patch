@@ -674,7 +674,7 @@ diff --git a/dom/backgroundsync/ChromeStorageManager.cpp b/dom/backgroundsync/Ch
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/ChromeStorageManager.cpp
-@@ -0,0 +1,175 @@
+@@ -0,0 +1,285 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -697,6 +697,45 @@ new file mode 100644
 +namespace {
 +  ChromeStorageManager* csmInstance = nullptr;
 +} // namespace
++
++//-----------------------------------------------------------------------------
++
++class ChromeStorageAction
++{
++public:
++  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(ChromeStorageAction)
++
++  enum Type {
++    Register = 0,
++    Unregister,
++    GetAll
++  };
++
++  ChromeStorageAction(Type aType)
++    : mType(aType)
++  {}
++
++  ChromeStorageAction(Type aType, const nsAString& aOrigin)
++    : mType(aType)
++    , mOrigin(aOrigin)
++  {}
++
++  Type Type()
++  {
++    return mType;
++  }
++
++  nsString& Origin()
++  {
++    return mOrigin;
++  }
++
++private:
++  ~ChromeStorageAction() {}
++
++  enum Type mType;
++  nsString mOrigin;
++};
 +
 +//-----------------------------------------------------------------------------
 +// IO thread
@@ -763,6 +802,53 @@ new file mode 100644
 +
 +NS_IMPL_ISUPPORTS(InitRunnable, nsICancelableRunnable, nsIRunnable)
 +
++class StorageActionRunnable : public nsIRunnable,
++                              public nsICancelableRunnable
++{
++public:
++  NS_DECL_THREADSAFE_ISUPPORTS
++
++  StorageActionRunnable(mozIStorageConnection* aConn,
++                        ChromeStorageAction* aAction)
++    : mConn(aConn)
++    , mAction(aAction)
++  {
++    MOZ_ASSERT(aConn);
++    MOZ_ASSERT(aAction);
++  }
++
++  NS_IMETHODIMP
++  Run() override
++  {
++    switch (mAction->Type()) {
++      case ChromeStorageAction::Type::Register:
++      break;
++      case ChromeStorageAction::Type::Unregister:
++      break;
++      case ChromeStorageAction::Type::GetAll:
++      break;
++      default:
++        MOZ_CRASH("BackgroundSync: Unexpected ChromeStorageAction");
++    }
++
++    return NS_OK;
++  }
++
++  NS_IMETHODIMP
++  Cancel() override
++  {
++    return NS_OK;
++  }
++
++private:
++  ~StorageActionRunnable() {}
++
++  nsCOMPtr<mozIStorageConnection> mConn;
++  RefPtr<ChromeStorageAction> mAction;
++};
++
++NS_IMPL_ISUPPORTS(StorageActionRunnable, nsICancelableRunnable, nsIRunnable)
++
 +//-----------------------------------------------------------------------------
 +// PBackground thread
 +
@@ -822,14 +908,14 @@ new file mode 100644
 +  mDBConn = aConn;
 +
 +  for (uint32_t i = 0; i < mPendingActions.Length(); ++i) {
-+    switch (mPendingActions[i].mType) {
-+      case PendingChromeStorageAction::Type::Register:
-+        Register(mPendingActions[i].mOrigin);
++    switch (mPendingActions[i]->Type()) {
++      case ChromeStorageAction::Type::Register:
++        Register(mPendingActions[i]->Origin());
 +        break;
-+      case PendingChromeStorageAction::Type::Unregister:
-+        Unregister(mPendingActions[i].mOrigin);
++      case ChromeStorageAction::Type::Unregister:
++        Unregister(mPendingActions[i]->Origin());
 +        break;
-+      case PendingChromeStorageAction::Type::GetAll:
++      case ChromeStorageAction::Type::GetAll:
 +        break;
 +    }
 +  }
@@ -837,16 +923,40 @@ new file mode 100644
 +}
 +
 +void
++ChromeStorageManager::ExecuteStorageAction(ChromeStorageAction* aAction)
++{
++  if (!mDBConn) {
++    mPendingActions.AppendElement(aAction);
++    return;
++  }
++
++  RefPtr<StorageActionRunnable> runnable = new StorageActionRunnable(mDBConn,
++                                                                     aAction);
++  mIOThread->Dispatch(runnable, nsIThread::DISPATCH_NORMAL);
++}
++
++void
 +ChromeStorageManager::Register(const nsAString& aOrigin)
-+{}
++{
++  RefPtr<ChromeStorageAction> action =
++    new ChromeStorageAction(ChromeStorageAction::Type::Register, aOrigin);
++  ExecuteStorageAction(action);
++}
 +
 +void
 +ChromeStorageManager::Unregister(const nsAString& aOrigin)
-+{}
++{
++  RefPtr<ChromeStorageAction> action =
++    new ChromeStorageAction(ChromeStorageAction::Type::Unregister, aOrigin);
++  ExecuteStorageAction(action);
++}
 +
 +void
 +ChromeStorageManager::GetAll(nsTArray<nsString>& aOrigins)
-+{}
++{
++  // XXX
++}
++
 +} // namespace backgroundsync
 +} // namespace dom
 +} // namespace mozilla
@@ -854,7 +964,7 @@ diff --git a/dom/backgroundsync/ChromeStorageManager.h b/dom/backgroundsync/Chro
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/ChromeStorageManager.h
-@@ -0,0 +1,69 @@
+@@ -0,0 +1,62 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -882,6 +992,8 @@ new file mode 100644
 +namespace dom {
 +namespace backgroundsync {
 +
++class ChromeStorageAction;
++
 +class ChromeStorageManager final
 +{
 +  friend class InitRunnable;
@@ -900,23 +1012,14 @@ new file mode 100644
 +  ~ChromeStorageManager();
 +
 +  void Init();
-+
 +  void OnInitialized(mozIStorageConnection* aConn);
++
++  void ExecuteStorageAction(ChromeStorageAction* aAction);
 +
 +  nsCOMPtr<nsIThread> mIOThread;
 +  nsCOMPtr<mozIStorageConnection> mDBConn;
 +
-+  struct PendingChromeStorageAction
-+  {
-+    enum Type {
-+      Register = 0,
-+      Unregister,
-+      GetAll
-+    } mType;
-+
-+    nsString mOrigin;
-+  };
-+  nsTArray<PendingChromeStorageAction> mPendingActions;
++  nsTArray<RefPtr<ChromeStorageAction>> mPendingActions;
 +};
 +
 +} // namespace backgroundsync
