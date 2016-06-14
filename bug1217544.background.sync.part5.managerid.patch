@@ -674,7 +674,7 @@ diff --git a/dom/backgroundsync/ChromeStorageManager.cpp b/dom/backgroundsync/Ch
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/ChromeStorageManager.cpp
-@@ -0,0 +1,285 @@
+@@ -0,0 +1,288 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -822,10 +822,13 @@ new file mode 100644
 +  {
 +    switch (mAction->Type()) {
 +      case ChromeStorageAction::Type::Register:
++        chromedb::Register(mConn, mAction->Origin());
 +      break;
 +      case ChromeStorageAction::Type::Unregister:
++        chromedb::Unregister(mConn, mAction->Origin());
 +      break;
 +      case ChromeStorageAction::Type::GetAll:
++        // XXX
 +      break;
 +      default:
 +        MOZ_CRASH("BackgroundSync: Unexpected ChromeStorageAction");
