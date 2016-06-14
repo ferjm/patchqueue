@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  3afa8a1a98b0e90c6621246faffef1d834ea82ba
+# Parent  947693c778b1adb67a3200d6af9796ed6a9971d7
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: BackgroundSyncService. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/BackgroundSyncParent.cpp
@@ -211,7 +211,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncService.cpp
-@@ -0,0 +1,245 @@
+@@ -0,0 +1,246 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -413,9 +413,10 @@ new file mode 100644
 +      mChromeStorageManager->Register(
 +          aResponse.get_SyncRegisterResponse().mOrigin());
 +      break;
-+/*    case SyncOpResponse::TSyncRemoveResponse:
-+      mChromeStorageManager->Unregister(aResponse.mOrigin());
-+      break;*/
++    case SyncOpResponse::TSyncRemoveResponse:
++      mChromeStorageManager->Unregister(
++          aResponse.get_SyncRemoveResponse().mOrigin());
++      break;
 +  }
 +
 +  uint64_t actorId = ReleaseStorageManagerRef(aRequestId);
@@ -590,59 +591,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
        ref->Init(oldManager);
  
        MOZ_ASSERT(!sFactory->mManagerList.Contains(ref));
-@@ -331,20 +332,18 @@ public:
-     NS_WARN_IF(NS_FAILED(rv));
-     return rv;
-   }
- 
-   virtual void
-   Complete(nsresult aRv) override
-   {
-     if (NS_FAILED(aRv)) {
--      mManager->OnRequestComplete<SyncOpResponse>(
--        mRequestId,
--        SyncOpError(static_cast<uint32_t>(aRv))
--      );
-+      mManager->OnRequestComplete(mRequestId,
-+                                  SyncOpError(static_cast<uint32_t>(aRv)));
-     } else {
-       mManager->OnRequestComplete<SyncOpResponse>(
-           mRequestId,
-           SyncRegisterResponse(mArgs.mOrigin())
-       );
-     }
-   }
- 
-@@ -372,25 +371,20 @@ public:
-     NS_WARN_IF(NS_FAILED(rv));
-     return rv;
-   }
- 
-   virtual void
-   Complete(nsresult aRv) override
-   {
-     if (NS_FAILED(aRv)) {
--      mManager->OnRequestComplete<SyncOpResponse>(
--        mRequestId,
--        SyncOpError(static_cast<uint32_t>(aRv))
--      );
-+      mManager->OnRequestComplete(mRequestId,
-+                                  SyncOpError(static_cast<uint32_t>(aRv)));
-     } else {
--      mManager->OnRequestComplete<SyncOpResponse>(
--          mRequestId,
--          SyncGetTagsResponse(mTags)
--      );
-+      mManager->OnRequestComplete(mRequestId, SyncGetTagsResponse(mTags));
-     }
-   }
- 
- private:
-   SyncGetTagsArgs mArgs;
-   nsTArray<nsString> mTags;
- };
- 
-@@ -414,20 +408,17 @@ public:
+@@ -476,33 +477,33 @@ public:
    }
  
    virtual void
@@ -651,54 +600,8 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
      NS_WARN_IF(NS_FAILED(aRv));
      // We need to remove the reference to the request independently of
      // its result so we can close the context.
--    mManager->OnRequestComplete<SyncOpResponse>(
--        mRequestId,
--        SyncGetAllResponse(mRegistrations)
--    );
-+    mManager->OnRequestComplete(mRequestId, SyncGetAllResponse(mRegistrations));
-   }
- 
- private:
-   nsTArray<Registration> mRegistrations;
- };
- 
- // ---------------------------------------------------------------------------
- 
-@@ -451,20 +442,17 @@ public:
-   }
- 
-   virtual void
-   Complete(nsresult aRv) override
-   {
-     NS_WARN_IF(NS_FAILED(aRv));
-     // We need to remove the reference to the request independently of
-     // its result so we can close the context.
--    mManager->OnRequestComplete<SyncOpResponse>(
--        mRequestId,
--        SyncOpResponse(void_t())
--    );
-+    mManager->OnRequestComplete(mRequestId, SyncOpResponse(void_t()));
-   }
- 
- private:
-   SyncRemoveArgs mArgs;
- };
- 
- // ---------------------------------------------------------------------------
- 
-@@ -488,35 +476,33 @@ public:
-   }
- 
-   virtual void
-   Complete(nsresult aRv) override
-   {
-     NS_WARN_IF(NS_FAILED(aRv));
-     // We need to remove the reference to the request independently of
-     // its result so we can close the context.
--    mManager->OnRequestComplete<SyncOpResponse>(
--        mRequestId,
--        SyncOpResponse(void_t())
--    );
+-    mManager->OnRequestComplete(mRequestId,
+-      SyncOpResponse(void_t()));
 +    mManager->OnRequestComplete(mRequestId, SyncOpResponse(void_t()));
    }
  
@@ -726,7 +629,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
  {
    mozilla::ipc::AssertIsOnBackgroundThread();
  
-@@ -533,34 +519,39 @@ StorageManager::ShutdownAll()
+@@ -519,34 +520,39 @@ StorageManager::ShutdownAll()
  void
  StorageManager::Abort(const nsACString& aOrigin)
  {
@@ -768,7 +671,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
    MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(
          NewRunnableMethod(ioThread, &nsIThread::Shutdown)));*/
  }
-@@ -762,20 +753,30 @@ StorageManager::OnRequestComplete(const 
+@@ -748,20 +754,30 @@ StorageManager::OnRequestComplete(const 
    NS_ASSERT_OWNINGTHREAD(StorageManager);
    MOZ_ASSERT(mPendingRequests.Contains(aRequestId));
  
