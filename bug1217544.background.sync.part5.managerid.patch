@@ -4239,7 +4239,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/StorageManager.cpp
-@@ -0,0 +1,781 @@
+@@ -0,0 +1,779 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -4583,10 +4583,8 @@ new file mode 100644
 +        SyncOpError(static_cast<uint32_t>(aRv))
 +      );
 +    } else {
-+      mManager->OnRequestComplete<SyncOpResponse>(
-+          mRequestId,
-+          SyncRegisterResponse(mArgs.mOrigin())
-+      );
++      mManager->OnRequestComplete(mRequestId,
++          SyncRegisterResponse(mArgs.mOrigin()));
 +    }
 +  }
 +
