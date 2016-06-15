@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  d3e6e958b9575c6e60025ae8cf7fcf176b2e4a83
+# Parent  fd0aafcee5c77818bfc1442d9de38e5b67a96b6a
 Bug 1217544 - Implement one-off BackgroundSync API. Part 5: Storage. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
@@ -716,7 +716,7 @@ diff --git a/dom/backgroundsync/ChromeStorageManager.cpp b/dom/backgroundsync/Ch
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/ChromeStorageManager.cpp
-@@ -0,0 +1,379 @@
+@@ -0,0 +1,417 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -1093,6 +1093,44 @@ new file mode 100644
 +  ExecuteStorageAction(action);
 +}
 +
++void
++ChromeStorageManager::OnRegisterSuccess(const nsID& aRequestId)
++{
++  ListenerList::ForwardIterator iter(mListenerList);
++  while (iter.HasMore()) {
++    iter.GetNext()->OnRegisterSuccess(aRequestId);
++  }
++}
++
++void
++ChromeStorageManager::OnUnregisterSuccess(const nsID& aRequestId)
++{
++  ListenerList::ForwardIterator iter(mListenerList);
++  while (iter.HasMore()) {
++    iter.GetNext()->OnUnregisterSuccess(aRequestId);
++  }
++}
++
++void
++ChromeStorageManager::OnGetAllOrigins(const nsID& aRequestId,
++                                      nsTArray<nsString>& aOrigins)
++{
++  ListenerList::ForwardIterator iter(mListenerList);
++  while (iter.HasMore()) {
++    iter.GetNext()->OnGetAllOrigins(aRequestId, aOrigins);
++  }
++}
++
++void
++ChromeStorageManager::OnStorageActionError(const nsID& aRequestId,
++                                           nsresult aRv)
++{
++  ListenerList::ForwardIterator iter(mListenerList);
++  while (iter.HasMore()) {
++    iter.GetNext()->OnStorageActionError(aRequestId, aRv);
++  }
++}
++
 +} // namespace backgroundsync
 +} // namespace dom
 +} // namespace mozilla
@@ -1100,7 +1138,7 @@ diff --git a/dom/backgroundsync/ChromeStorageManager.h b/dom/backgroundsync/Chro
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/ChromeStorageManager.h
-@@ -0,0 +1,90 @@
+@@ -0,0 +1,91 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -1171,6 +1209,7 @@ new file mode 100644
 +  void OnInitialized(mozIStorageConnection* aConn);
 +
 +  void ExecuteStorageAction(ChromeStorageAction* aAction);
++
 +  void OnRegisterSuccess(const nsID& aRequestId);
 +  void OnUnregisterSuccess(const nsID& aRequestId);
 +  void OnGetAllOrigins(const nsID& aRequestId, nsTArray<nsString>& aOrigins);
