@@ -880,7 +880,7 @@ new file mode 100644
 +  }
 +
 +private:
-+  ~ShutdownRunnable();
++  ~ShutdownRunnable() {};
 +
 +  nsCOMPtr<mozIStorageConnection> mDBConn;
 +};
