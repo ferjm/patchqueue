@@ -1,0 +1,4485 @@
+# HG changeset patch
+# Parent  4ffaaccecc2ebe2ba34614b0f87bf8672e52af88
+
+diff --git a/dom/bindings/Bindings.conf b/dom/bindings/Bindings.conf
+--- a/dom/bindings/Bindings.conf
++++ b/dom/bindings/Bindings.conf
+@@ -1243,16 +1243,22 @@ DOMInterfaces = {
+ 'SVGUnitTypes' : {
+     'concrete': False,
+ },
+ 
+ 'SVGZoomAndPan' : {
+     'concrete': False,
+ },
+ 
++'SyncEvent': {
++    'headerFile': 'mozilla/dom/ServiceWorkerEvents.h',
++    'nativeType': 'mozilla::dom::workers::SyncEvent',
++    'workers': True
++},
++
+ 'TestFunctions': {
+     'wrapperCache': False
+ },
+ 
+ 'Text': {
+     # Total hack to allow binding code to realize that nsTextNode can
+     # in fact be cast to Text.
+     'headerFile': 'nsTextNode.h',
+diff --git a/dom/interfaces/base/nsIServiceWorkerManager.idl b/dom/interfaces/base/nsIServiceWorkerManager.idl
+--- a/dom/interfaces/base/nsIServiceWorkerManager.idl
++++ b/dom/interfaces/base/nsIServiceWorkerManager.idl
+@@ -192,13 +192,18 @@ interface nsIServiceWorkerManager : nsIS
+   void sendPushSubscriptionChangeEvent(in ACString aOriginAttributes,
+                                        in ACString scope);
+ 
+   void addListener(in nsIServiceWorkerManagerListener aListener);
+ 
+   void removeListener(in nsIServiceWorkerManagerListener aListener);
+ 
+   bool shouldReportToWindow(in mozIDOMWindowProxy aWindow, in ACString aScope);
++
++  void sendSyncEvent(in ACString aOriginAttributes,
++                     in ACString scope,
++                     in AString aTag,
++                     in boolean aLastChance);
+ };
+ 
+ %{ C++
+ #define SERVICEWORKERMANAGER_CONTRACTID "@mozilla.org/serviceworkers/manager;1"
+ %}
+diff --git a/dom/moz.build b/dom/moz.build
+--- a/dom/moz.build
++++ b/dom/moz.build
+@@ -94,16 +94,17 @@ DIRS += [
+     'ipc',
+     'workers',
+     'camera',
+     'audiochannel',
+     'broadcastchannel',
+     'messagechannel',
+     'promise',
+     'smil',
++    'sync',
+     'telephony',
+     'tv',
+     'voicemail',
+     'inputmethod',
+     'webidl',
+     'xbl',
+     'xml',
+     'xslt',
+diff --git a/dom/sync/PSyncManager.ipdl b/dom/sync/PSyncManager.ipdl
+new file mode 100644
+--- /dev/null
++++ b/dom/sync/PSyncManager.ipdl
+@@ -0,0 +1,28 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++include protocol PBackground;
++
++include SyncIPCTypes;
++
++using struct nsID from "nsID.h";
++
++namespace mozilla {
++namespace dom {
++
++protocol PSyncManager
++{
++  manager PBackground;
++
++parent: // child -> parent messages
++  async Request(nsID aRequestId, SyncOp aOp);
++  async Shutdown();
++
++child: // parent -> child messages
++  async Response(nsID requestId, SyncOpResponse aResponse);
++  async __delete__();
++};
++
++} // namespace dom
++} // namespace mozilla
+diff --git a/dom/sync/SyncIPCTypes.ipdlh b/dom/sync/SyncIPCTypes.ipdlh
+new file mode 100644
+--- /dev/null
++++ b/dom/sync/SyncIPCTypes.ipdlh
+@@ -0,0 +1,88 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++include PBackgroundSharedTypes;
++
++namespace mozilla {
++namespace dom {
++
++struct SyncRegisterArgs
++{
++  nsString mScope;
++  nsString mTag;
++};
++
++struct SyncGetTagsArgs
++{
++  nsString mScope;
++};
++
++union SyncOpArgs
++{
++  SyncRegisterArgs;
++  SyncGetTagsArgs;
++};
++
++struct SyncOp
++{
++  PrincipalInfo mPrincipal;
++  SyncOpArgs mArgs;
++};
++
++struct SyncGetAllArgs
++{
++};
++
++struct SyncChangeStateArgs
++{
++  nsString mId;
++  uint16_t mState;
++};
++
++struct SyncRemoveArgs
++{
++  nsString mId;
++};
++
++union SyncInternalOpArgs
++{
++  SyncGetAllArgs;
++  SyncChangeStateArgs;
++  SyncRemoveArgs;
++};
++
++struct SyncInternalOp
++{
++  SyncInternalOpArgs mArgs;
++};
++
++union SyncOpOrInternalOp
++{
++  SyncOp;
++  SyncInternalOp;
++};
++
++struct SyncRegisterResponse
++{
++};
++
++struct SyncGetTagsResponse
++{
++  nsString[] mTags;
++};
++
++struct SyncOpError
++{
++  uint32_t mCode;
++};
++
++union SyncOpResponse
++{
++  SyncRegisterResponse;
++  SyncGetTagsResponse;
++  SyncOpError;
++};
++
++} // namespace dom
++} // namespace mozilla
+diff --git a/dom/sync/SyncManager.cpp b/dom/sync/SyncManager.cpp
+new file mode 100644
+--- /dev/null
++++ b/dom/sync/SyncManager.cpp
+@@ -0,0 +1,450 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
++ * You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#include "SyncManager.h"
++#include "SyncManagerChild.h"
++
++#include "mozilla/dom/Promise.h"
++#include "mozilla/dom/PromiseWorkerProxy.h"
++#include "mozilla/dom/SyncIPCTypes.h"
++#include "mozilla/dom/SyncManagerBinding.h"
++#include "mozilla/ipc/BackgroundChild.h"
++#include "mozilla/ipc/BackgroundUtils.h"
++#include "mozilla/ipc/PBackgroundChild.h"
++#include "mozilla/Preferences.h"
++#include "mozilla/unused.h"
++#include "nsIGlobalObject.h"
++#include "nsISupportsPrimitives.h"
++#include "WorkerPrivate.h"
++
++namespace mozilla {
++
++using namespace ipc;
++
++namespace dom {
++
++using namespace workers;
++
++// Helpers
++
++class SyncOpRunnable final : public nsIRunnable,
++                             public nsICancelableRunnable
++{
++public:
++  NS_DECL_ISUPPORTS
++
++  SyncOpRunnable(Promise* aPromise, nsAutoPtr<SyncOp>& aOp)
++    : mPromise(aPromise)
++    , mOp(aOp)
++  {
++    MOZ_ASSERT(mPromise);
++    MOZ_ASSERT(mOp);
++  }
++
++  void SetActor(SyncManagerChild* aActor)
++  {
++    MOZ_ASSERT(!mActor);
++    MOZ_ASSERT(aActor);
++    mActor = aActor;
++  }
++
++  NS_IMETHODIMP Run() override
++  {
++    MOZ_ASSERT(mActor);
++    if (mActor->IsActorDestroyed()) {
++      return NS_OK;
++    }
++
++    return mActor->ExecuteOp(mPromise, mOp);
++  }
++
++  NS_IMETHODIMP Cancel() override
++  {
++    mActor = nullptr;
++    mPromise = nullptr;
++    mOp = nullptr;
++    return NS_OK;
++  }
++
++private:
++  ~SyncOpRunnable() {}
++
++  RefPtr<Promise> mPromise;
++  nsAutoPtr<SyncOp> mOp;
++  RefPtr<SyncManagerChild> mActor;
++};
++
++NS_IMPL_ISUPPORTS(SyncOpRunnable, nsICancelableRunnable, nsIRunnable)
++
++class TeardownRunnable final : public nsIRunnable,
++                               public nsICancelableRunnable
++{
++public:
++  NS_DECL_ISUPPORTS
++
++  explicit TeardownRunnable(SyncManagerChild* aActor)
++    : mActor(aActor)
++  {
++    MOZ_ASSERT(mActor);
++  }
++
++  NS_IMETHODIMP Run() override
++  {
++    MOZ_ASSERT(mActor);
++    if (!mActor->IsActorDestroyed()) {
++      mActor->SendShutdown();
++    }
++    return NS_OK;
++  }
++
++  NS_IMETHODIMP Cancel() override
++  {
++    mActor = nullptr;
++    return NS_OK;
++  }
++
++private:
++  ~TeardownRunnable() {};
++
++  RefPtr<SyncManagerChild> mActor;
++};
++
++NS_IMPL_ISUPPORTS(TeardownRunnable, nsICancelableRunnable, nsIRunnable)
++
++class SyncManagerFeature final : public workers::WorkerFeature
++{
++  // The manager keeps alive this feature.
++  SyncManager* MOZ_NON_OWNING_REF mManager;
++
++public:
++  explicit SyncManagerFeature(SyncManager* aManager)
++    : mManager(aManager)
++  {
++    MOZ_ASSERT(aManager);
++    MOZ_COUNT_CTOR(SyncManagerFeature);
++  }
++
++  virtual bool Notify(workers::Status aStatus) override
++  {
++    if (aStatus >= Closing) {
++      mManager->Shutdown();
++    }
++    return true;
++  }
++
++private:
++  ~SyncManagerFeature()
++  {
++    MOZ_COUNT_CTOR(SyncManagerFeature);
++  }
++};
++
++// SyncManager
++
++// static
++already_AddRefed<SyncManager>
++SyncManager::CreateOnMainThread(nsIGlobalObject* aGlobal,
++                                nsIPrincipal* aPrincipal,
++                                const nsAString& aScope,
++                                ErrorResult& aRv)
++{
++  MOZ_ASSERT(aGlobal);
++  MOZ_ASSERT(aPrincipal);
++  MOZ_ASSERT(!aScope.IsEmpty());
++  MOZ_ASSERT(NS_IsMainThread());
++
++  PrincipalInfo principalInfo;
++  aRv = PrincipalToPrincipalInfo(aPrincipal, &principalInfo);
++  if (NS_WARN_IF(aRv.Failed())) {
++    return nullptr;
++  }
++
++  RefPtr<SyncManager> ref = new SyncManager(aGlobal, principalInfo, aScope);
++
++  // Register as observer for inner-window-destroyed.
++  nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
++  if (obs) {
++    aRv = obs->AddObserver(ref, "inner-window-destroyed",
++                           false /* ownsWeak */);
++    if (NS_WARN_IF(aRv.Failed())) {
++      return nullptr;
++    }
++
++    aRv = obs->AddObserver(ref, "xpcom-shutdown",
++                           false /* ownsWeak */);
++    if (NS_WARN_IF(aRv.Failed())) {
++      return nullptr;
++    }
++  } else {
++    aRv.Throw(NS_ERROR_UNEXPECTED);
++    return nullptr;
++  }
++
++  nsCOMPtr<nsPIDOMWindowInner> window = do_QueryInterface(aGlobal);
++  MOZ_ASSERT(window);
++  MOZ_ASSERT(window->IsInnerWindow());
++  ref->mInnerID = window->WindowID();
++
++  return ref.forget();
++}
++
++// static
++already_AddRefed<SyncManager>
++SyncManager::CreateOnWorker(nsIGlobalObject* aGlobal,
++                            WorkerPrivate* aWorkerPrivate,
++                            const nsAString& aScope)
++{
++  MOZ_ASSERT(aWorkerPrivate);
++  MOZ_ASSERT(!aScope.IsEmpty());
++  aWorkerPrivate->AssertIsOnWorkerThread();
++
++  const PrincipalInfo& principalInfo = aWorkerPrivate->GetPrincipalInfo();
++
++  RefPtr<SyncManager> ref = new SyncManager(aGlobal, principalInfo, aScope);
++
++  ref->mWorkerFeature = new SyncManagerFeature(ref);
++  if (NS_WARN_IF(!aWorkerPrivate->AddFeature(ref->mWorkerFeature))) {
++    ref->mWorkerFeature = nullptr;
++    return nullptr;
++  }
++
++  return ref.forget();
++}
++
++SyncManager::SyncManager(nsIGlobalObject* aGlobal,
++                         const PrincipalInfo& aPrincipalInfo,
++                         const nsAString& aScope)
++  : mInnerID(0)
++  , mGlobal(aGlobal)
++  , mShuttingDown(false)
++  , mPrincipalInfo(MakeUnique<PrincipalInfo>(aPrincipalInfo))
++  , mScope(aScope)
++{
++#ifdef DEBUG
++  mThread = do_GetCurrentThread();
++#endif
++
++  MOZ_ASSERT(aGlobal);
++
++  // Register this component to PBackground.
++  PBackgroundChild* actor = BackgroundChild::GetForCurrentThread();
++  if (actor) {
++    ActorCreated(actor);
++  } else {
++    MOZ_ALWAYS_TRUE(BackgroundChild::GetOrCreateForCurrentThread(this));
++  }
++}
++
++SyncManager::~SyncManager()
++{
++  Shutdown();
++  MOZ_ASSERT(!mWorkerFeature);
++  MOZ_ASSERT(!mActor);
++}
++
++bool
++SyncManager::IsSyncManagerThread() {
++  return mThread == nsCOMPtr<nsIThread>(do_GetCurrentThread());
++};
++
++void
++SyncManager::Shutdown()
++{
++  if (mShuttingDown) {
++    return;
++  }
++
++  MOZ_ASSERT(IsSyncManagerThread());
++
++  mShuttingDown = true;
++
++  if (NS_IsMainThread()) {
++    nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
++    if (obs) {
++      obs->RemoveObserver(this, "inner-window-destroyed");
++      obs->RemoveObserver(this, "xpcom-shutdown");
++    }
++  }
++
++  if (mWorkerFeature) {
++    WorkerPrivate* workerPrivate = GetCurrentThreadWorkerPrivate();
++    MOZ_ASSERT(workerPrivate);
++    workerPrivate->AssertIsOnWorkerThread();
++    workerPrivate->RemoveFeature(mWorkerFeature);
++    mWorkerFeature = nullptr;
++  }
++
++  if (mActor) {
++    RefPtr<TeardownRunnable> runnable = new TeardownRunnable(mActor);
++    Unused << NS_WARN_IF(NS_FAILED(NS_DispatchToCurrentThread(runnable)));
++    mActor = nullptr;
++  }
++
++  mPendingOperations.Clear();
++}
++
++// Bindings methods.
++
++JSObject*
++SyncManager::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
++{
++  MOZ_ASSERT(IsSyncManagerThread());
++
++  return SyncManagerBinding::Wrap(aCx, this, aGivenProto);
++}
++
++// static
++bool
++SyncManager::PrefEnabled(JSContext* aCx, JSObject* aObj)
++{
++  using mozilla::dom::workers::WorkerPrivate;
++  using mozilla::dom::workers::GetWorkerPrivateFromContext;
++
++  // If we are on the main thread, then check the pref directly.
++  if (NS_IsMainThread()) {
++    bool enabled = false;
++    Preferences::GetBool("dom.backgroundSync.enabled", &enabled);
++    return enabled;
++  }
++
++  // Otherwise check the pref via the worker private helper.
++  WorkerPrivate* workerPrivate = GetWorkerPrivateFromContext(aCx);
++  if (!workerPrivate) {
++    return false;
++  }
++
++  return workerPrivate->BackgroundSyncEnabled();
++}
++
++// nsIIPCBackgroundChildCreateCallback methods.
++
++void
++SyncManager::ActorFailed()
++{
++  MOZ_CRASH("Failed to create a PBackgroundChild actor!");
++}
++
++void
++SyncManager::ActorCreated(PBackgroundChild* aActor)
++{
++  MOZ_ASSERT(IsSyncManagerThread());
++  MOZ_ASSERT(aActor);
++  MOZ_ASSERT(!mActor);
++
++  if (mShuttingDown) {
++    return;
++  }
++
++  PSyncManagerChild* actor = aActor->SendPSyncManagerConstructor();
++  mActor = static_cast<SyncManagerChild*>(actor);
++  MOZ_ASSERT(mActor);
++
++  // Flush pending requests.
++  for (uint32_t i = 0, len = mPendingOperations.Length(); i < len; ++i) {
++    RefPtr<SyncOpRunnable> runnable = mPendingOperations[i];
++    MOZ_ASSERT(runnable);
++    runnable->SetActor(mActor);
++    if (NS_FAILED(NS_DispatchToCurrentThread(runnable))) {
++      NS_WARNING("Failed to dispatch to the current thread");
++      mPendingOperations.Clear();
++      return;
++    }
++  }
++  mPendingOperations.Clear();
++}
++
++// nsIObserver
++
++NS_IMETHODIMP
++SyncManager::Observe(nsISupports* aSubject,
++                     const char* aTopic,
++                     const char16_t* aData)
++{
++  MOZ_ASSERT(IsSyncManagerThread());
++  MOZ_ASSERT(NS_IsMainThread());
++  MOZ_ASSERT(!strcmp(aTopic, "inner-window-destroyed") ||
++             !strcmp(aTopic, "xpcom-shutdown"));
++
++  if (!strcmp(aTopic, "inner-window-destroyed")) {
++    nsCOMPtr<nsISupportsPRUint64> wrapper = do_QueryInterface(aSubject);
++    NS_ENSURE_TRUE(wrapper, NS_ERROR_FAILURE);
++
++    uint64_t innerID;
++    nsresult rv = wrapper->GetData(&innerID);
++    NS_ENSURE_SUCCESS(rv, rv);
++
++    if (innerID != mInnerID) {
++      return NS_OK;
++    }
++  }
++
++  Shutdown();
++
++  return NS_OK;
++}
++
++already_AddRefed<Promise>
++SyncManager::ExecuteOp(const SyncOpArgs& aArgs, ErrorResult& aRv)
++{
++  MOZ_ASSERT(IsSyncManagerThread());
++
++  if (mShuttingDown) {
++    return nullptr;
++  }
++
++  RefPtr<Promise> p = Promise::Create(mGlobal, aRv);
++  if (NS_WARN_IF(aRv.Failed())) {
++    return nullptr;
++  }
++
++  nsAutoPtr<SyncOp> op(new SyncOp(*mPrincipalInfo, aArgs));
++  RefPtr<SyncOpRunnable> runnable = new SyncOpRunnable(p, op);
++
++  if (!mActor) {
++    mPendingOperations.AppendElement(runnable);
++    return p.forget();
++  }
++
++  runnable->SetActor(mActor);
++  nsresult rv = NS_DispatchToCurrentThread(runnable);
++  if (NS_WARN_IF(NS_FAILED(rv))) {
++    p->MaybeReject(rv);
++  }
++
++  return p.forget();
++}
++
++// WebIDL interface methods.
++
++already_AddRefed<Promise>
++SyncManager::Register(const nsAString& aTag, ErrorResult& aRv)
++{
++  MOZ_ASSERT(IsSyncManagerThread());
++
++  const SyncRegisterArgs args(mScope, (nsString(aTag)));
++  return ExecuteOp(SyncOpArgs(args), aRv);
++}
++
++already_AddRefed<Promise>
++SyncManager::GetTags(ErrorResult& aRv)
++{
++  MOZ_ASSERT(IsSyncManagerThread());
++
++  const SyncGetTagsArgs args(mScope);
++  return ExecuteOp(SyncOpArgs(args), aRv);
++}
++
++NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(SyncManager, mGlobal)
++NS_IMPL_CYCLE_COLLECTING_ADDREF(SyncManager)
++NS_IMPL_CYCLE_COLLECTING_RELEASE(SyncManager)
++NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(SyncManager)
++  NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
++  NS_INTERFACE_MAP_ENTRY(nsIIPCBackgroundChildCreateCallback)
++  NS_INTERFACE_MAP_ENTRY(nsIObserver)
++NS_INTERFACE_MAP_END
++
++} // namespace dom
++} // namespace mozilla
+diff --git a/dom/sync/SyncManager.h b/dom/sync/SyncManager.h
+new file mode 100644
+--- /dev/null
++++ b/dom/sync/SyncManager.h
+@@ -0,0 +1,122 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
++ * You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#ifndef mozilla_dom_SyncManager_h
++#define mozilla_dom_SyncManager_h
++
++#include "mozilla/dom/SyncIPCTypes.h"
++
++#include "nsIIPCBackgroundChildCreateCallback.h"
++#include "nsIObserver.h"
++#include "nsIPrincipal.h"
++#include "nsWrapperCache.h"
++
++#include "mozilla/AlreadyAddRefed.h"
++#include "mozilla/dom/BindingDeclarations.h"
++#include "mozilla/ErrorResult.h"
++
++#include "nsCOMPtr.h"
++#include "jsapi.h"
++
++class nsIGlobalObject;
++
++namespace mozilla {
++
++namespace ipc {
++  class PrincipalInfo;
++} // namespace ipc
++
++namespace dom {
++
++namespace workers {
++  class WorkerFeature;
++  class WorkerPrivate;
++} // namespace workers
++
++class Promise;
++class SyncManagerChild;
++class SyncOpRunnable;
++
++class SyncManager final : public nsIIPCBackgroundChildCreateCallback
++                        , public nsIObserver
++                        , public nsWrapperCache
++{
++  NS_DECL_NSIIPCBACKGROUNDCHILDCREATECALLBACK
++  NS_DECL_NSIOBSERVER
++
++public:
++  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
++  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_AMBIGUOUS(
++      SyncManager, nsIIPCBackgroundChildCreateCallback)
++
++  static already_AddRefed<SyncManager>
++  CreateOnMainThread(nsIGlobalObject* aGlobal,
++                     nsIPrincipal* aPrincipal,
++                     const nsAString& aScope,
++                     ErrorResult& aRv);
++
++  static already_AddRefed<SyncManager>
++  CreateOnWorker(nsIGlobalObject* aGlobal,
++                 workers::WorkerPrivate* aWorkerPrivate,
++                 const nsAString& aScope);
++
++  // Binding methods.
++
++  nsIGlobalObject*
++  GetParentObject() const
++  {
++    return mGlobal;
++  }
++
++  JSObject*
++  WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
++
++  static bool PrefEnabled(JSContext* aCx, JSObject* aObj);
++
++  // WebIDL interface methods.
++
++  already_AddRefed<Promise>
++  Register(const nsAString& aTag, ErrorResult& aRv);
++
++  already_AddRefed<Promise>
++  GetTags(ErrorResult& aRv);
++
++  void Shutdown();
++private:
++  SyncManager(nsIGlobalObject* aGlobal,
++              const mozilla::ipc::PrincipalInfo& aPrincipalInfo,
++              const nsAString& aScope);
++
++  ~SyncManager();
++
++  bool IsSyncManagerThread();
++
++  already_AddRefed<Promise>
++  ExecuteOp(const SyncOpArgs& aArgs, ErrorResult& aRv);
++
++  uint64_t mInnerID;
++
++  nsCOMPtr<nsIGlobalObject> mGlobal;
++
++  nsAutoPtr<workers::WorkerFeature> mWorkerFeature;
++
++  RefPtr<SyncManagerChild> mActor;
++
++  bool mShuttingDown;
++
++  UniquePtr<mozilla::ipc::PrincipalInfo> mPrincipalInfo;
++
++  nsCOMPtr<nsIThread> mThread;
++
++  nsString mScope;
++
++  nsTArray<RefPtr<SyncOpRunnable>> mPendingOperations;
++};
++
++} // namespace dom
++} // namespace mozilla
++
++#endif // mozilla_dom_SyncManager_h
+diff --git a/dom/sync/SyncManagerChild.cpp b/dom/sync/SyncManagerChild.cpp
+new file mode 100644
+--- /dev/null
++++ b/dom/sync/SyncManagerChild.cpp
+@@ -0,0 +1,131 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
++ * You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#include "SyncManagerChild.h"
++
++#include "mozilla/unused.h"
++#include "mozilla/ipc/PBackgroundChild.h"
++
++namespace mozilla {
++
++using namespace ipc;
++
++namespace dom {
++
++struct SyncManagerChild::PendingRequest final
++{
++  explicit PendingRequest(Promise* aPromise)
++    : mPromise(aPromise)
++  {}
++
++  RefPtr<Promise> mPromise;
++};
++
++SyncManagerChild::SyncManagerChild()
++  : mActorDestroyed(false)
++{
++}
++
++SyncManagerChild::~SyncManagerChild()
++{
++}
++
++void
++SyncManagerChild::ActorDestroy(ActorDestroyReason aWhy)
++{
++  mActorDestroyed = true;
++
++  for (auto iter = mPendingRequests.Iter(); !iter.Done(); iter.Next()) {
++    PendingRequest* request;
++    mPendingRequests.Get(iter.Key(), &request);
++    if (NS_WARN_IF(!request)) {
++      continue;
++    }
++    request->mPromise->MaybeReject(NS_ERROR_NOT_AVAILABLE);
++  }
++
++  mPendingRequests.Clear();
++}
++
++nsresult
++SyncManagerChild::StorePendingRequest(Promise* aPromise, nsID& aID)
++{
++  nsresult rv;
++  nsCOMPtr<nsIUUIDGenerator> uuidGenerator =
++    do_GetService("@mozilla.org/uuid-generator;1", &rv);
++  NS_ENSURE_SUCCESS(rv, rv);
++
++  nsID id;
++  rv = uuidGenerator->GenerateUUIDInPlace(&id);
++  NS_ENSURE_SUCCESS(rv, rv);
++
++  PendingRequest* request = new PendingRequest(aPromise);
++  mPendingRequests.Put(id, request);
++
++  aID = id;
++
++  return NS_OK;
++}
++
++Promise*
++SyncManagerChild::GetPendingRequest(const nsID& aID)
++{
++  PendingRequest* request = mPendingRequests.Get(aID);
++  if (NS_WARN_IF(!request)) {
++    return nullptr;
++  }
++
++  RefPtr<Promise> promise = request->mPromise;
++
++  mPendingRequests.Remove(const_cast<nsID&>(aID));
++  return promise;
++}
++
++nsresult
++SyncManagerChild::ExecuteOp(Promise* aPromise, SyncOp* aOp)
++{
++  if (mActorDestroyed) {
++    return NS_OK;
++  }
++
++  nsID requestId;
++  nsresult rv = StorePendingRequest(aPromise, requestId);
++  NS_ENSURE_SUCCESS(rv, rv);
++
++  Unused << SendRequest(requestId, *aOp);
++
++  return NS_OK;
++}
++
++bool
++SyncManagerChild::RecvResponse(const nsID& aRequestId,
++                               const SyncOpResponse& aResponse)
++{
++  Promise* p = GetPendingRequest(aRequestId);
++  if (NS_WARN_IF(!p)) {
++    // This should never happen.
++    return false;
++  }
++
++  switch(aResponse.type()) {
++    case SyncOpResponse::TSyncRegisterResponse:
++      p->MaybeResolve(true);
++      return true;
++    case SyncOpResponse::TSyncGetTagsResponse:
++      p->MaybeResolve(aResponse.get_SyncGetTagsResponse().mTags());
++      return true;
++    case SyncOpResponse::TSyncOpError:
++      p->MaybeReject(
++          static_cast<nsresult>(aResponse.get_SyncOpError().mCode()));
++      return true;
++    default:
++      MOZ_CRASH("Unknown BackgroundSync response");
++      return false;
++  }
++}
++
++} // namespace dom
++} // namespace mozilla
+diff --git a/dom/sync/SyncManagerChild.h b/dom/sync/SyncManagerChild.h
+new file mode 100644
+--- /dev/null
++++ b/dom/sync/SyncManagerChild.h
+@@ -0,0 +1,62 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
++ * You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#ifndef mozilla_dom_SyncManagerChild_h
++#define mozilla_dom_SyncManagerChild_h
++
++#include "SyncManager.h"
++
++#include "mozilla/dom/PSyncManagerChild.h"
++
++#include "nsID.h"
++#include "nsClassHashtable.h"
++
++namespace mozilla {
++
++namespace ipc {
++class BackgroundChildImpl;
++} // namespace ipc
++
++namespace dom {
++
++class SyncManager;
++
++class SyncManagerChild final : public PSyncManagerChild
++{
++  friend class mozilla::ipc::BackgroundChildImpl;
++
++public:
++  NS_INLINE_DECL_REFCOUNTING(SyncManagerChild)
++
++  bool IsActorDestroyed() const
++  {
++    return mActorDestroyed;
++  }
++
++  nsresult ExecuteOp(Promise* aPromise, SyncOp* aOp);
++
++  virtual bool RecvResponse(const nsID& aRequestId,
++                            const SyncOpResponse& aResponse) override;
++
++private:
++  SyncManagerChild();
++  ~SyncManagerChild();
++
++  virtual void ActorDestroy(ActorDestroyReason aWhy) override;
++
++  nsresult StorePendingRequest(Promise* aPromise, nsID& aID);
++  Promise* GetPendingRequest(const nsID& aID);
++
++  bool mActorDestroyed;
++
++  struct PendingRequest;
++  nsClassHashtable<nsIDHashKey, PendingRequest> mPendingRequests;
++};
++
++} // namespace dom
++} // namespace mozilla
++
++#endif // mozilla_dom_SyncManagerChild_h
+diff --git a/dom/sync/SyncManagerParent.cpp b/dom/sync/SyncManagerParent.cpp
+new file mode 100644
+--- /dev/null
++++ b/dom/sync/SyncManagerParent.cpp
+@@ -0,0 +1,96 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
++ * You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#include "SyncManagerParent.h"
++#include "SyncService.h"
++
++#include "mozilla/unused.h"
++#include "mozilla/ipc/BackgroundParent.h"
++
++namespace mozilla {
++
++using namespace ipc;
++
++namespace dom {
++
++namespace {
++  uint64_t sSyncManagerParentId = 0;
++}
++
++SyncManagerParent::SyncManagerParent()
++  : mService(SyncService::GetOrCreate())
++  , mId(++sSyncManagerParentId)
++  , mActorDestroyed(false)
++{
++  AssertIsOnBackgroundThread();
++
++  mService->RegisterActor(this);
++}
++
++SyncManagerParent::~SyncManagerParent()
++{
++  AssertIsOnBackgroundThread();
++}
++
++void
++SyncManagerParent::ActorDestroy(ActorDestroyReason aWhy)
++{
++  AssertIsOnBackgroundThread();
++
++  mActorDestroyed = true;
++
++  if (mService) {
++    mService->UnregisterActor(this);
++  }
++}
++
++bool
++SyncManagerParent::RecvRequest(const nsID& aRequestId,
++                               const SyncOp& aOp)
++{
++  AssertIsOnBackgroundThread();
++
++  if (NS_WARN_IF(!mService)) {
++    return false;
++  }
++
++  mService->Request(mId, aRequestId, aOp);
++
++  return true;
++}
++
++bool
++SyncManagerParent::RecvShutdown()
++{
++  AssertIsOnBackgroundThread();
++
++  if (NS_WARN_IF(!mService)) {
++    return false;
++  }
++
++  mService->UnregisterActor(this);
++  mService = nullptr;
++
++  if (!mActorDestroyed) {
++    Unused << Send__delete__(this);
++  }
++
++  return true;
++}
++
++void
++SyncManagerParent::NotifyResponse(const nsID& aRequestId,
++                                  const SyncOpResponse& aResponse)
++{
++  AssertIsOnBackgroundThread();
++
++  if (!mActorDestroyed) {
++    Unused << SendResponse(aRequestId, aResponse);
++  }
++}
++
++} // namespace dom
++} // namespace mozilla
+diff --git a/dom/sync/SyncManagerParent.h b/dom/sync/SyncManagerParent.h
+new file mode 100644
+--- /dev/null
++++ b/dom/sync/SyncManagerParent.h
+@@ -0,0 +1,71 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
++ * You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#ifndef mozilla_dom_SyncManagerParent_h
++#define mozilla_dom_SyncManagerParent_h
++
++#include "mozilla/dom/PSyncManagerParent.h"
++#include "mozilla/dom/SyncIPCTypes.h"
++
++#include "nsID.h"
++
++namespace mozilla {
++
++namespace ipc {
++class BackgroundParentImpl;
++} // namespace ipc
++
++namespace dom {
++
++class SyncService;
++
++class SyncManagerParent final : public PSyncManagerParent
++{
++  friend class mozilla::ipc::BackgroundParentImpl;
++
++public:
++  NS_INLINE_DECL_REFCOUNTING(SyncManagerParent)
++
++  virtual bool RecvRequest(const nsID& aRequestId,
++                           const SyncOp& aOp) override;
++
++  virtual bool RecvShutdown() override;
++
++  void NotifyResponse(const nsID& aRequestId,
++                      const SyncOpResponse& aResponse);
++
++  uint64_t Id() const
++  {
++    return mId;
++  }
++
++  bool ActorDestroyed() const
++  {
++    return mActorDestroyed;
++  }
++
++private:
++  SyncManagerParent();
++  ~SyncManagerParent();
++
++  virtual void ActorDestroy(ActorDestroyReason aWhy) override;
++
++  // SyncManagerParent objects keep SyncService alive.
++  RefPtr<SyncService> mService;
++
++  // The identifier will be used by the SyncService to know which request
++  // belongs to which parent actor.
++  uint64_t mId;
++
++  bool mActorDestroyed;
++};
++
++} // namespace dom
++} // namespace mozilla
++
++#endif // mozilla_dom_SyncManagerParent_h
++
++
+diff --git a/dom/sync/SyncRegistration.cpp b/dom/sync/SyncRegistration.cpp
+new file mode 100644
+--- /dev/null
++++ b/dom/sync/SyncRegistration.cpp
+@@ -0,0 +1,147 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
++ * You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#include "mozilla/ModuleUtils.h"
++#include "SyncRegistration.h"
++
++#define NS_SYNCREGISTRATION_CID \
++  { 0x566a1540, 0x45d8, 0x4828, {0xbf, 0x8a, 0xf9, 0x6e, 0x58, 0x5d, 0x94, 0xe8} }
++
++namespace mozilla {
++namespace dom {
++
++NS_IMPL_ISUPPORTS(nsSyncRegistration, nsISyncRegistration)
++
++NS_IMETHODIMP
++nsSyncRegistration::Init(const nsAString& aId,
++                         const nsAString& aOriginSuffix,
++                         const nsAString& aScope,
++                         const nsAString& aTag,
++                         uint16_t aState,
++                         bool aLastChance)
++{
++  mId = aId;
++  mOriginSuffix = aOriginSuffix;
++  mScope = aScope;
++  mTag = aTag;
++  mState = aState;
++  mLastChance = aLastChance;
++  return NS_OK;
++}
++
++/* attribute DOMString originSuffix; */
++NS_IMETHODIMP
++nsSyncRegistration::GetOriginSuffix(nsAString & aOriginSuffix)
++{
++  aOriginSuffix = mOriginSuffix;
++  return NS_OK;
++}
++
++NS_IMETHODIMP
++nsSyncRegistration::SetOriginSuffix(const nsAString & aOriginSuffix)
++{
++  mOriginSuffix = aOriginSuffix;
++  return NS_OK;
++}
++
++/* attribute DOMString id; */
++NS_IMETHODIMP
++nsSyncRegistration::GetId(nsAString & aId)
++{
++  aId = mId;
++  return NS_OK;
++}
++
++NS_IMETHODIMP
++nsSyncRegistration::SetId(const nsAString & aId)
++{
++  mId = aId;
++  return NS_OK;
++}
++
++/* attribute DOMString scope; */
++NS_IMETHODIMP
++nsSyncRegistration::GetScope(nsAString & aScope)
++{
++  aScope = mScope;
++  return NS_OK;
++}
++
++NS_IMETHODIMP
++nsSyncRegistration::SetScope(const nsAString & aScope)
++{
++  mScope = aScope;
++  return NS_OK;
++}
++
++/* attribute DOMString tag; */
++NS_IMETHODIMP
++nsSyncRegistration::GetTag(nsAString & aTag)
++{
++  aTag = mTag;
++  return NS_OK;
++}
++
++NS_IMETHODIMP
++nsSyncRegistration::SetTag(const nsAString & aTag)
++{
++  mTag = aTag;
++  return NS_OK;
++}
++
++/* attribute unsigned short state; */
++NS_IMETHODIMP
++nsSyncRegistration::GetState(uint16_t *aState)
++{
++  *aState = mState;
++  return NS_OK;
++}
++
++NS_IMETHODIMP
++nsSyncRegistration::SetState(uint16_t aState)
++{
++  mState = aState;
++  return NS_OK;
++}
++
++/* attribute boolean lastChance; */
++NS_IMETHODIMP
++nsSyncRegistration::GetLastChance(bool *aLastChance)
++{
++  *aLastChance = mLastChance;
++  return NS_OK;
++}
++
++NS_IMETHODIMP
++nsSyncRegistration::SetLastChance(bool aLastChance)
++{
++  mLastChance = aLastChance;
++  return NS_OK;
++}
++
++NS_GENERIC_FACTORY_CONSTRUCTOR(nsSyncRegistration);
++
++NS_DEFINE_NAMED_CID(NS_SYNCREGISTRATION_CID);
++
++static const mozilla::Module::CIDEntry kSyncRegistrationCIDs[] = {
++  { &kNS_SYNCREGISTRATION_CID, false, nullptr, nsSyncRegistrationConstructor },
++  { nullptr }
++};
++
++static const mozilla::Module::ContractIDEntry kSyncRegistrationContracts[] = {
++  { "@mozilla.org/dom/sync/registration;1", &kNS_SYNCREGISTRATION_CID },
++  { nullptr }
++};
++
++static const mozilla::Module kSyncRegistrationModule = {
++  mozilla::Module::kVersion,
++  kSyncRegistrationCIDs,
++  kSyncRegistrationContracts,
++  nullptr
++};
++
++} // namespace dom
++} // namespace mozilla
++
++NSMODULE_DEFN(SyncRegistrationModule) = &mozilla::dom::kSyncRegistrationModule;
+diff --git a/dom/sync/SyncRegistration.h b/dom/sync/SyncRegistration.h
+new file mode 100644
+--- /dev/null
++++ b/dom/sync/SyncRegistration.h
+@@ -0,0 +1,35 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
++ * You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#ifndef mozilla_dom_SyncRegistration_h
++#define mozilla_dom_SyncRegistration_h
++
++#include "nsISyncRegistry.h"
++
++namespace mozilla {
++namespace dom {
++
++class nsSyncRegistration final : public nsISyncRegistration
++{
++public:
++  NS_DECL_THREADSAFE_ISUPPORTS
++  NS_DECL_NSISYNCREGISTRATION
++
++  nsSyncRegistration() {}
++
++private:
++  ~nsSyncRegistration() {}
++
++  nsString mOriginSuffix;
++  nsString mId;
++  nsString mScope;
++  nsString mTag;
++  uint16_t mState;
++  bool mLastChance;
++};
++
++} // namespace dom
++} // namespace mozilla
++
++#endif // mozilla_dom_SyncRegistration_h
+diff --git a/dom/sync/SyncRegistry.js b/dom/sync/SyncRegistry.js
+new file mode 100644
+--- /dev/null
++++ b/dom/sync/SyncRegistry.js
+@@ -0,0 +1,170 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++"use strict"
++
++function debug(s) {
++  dump("DEBUG SyncRegistry: " + s + "\n");
++}
++
++function error(s) {
++  dump("ERROR SyncRegistry: " + s + "\n");
++}
++
++const { classes: Cc, interfaces: Ci, results: Cr, utils: Cu } = Components;
++
++Cu.import("resource://gre/modules/IndexedDBHelper.jsm");
++Cu.import("resource://gre/modules/XPCOMUtils.jsm");
++
++const RW = "readwrite";
++const RO = "readonly";
++
++const SYNC_REGISTRY_DB_NAME    = "background-sync-registry";
++const SYNC_REGISTRY_DB_VERSION = 1;
++const SYNC_REGISTRY_STORE_NAME = "registry";
++
++let gInstance = null;
++function SyncRegistry() {
++  if (gInstance) {
++    return gInstance;
++  }
++  gInstance = this;
++  gInstance.init();
++  debug("SyncRegistry created");
++}
++
++SyncRegistry.prototype = {
++  __proto__: IndexedDBHelper.prototype,
++
++  init: function() {
++    debug("init");
++    this.initDBHelper(SYNC_REGISTRY_DB_NAME,
++                      SYNC_REGISTRY_DB_VERSION,
++                      [SYNC_REGISTRY_STORE_NAME]);
++  },
++
++  upgradeSchema: function(aTransaction, aDb, aOldVersion, aNewVersion) {
++    debug("upgradeSchema");
++    /**
++     * We will be storing objects like:
++     * {
++     *   id: <string> (key), // concatenation of scope + tag,
++     *   originSuffix: <string>,
++     *   scope: <string> (index),
++     *   tag: <string>,
++     *   state: <number>,
++     *   lastChance: <boolean>
++     * }
++     */
++    let objectStore = aDb.createObjectStore(SYNC_REGISTRY_STORE_NAME, {
++      keyPath: "id"
++    });
++    objectStore.createIndex("scope", "scope", { unique: false });
++  },
++
++  getId(aRegistration) {
++    return aRegistration.tag + '@' + aRegistration.scope;
++  },
++
++  add(aRegistration, aListener) {
++    debug("add " + JSON.stringify(aRegistration));
++    if (!aRegistration ||
++        !aRegistration.tag || !aRegistration.scope ||
++        !aRegistration.tag.length || !aRegistration.scope.length) {
++      error("Missing registration info");
++      aListener.notifyError(Cr.NS_ERROR_ILLEGAL_VALUE);
++      return;
++    }
++
++    this.newTxn(RW, SYNC_REGISTRY_STORE_NAME, (aTxn, aStore) => {
++      aStore.add({
++        id: this.getId(aRegistration),
++        originSuffix: aRegistration.originSuffix,
++        scope: aRegistration.scope,
++        tag: aRegistration.tag,
++        state: Ci.nsISyncRegistry.STATE_PENDING,
++        lastChance: true // XXX Bug 1260138
++      });
++    }, () => {
++      aListener.notifyAddSuccess();
++    }, error => {
++      error = isNaN(error) ? Cr.NS_ERROR_FAILURE : error;
++      aListener.notifyError(error);
++    });
++  },
++
++  remove(aId, aListener) {
++    debug("remove " + aId);
++    this.newTxn(RW, SYNC_REGISTRY_STORE_NAME, (aTxn, aStore) => {
++      aStore.delete(aId);
++    }, () => {
++      debug("registration removed " + aId);
++      aListener.notifyRemoveSuccess();
++    }, error => {
++      error = isNaN(error) ? Cr.NS_ERROR_FAILURE : error;
++      aListener.notifyError(error);
++    });
++  },
++
++  getAll(aListener) {
++    debug("getAll");
++    this.newTxn(RO, SYNC_REGISTRY_STORE_NAME, (aTxn, aStore) => {
++      aStore.getAll().onsuccess = event => {
++        let results = event.target.result;
++        let registrations = Cc["@mozilla.org/array;1"]
++                              .createInstance(Ci.nsIMutableArray);;
++        for (let i = 0; i < results.length; i++) {
++          let registration = Cc["@mozilla.org/dom/sync/registration;1"]
++                               .createInstance(Ci.nsISyncRegistration);
++          let result = results[i];
++          registration.init(result.id,
++                            result.originSuffix,
++                            result.scope,
++                            result.tag,
++                            result.state,
++                            result.lastChance);
++          debug("registration " + JSON.stringify(registration));
++          try {
++            registrations.appendElement(registration, false /* weak */);
++          } catch(e) {
++            return aListener.notifyError(Cr.NS_ERROR_OUT_OF_MEMORY);
++          }
++        }
++        aListener.notifyGetAllSuccess(registrations);
++      };
++    }, null, error => {
++      error = isNaN(error) ? Cr.NS_ERROR_FAILURE : error;
++      aListener.notifyError(error);
++    });
++  },
++
++  changeState(aId, aState, aListener) {
++    debug("changeState " + aId + " " + aState);
++    this.newTxn(RW, SYNC_REGISTRY_STORE_NAME, (aTxn, aStore) => {
++      aStore.get(aId).onsuccess = event => {
++        let registration = event.target.result;
++        debug("registration " + JSON.stringify(registration));
++        registration.state = aState;
++        aStore.put(registration).onsuccess = event => {
++          let result = Cc["@mozilla.org/dom/sync/registration;1"]
++                         .createInstance(Ci.nsISyncRegistration);
++          ["id", "scope", "tag", "state", "lastChance"].forEach(property => {
++            result[property] = registration[property];
++          });
++          aListener.notifyChangeStateSuccess(result);
++        };
++      };
++    }, null, error => {
++      error = isNaN(error) ? Cr.NS_ERROR_FAILURE : error;
++      aListener.notifyError(error);
++    });
++  },
++
++  classID: Components.ID("{c1200834-3ebb-45e2-81cf-986edeb107f6}"),
++  contractID: "@mozilla.org/dom/sync/registry;1",
++  QueryInterface: XPCOMUtils.generateQI([Ci.nsISyncRegistry,
++                                         Ci.nsISupports])
++};
++
++this.NSGetFactory = XPCOMUtils.generateNSGetFactory([SyncRegistry]);
+diff --git a/dom/sync/SyncRegistry.manifest b/dom/sync/SyncRegistry.manifest
+new file mode 100644
+--- /dev/null
++++ b/dom/sync/SyncRegistry.manifest
+@@ -0,0 +1,2 @@
++component {c1200834-3ebb-45e2-81cf-986edeb107f6} SyncRegistry.js
++contract @mozilla.org/dom/sync/registry;1 {c1200834-3ebb-45e2-81cf-986edeb107f6}
+diff --git a/dom/sync/SyncService.cpp b/dom/sync/SyncService.cpp
+new file mode 100644
+--- /dev/null
++++ b/dom/sync/SyncService.cpp
+@@ -0,0 +1,675 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#include "nsArrayUtils.h"
++#include "nsIMutableArray.h"
++#include "nsIOService.h"
++#include "SyncManagerParent.h"
++#include "SyncService.h"
++#include "SyncTypes.h"
++
++namespace mozilla {
++
++namespace dom {
++
++namespace {
++  SyncService* sInstance = nullptr;
++} // namespace
++
++class SyncRegistryResponseRunnable : public Runnable
++{
++public:
++  SyncRegistryResponseRunnable(SyncRegistryResponse* aResponse)
++    : mResponse(aResponse)
++  {
++    AssertIsOnMainThread();
++  }
++
++  SyncRegistryResponseRunnable(SyncRegistryInternalResponse* aResponse)
++    : mInternalResponse(aResponse)
++  {
++    AssertIsOnMainThread();
++  }
++
++  NS_IMETHODIMP Run() override
++  {
++    AssertIsOnBackgroundThread();
++
++    if (mResponse) {
++      sInstance->Response(mResponse);
++    } else if (mInternalResponse) {
++      sInstance->InternalResponse(mInternalResponse);
++    }
++
++    return NS_OK;
++  }
++
++private:
++  ~SyncRegistryResponseRunnable() {}
++
++  RefPtr<SyncRegistryResponse> mResponse;
++  RefPtr<SyncRegistryInternalResponse> mInternalResponse;
++};
++
++class SyncRegistryRequestRunnable final : public nsIRunnable
++                                        , public nsISyncRegistryListener
++{
++
++public:
++  NS_DECL_THREADSAFE_ISUPPORTS
++
++  SyncRegistryRequestRunnable(SyncRegistryRequest* aRequest)
++    : mRequest(aRequest)
++    , mBackgroundThread(NS_GetCurrentThread())
++  {
++    AssertIsOnBackgroundThread();
++  }
++
++  NS_IMETHODIMP
++  GetRequestId(nsID* aRequestId) override
++  {
++    AssertIsOnMainThread();
++
++    aRequestId = &(mRequest->mRequestId);
++    return NS_OK;
++  }
++
++  NS_IMETHODIMP
++  SetRequestId(const nsID aRequestId) override
++  {
++    return NS_OK;
++  }
++
++  NS_IMETHODIMP
++  GetActorId(uint64_t* aActorId) override
++  {
++    AssertIsOnMainThread();
++
++    aActorId = &(mRequest->mActorId);
++    return NS_OK;
++  }
++
++  NS_IMETHODIMP
++  SetActorId(const uint64_t aActorId) override
++  {
++    return NS_OK;
++  }
++
++  NS_IMETHODIMP
++  NotifyAddSuccess() override
++  {
++    AssertIsOnMainThread();
++
++    return Callback(SyncRegisterResponse());
++  }
++
++  NS_IMETHODIMP
++  NotifyGetAllSuccess(nsIArray* aRegistrations) override
++  {
++    AssertIsOnMainThread();
++
++    if (!aRegistrations) {
++      return Callback(SyncOpError(static_cast<uint32_t>(NS_ERROR_INVALID_ARG)));
++    }
++
++    uint32_t length;
++    nsresult rv = aRegistrations->GetLength(&length);
++    if (NS_WARN_IF(NS_FAILED(rv))) {
++      return Callback(SyncOpError(static_cast<uint32_t>(rv)));
++    }
++
++    if (mRequest->mActorId == 0) {
++      // Internal request.
++      nsTArray<nsCOMPtr<nsISyncRegistration>> registrations;
++      for (uint32_t i = 0; i < length; i++) {
++        nsCOMPtr<nsISyncRegistration> registration =
++          do_QueryElementAt(aRegistrations, i);
++        if (NS_WARN_IF(!registration)) {
++          continue;
++        }
++        registrations.AppendElement(registration);
++      }
++
++      return Callback(new SyncRegistryInternalResponse(
++        SyncRegistryInternalResponse::TGetAllResponse, registrations));
++    }
++
++    // DOM request.
++    nsTArray<nsString> tags;
++    for (uint32_t i = 0; i < length; i++) {
++      nsCOMPtr<nsISyncRegistration> registration =
++        do_QueryElementAt(aRegistrations, i);
++      if (NS_WARN_IF(!registration)) {
++        continue;
++      }
++      nsString tag;
++      registration->GetTag(tag);
++      tags.AppendElement(tag);
++    }
++
++    return Callback(SyncGetTagsResponse(tags));
++  }
++
++  NS_IMETHODIMP
++  NotifyChangeStateSuccess(nsISyncRegistration* aRegistration) override
++  {
++    AssertIsOnMainThread();
++
++    nsTArray<nsCOMPtr<nsISyncRegistration>> registrations;
++    registrations.AppendElement(aRegistration);
++
++    return Callback(new SyncRegistryInternalResponse(
++      SyncRegistryInternalResponse::TChangeStateResponse, registrations));
++  }
++
++  NS_IMETHODIMP
++  NotifyRemoveSuccess() override
++  {
++    return NS_OK;
++  }
++
++  NS_IMETHODIMP
++  NotifyError(const uint32_t aError) override
++  {
++    AssertIsOnMainThread();
++
++    return Callback(SyncOpError(aError));
++  }
++
++  NS_IMETHODIMP
++  Run() override
++  {
++    AssertIsOnMainThread();
++
++    nsCOMPtr<nsISyncRegistry> registry =
++      do_CreateInstance("@mozilla.org/dom/sync/registry;1");
++    MOZ_ASSERT(registry);
++
++    if (mRequest->mOpOrIOp.type() == SyncOpOrInternalOp::TSyncOp) {
++      SyncOp op = mRequest->mOpOrIOp.get_SyncOp();
++
++      switch(op.mArgs().type()) {
++        case SyncOpArgs::TSyncRegisterArgs:
++        {
++          nsCOMPtr<nsISyncRegistration> registration =
++            do_CreateInstance("@mozilla.org/dom/sync/registration;1");
++          MOZ_ASSERT(registration);
++
++          nsCOMPtr<nsIPrincipal> principal =
++            PrincipalInfoToPrincipal(op.mPrincipal());
++          if (NS_WARN_IF(!principal)) {
++            return NotifyError(static_cast<uint32_t>(NS_ERROR_INVALID_ARG));
++          }
++
++          nsAutoCString originSuffix;
++          nsresult rv = principal->GetOriginSuffix(originSuffix);
++          if (NS_WARN_IF(NS_FAILED(rv))) {
++            return NotifyError(static_cast<uint32_t>(NS_ERROR_INVALID_ARG));
++          }
++
++          registration->SetOriginSuffix(NS_ConvertUTF8toUTF16(originSuffix));
++          registration->SetScope(op.mArgs().get_SyncRegisterArgs().mScope());
++          registration->SetTag(op.mArgs().get_SyncRegisterArgs().mTag());
++
++          registry->Add(registration, this);
++
++          break;
++        }
++        case SyncOpArgs::TSyncGetTagsArgs:
++          registry->GetAll(this);
++          break;
++        default:
++          MOZ_CRASH("Unknown BackgroundSync request");
++      }
++
++    } else if (mRequest->mOpOrIOp.type() == SyncOpOrInternalOp::TSyncInternalOp) {
++
++      SyncInternalOp op = mRequest->mOpOrIOp.get_SyncInternalOp();
++
++      switch (op.mArgs().type()) {
++        case SyncInternalOpArgs::TSyncGetAllArgs:
++          registry->GetAll(this);
++          break;
++        case SyncInternalOpArgs::TSyncChangeStateArgs:
++          registry->ChangeState(op.mArgs().get_SyncChangeStateArgs().mId(),
++                                op.mArgs().get_SyncChangeStateArgs().mState(),
++                                this);
++          break;
++        case SyncInternalOpArgs::TSyncRemoveArgs:
++          registry->Remove(op.mArgs().get_SyncRemoveArgs().mId(), this);
++          break;
++        default:
++          MOZ_CRASH("Unknown BackgroundSync internal request");
++      }
++
++    } else {
++      MOZ_CRASH("Unknown BackgroundSync registry request");
++    }
++
++    return NS_OK;
++  }
++
++private:
++  ~SyncRegistryRequestRunnable() {}
++
++  nsresult
++  Callback(const SyncOpResponse& aResponse)
++  {
++    AssertIsOnMainThread();
++
++    RefPtr<SyncRegistryResponse> response =
++      new SyncRegistryResponse(mRequest->mActorId,
++                               mRequest->mRequestId,
++                               aResponse);
++    RefPtr<SyncRegistryResponseRunnable> callback =
++      new SyncRegistryResponseRunnable(response);
++    MOZ_ASSERT(callback);
++
++    mBackgroundThread->Dispatch(callback, NS_DISPATCH_NORMAL);
++
++    return NS_OK;
++  }
++
++  nsresult
++  Callback(SyncRegistryInternalResponse* aResponse)
++  {
++    AssertIsOnMainThread();
++
++    RefPtr<SyncRegistryResponseRunnable> callback =
++      new SyncRegistryResponseRunnable(aResponse);
++    MOZ_ASSERT(callback);
++
++    mBackgroundThread->Dispatch(callback, NS_DISPATCH_NORMAL);
++
++    return NS_OK;
++  }
++
++  RefPtr<SyncRegistryRequest> mRequest;
++  nsCOMPtr<nsIThread> mBackgroundThread;
++};
++
++NS_IMPL_ISUPPORTS(SyncRegistryRequestRunnable, nsIRunnable, nsISyncRegistryListener);
++
++class SyncServiceNotifyOnlineStateRunnable final : public Runnable
++{
++public:
++  SyncServiceNotifyOnlineStateRunnable(const OnlineState aState)
++    : mOnlineState(aState)
++  {
++    AssertIsOnMainThread();
++  }
++
++  NS_IMETHOD
++  Run() override
++  {
++    AssertIsOnBackgroundThread();
++
++    sInstance->OnlineStateChange(mOnlineState);
++
++    return NS_OK;
++  }
++
++private:
++  ~SyncServiceNotifyOnlineStateRunnable() {}
++
++  OnlineState mOnlineState;
++};
++
++class SyncServiceInitRunnable final : public nsIRunnable
++                                    , public nsIObserver
++{
++public:
++  NS_DECL_THREADSAFE_ISUPPORTS
++
++  SyncServiceInitRunnable()
++    : mBackgroundThread(NS_GetCurrentThread())
++  {
++    AssertIsOnBackgroundThread();
++  }
++
++  NS_IMETHOD
++  Observe(nsISupports* aSubject, const char* aTopic,
++          const char16_t* aData) override
++  {
++    AssertIsOnMainThread();
++
++    OnlineState state = OFFLINE;
++    if (nsDependentString(aData).EqualsLiteral(NS_IOSERVICE_ONLINE)) {
++      state = ONLINE;
++    }
++
++    mBackgroundThread->Dispatch(
++        new SyncServiceNotifyOnlineStateRunnable(state), NS_DISPATCH_NORMAL);
++
++    return NS_OK;
++  }
++
++  NS_IMETHOD
++  Run() override
++  {
++    AssertIsOnMainThread();
++
++    nsCOMPtr<nsIObserverService> os = services::GetObserverService();
++    NS_ENSURE_STATE(os);
++    // The observer service holds us alive.
++    os->AddObserver(this, NS_IOSERVICE_OFFLINE_STATUS_TOPIC,
++                    /* holdsWeak */ false);
++
++    bool offline = true;
++    nsCOMPtr<nsIIOService> ioService = services::GetIOService();
++    NS_ENSURE_STATE(ioService);
++    NS_WARN_IF(NS_FAILED(ioService->GetOffline(&offline)));
++
++    OnlineState state = UNKNOWN;
++    if (offline) {
++      state = OFFLINE;
++    } else {
++      state = ONLINE;
++    }
++
++    mBackgroundThread->Dispatch(
++        new SyncServiceNotifyOnlineStateRunnable(state), NS_DISPATCH_NORMAL);
++
++    return NS_OK;
++  }
++
++private:
++  ~SyncServiceInitRunnable() {}
++
++  nsCOMPtr<nsIThread> mBackgroundThread;
++};
++
++NS_IMPL_ISUPPORTS(SyncServiceInitRunnable, nsIRunnable, nsIObserver)
++
++SyncService::SyncService()
++  : mOnlineState(UNKNOWN)
++{
++  AssertIsOnBackgroundThread();
++
++  // sInstance is a raw SyncService*.
++  MOZ_ASSERT(!sInstance);
++  sInstance = this;
++}
++
++SyncService::~SyncService()
++{
++  AssertIsOnBackgroundThread();
++  MOZ_ASSERT(sInstance == this);
++  MOZ_ASSERT(mSyncManagerActors.Count() == 0);
++
++  sInstance = nullptr;
++}
++
++// static
++already_AddRefed<SyncService>
++SyncService::GetOrCreate()
++{
++  AssertIsOnBackgroundThread();
++
++  RefPtr<SyncService> instance = sInstance;
++  if (!instance) {
++    instance = new SyncService();
++    instance->Init();
++  }
++  return instance.forget();
++}
++
++void
++SyncService::Init()
++{
++  NS_DispatchToMainThread(new SyncServiceInitRunnable());
++}
++
++void
++SyncService::RegisterActor(SyncManagerParent* aParent)
++{
++  AssertIsOnBackgroundThread();
++  MOZ_ASSERT(aParent);
++  MOZ_ASSERT(!mSyncManagerActors.Contains(aParent));
++
++  mSyncManagerActors.PutEntry(aParent);
++}
++
++void
++SyncService::UnregisterActor(SyncManagerParent* aParent)
++{
++  AssertIsOnBackgroundThread();
++  MOZ_ASSERT(aParent);
++  MOZ_ASSERT(mSyncManagerActors.Contains(aParent));
++
++  mSyncManagerActors.RemoveEntry(aParent);
++}
++
++void
++SyncService::RegisterActor(workers::ServiceWorkerManagerParent* aParent)
++{
++  AssertIsOnBackgroundThread();
++  MOZ_ASSERT(aParent);
++  MOZ_ASSERT(!mServiceWorkerManagerActors.Contains(aParent));
++
++  mServiceWorkerManagerActors.PutEntry(aParent);
++}
++
++void
++SyncService::UnregisterActor(workers::ServiceWorkerManagerParent* aParent)
++{
++  AssertIsOnBackgroundThread();
++  MOZ_ASSERT(aParent);
++  MOZ_ASSERT(mServiceWorkerManagerActors.Contains(aParent));
++
++  mServiceWorkerManagerActors.RemoveEntry(aParent);
++}
++
++void
++SyncService::Request(const uint64_t aActorId,
++                     const nsID& aRequestId,
++                     const SyncOp& aOp)
++{
++  AssertIsOnBackgroundThread();
++
++  RefPtr<SyncRegistryRequestRunnable> runnable =
++    new SyncRegistryRequestRunnable(
++        new SyncRegistryRequest(aActorId, aRequestId, aOp));
++  NS_DispatchToMainThread(runnable);
++}
++
++void
++SyncService::Response(SyncRegistryResponse* aResponse)
++{
++  AssertIsOnBackgroundThread();
++
++  for (auto iter = mSyncManagerActors.Iter(); !iter.Done(); iter.Next()) {
++    RefPtr<SyncManagerParent> parent = iter.Get()->GetKey();
++    MOZ_ASSERT(parent);
++    if (parent->Id() != aResponse->mActorId ||
++        parent->ActorDestroyed()) {
++      continue;
++    }
++    parent->NotifyResponse(aResponse->mRequestId, aResponse->mResponse);
++  }
++
++  // If we just successfully added a new sync request we try to trigger
++  // the corresponding sync event.
++  if (aResponse->mResponse.type() == SyncOpResponse::TSyncRegisterResponse) {
++    StartTriggerSyncEvents();
++  }
++}
++
++void
++SyncService::InternalResponse(SyncRegistryInternalResponse* aResponse)
++{
++  AssertIsOnBackgroundThread();
++  MOZ_ASSERT(aResponse);
++
++  nsTArray<nsCOMPtr<nsISyncRegistration>> registrations;
++  aResponse->GetRegistrations(registrations);
++
++  switch (aResponse->type()) {
++    case SyncRegistryInternalResponse::TGetAllResponse:
++      ContinueTriggerSyncEvents(registrations);
++      break;
++    case SyncRegistryInternalResponse::TChangeStateResponse:
++      MOZ_ASSERT((registrations.Length() == 1));
++
++      uint16_t state;
++      registrations[0]->GetState(&state);
++
++      if (state == nsISyncRegistry::STATE_FIRING) {
++        // After setting the state of the registration to STATE_FIRING
++        // we try to actually trigger the sync event.
++        TriggerSyncEvent(registrations[0]);
++      }
++      break;
++    default:
++      MOZ_CRASH("Unknown BackgroundSync internal response");
++  }
++}
++
++void SyncService::InternalRequest(const SyncInternalOpArgs& aArgs)
++{
++  AssertIsOnBackgroundThread();
++
++  const SyncInternalOp op(aArgs);
++
++  RefPtr<SyncRegistryRequestRunnable> runnable =
++    new SyncRegistryRequestRunnable(
++        new SyncRegistryRequest(0 /* internal request */, nsID(), op));
++  NS_DispatchToMainThread(runnable);
++}
++
++void
++SyncService::StartTriggerSyncEvents()
++{
++  AssertIsOnBackgroundThread();
++
++  // We need to jump to the main thread to get the list of registered
++  // sync requests. If we are still online while coming back to the
++  // background thread with this list of sync requests, we will fire
++  // a sync event for each of them.
++  const SyncGetAllArgs args;
++  InternalRequest(args);
++}
++
++void
++SyncService::RemoveSyncRegistration(const nsString& aId)
++{
++  AssertIsOnBackgroundThread();
++
++  const SyncRemoveArgs args(aId);
++  InternalRequest(args);
++}
++
++void
++SyncService::ContinueTriggerSyncEvents(
++    nsTArray<nsCOMPtr<nsISyncRegistration>>& aRegistrations)
++{
++  AssertIsOnBackgroundThread();
++
++  // At this point we got the list of registered sync requests from
++  // the main thread. If we are still online, we try to trigger a sync
++  // event for each request.
++  if (mOnlineState != ONLINE) {
++    return;
++  }
++
++  // Before actually triggering the sync event, we need to set each
++  // registration entry state to STATE_FIRING.
++  for (uint32_t i = 0; i < aRegistrations.Length(); i++) {
++    nsCOMPtr<nsISyncRegistration> registration = aRegistrations[i];
++    if (NS_WARN_IF(!registration)) {
++      continue;
++    }
++
++    // If the state of this registration entry is not 'pending', we ignore it.
++    uint16_t state;
++    registration->GetState(&state);
++    if (state != nsISyncRegistry::STATE_PENDING) {
++      continue;
++    }
++
++    // Otherwise, we set the registration state to 'firing'.
++    nsString id;
++    registration->GetId(id);
++    MOZ_ASSERT(!id.IsEmpty());
++    const SyncInternalOp op(
++        (SyncChangeStateArgs(id, nsISyncRegistry::STATE_FIRING)));
++    RefPtr<SyncRegistryRequestRunnable> runnable =
++      new SyncRegistryRequestRunnable(
++          new SyncRegistryRequest(0 /* internal request */, nsID(), op));
++    NS_DispatchToMainThread(runnable);
++  }
++}
++
++void
++SyncService::TriggerSyncEvent(nsISyncRegistration* aRegistration)
++{
++  AssertIsOnBackgroundThread();
++  MOZ_ASSERT(aRegistration);
++
++  // If we are no longer online, we can't trigger the sync event. So we need
++  // to get the registration state back to pending and bail out.
++  if (mOnlineState != ONLINE) {
++    nsString id;
++    aRegistration->GetId(id);
++    MOZ_ASSERT(!id.IsEmpty());
++    const SyncInternalOp op(
++        (SyncChangeStateArgs(id, nsISyncRegistry::STATE_PENDING)));
++    RefPtr<SyncRegistryRequestRunnable> runnable =
++      new SyncRegistryRequestRunnable(
++          new SyncRegistryRequest(0 /* internal request */, nsID(), op));
++    NS_DispatchToMainThread(runnable);
++    return;
++  }
++
++  uint16_t state;
++  aRegistration->GetState(&state);
++  MOZ_ASSERT(state == nsISyncRegistry::STATE_FIRING);
++
++  nsString originSuffix;
++  aRegistration->GetOriginSuffix(originSuffix);
++
++  nsString scope;
++  aRegistration->GetScope(scope);
++  MOZ_ASSERT(!scope.IsEmpty());
++
++  nsString tag;
++  aRegistration->GetTag(tag);
++  MOZ_ASSERT(!tag.IsEmpty());
++
++  bool lastChance;
++  aRegistration->GetLastChance(&lastChance);
++
++  for (auto iter = mServiceWorkerManagerActors.Iter(); !iter.Done();
++       iter.Next()) {
++    RefPtr<ServiceWorkerManagerParent> parent = iter.Get()->GetKey();
++    MOZ_ASSERT(parent);
++    Unused << parent->SendNotifySyncEvent(originSuffix, scope, tag,
++                                          lastChance);
++  }
++
++  // XXX Bug 1260141. For now we simply remove the sync registration, but
++  // we need to implement the sync event handling logic.
++  nsString id;
++  aRegistration->GetId(id);
++  RemoveSyncRegistration(id);
++}
++
++void
++SyncService::OnlineStateChange(const OnlineState& aState)
++{
++  mOnlineState = aState;
++
++  if (mOnlineState != ONLINE) {
++    return;
++  }
++
++  // If we are online we need to get the list of registered sync requests
++  // to trigger the corresponding 'sync' events.
++  StartTriggerSyncEvents();
++}
++
++} // namespace dom
++} // namespace mozilla
+diff --git a/dom/sync/SyncService.h b/dom/sync/SyncService.h
+new file mode 100644
+--- /dev/null
++++ b/dom/sync/SyncService.h
+@@ -0,0 +1,86 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
++ * You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#ifndef mozilla_dom_SyncService_h
++#define mozilla_dom_SyncService_h
++
++#include "mozilla/dom/SyncIPCTypes.h"
++#include "nsISupportsImpl.h"
++#include "nsISyncRegistry.h"
++#include "nsHashKeys.h"
++#include "nsTArray.h"
++#include "nsTHashtable.h"
++#include "ServiceWorkerManagerParent.h"
++
++namespace mozilla {
++namespace dom {
++
++namespace workers {
++class ServiceWorkerManagerParent;
++} // namespace workers
++
++class SyncManagerParent;
++class SyncRegistryResponse;
++class SyncRegistryInternalResponse;
++
++typedef enum {
++  ONLINE,
++  OFFLINE,
++  UNKNOWN
++} OnlineState;
++
++class SyncService final
++{
++  friend class SyncRegistryResponseRunnable;
++  friend class SyncServiceNotifyOnlineStateRunnable;
++
++public:
++  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(SyncService)
++
++  static already_AddRefed<SyncService> GetOrCreate();
++
++  void RegisterActor(SyncManagerParent* aParent);
++  void UnregisterActor(SyncManagerParent* aParent);
++
++  void RegisterActor(workers::ServiceWorkerManagerParent* aParent);
++  void UnregisterActor(workers::ServiceWorkerManagerParent* aParent);
++
++  void Request(const uint64_t aActorId,
++               const nsID& aRequestId,
++               const SyncOp& aOp);
++
++  SyncService();
++
++private:
++  ~SyncService();
++
++  void Init();
++
++  void Response(SyncRegistryResponse* aResponse);
++  void InternalResponse(SyncRegistryInternalResponse* aResponse);
++
++  void InternalRequest(const SyncInternalOpArgs& aArgs);
++
++  void StartTriggerSyncEvents();
++  void ContinueTriggerSyncEvents(
++      nsTArray<nsCOMPtr<nsISyncRegistration>>& aRegistrations);
++  void TriggerSyncEvent(nsISyncRegistration* aRegistration);
++
++  void RemoveSyncRegistration(const nsString& aId);
++
++  void OnlineStateChange(const OnlineState& aState);
++
++  OnlineState mOnlineState;
++
++  nsTHashtable<nsRefPtrHashKey<SyncManagerParent>> mSyncManagerActors;
++  nsTHashtable<nsRefPtrHashKey<workers::ServiceWorkerManagerParent>>
++    mServiceWorkerManagerActors;
++};
++
++} // namespace dom
++} // namespace mozilla
++
++#endif // mozilla_dom_SyncService_h
+diff --git a/dom/sync/SyncTypes.h b/dom/sync/SyncTypes.h
+new file mode 100644
+--- /dev/null
++++ b/dom/sync/SyncTypes.h
+@@ -0,0 +1,110 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#ifndef mozilla_dom_sync_Types_h
++#define mozilla_dom_sync_Types_h
++
++#include "nsCOMPtr.h"
++#include "nsTArray.h"
++
++namespace mozilla {
++namespace dom {
++
++class SyncRegistryAction
++{
++public:
++  uint64_t mActorId;
++  nsID mRequestId;
++
++protected:
++  SyncRegistryAction(const uint64_t aActorId,
++                     const nsID& aRequestId)
++    : mActorId(aActorId)
++    , mRequestId(aRequestId)
++  {}
++
++  ~SyncRegistryAction() {}
++};
++
++class SyncRegistryRequest final : public SyncRegistryAction
++{
++public:
++  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(SyncRegistryRequest)
++
++  SyncOpOrInternalOp mOpOrIOp;
++
++  SyncRegistryRequest(const uint64_t aActorId,
++                      const nsID& aRequestId,
++                      const SyncOpOrInternalOp& aOpOrIOp)
++    : SyncRegistryAction(aActorId, aRequestId)
++    , mOpOrIOp(aOpOrIOp)
++  {}
++
++private:
++  ~SyncRegistryRequest() {}
++};
++
++class SyncRegistryResponse final : public SyncRegistryAction
++{
++public:
++  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(SyncRegistryResponse)
++
++  SyncOpResponse mResponse;
++
++  SyncRegistryResponse(const uint64_t aActorId,
++                       const nsID& aRequestId,
++                       const SyncOpResponse& aResponse)
++    : SyncRegistryAction(aActorId, aRequestId)
++    , mResponse(aResponse)
++  {}
++
++private:
++  ~SyncRegistryResponse() {}
++};
++
++class SyncRegistryInternalResponse final
++{
++public:
++  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(SyncRegistryInternalResponse)
++
++  enum Type {
++    TGetAllResponse,
++    TChangeStateResponse
++  };
++
++  SyncRegistryInternalResponse(
++      Type aType,
++      nsTArray<nsCOMPtr<nsISyncRegistration>> &aRegistrations)
++    : mType(aType)
++  {
++    for (uint32_t i = 0; i < aRegistrations.Length(); i++) {
++      mRegistrations.AppendElement(aRegistrations[i]);
++    }
++  }
++
++  Type
++  type() {
++    return mType;
++  }
++
++  void
++  GetRegistrations(nsTArray<nsCOMPtr<nsISyncRegistration>>& aRegistrations)
++  {
++    for (uint32_t i = 0; i < mRegistrations.Length(); i++) {
++      aRegistrations.AppendElement(mRegistrations[i]);
++    }
++  }
++
++private:
++  ~SyncRegistryInternalResponse() {}
++
++  Type mType;
++
++  nsTArray<nsCOMPtr<nsISyncRegistration>> mRegistrations;
++};
++
++} // namespace dom
++} // namespace mozilla
++
++#endif // mozilla_dom_sync_Types_h
+diff --git a/dom/sync/moz.build b/dom/sync/moz.build
+new file mode 100644
+--- /dev/null
++++ b/dom/sync/moz.build
+@@ -0,0 +1,49 @@
++# vim: set filetype=python:
++# This Source Code Form is subject to the terms of the Mozilla Public
++# License, v. 2.0. If a copy of the MPL was not distributed with this
++# file, You can obtain one at http://mozilla.org/MPL/2.0/.
++
++EXPORTS.mozilla.dom += [
++    'SyncManager.h'
++]
++
++UNIFIED_SOURCES += [
++    'SyncManager.cpp',
++    'SyncManagerChild.cpp',
++    'SyncManagerParent.cpp',
++    'SyncRegistration.cpp',
++    'SyncService.cpp'
++]
++
++IPDL_SOURCES += [
++    'PSyncManager.ipdl',
++    'SyncIPCTypes.ipdlh'
++]
++
++LOCAL_INCLUDES += [
++    '/dom/workers',
++    '/netwerk/base'
++]
++
++XPIDL_SOURCES += [
++    'nsISyncRegistry.idl'
++]
++
++MOCHITEST_MANIFESTS += [
++    'tests/mochitest.ini'
++]
++
++XPCSHELL_TESTS_MANIFESTS += [
++    'tests/xpcshell.ini'
++]
++
++XPIDL_MODULE = 'dom_sync'
++
++EXTRA_COMPONENTS += [
++    'SyncRegistry.js',
++    'SyncRegistry.manifest'
++]
++
++include('/ipc/chromium/chromium-config.mozbuild')
++
++FINAL_LIBRARY = 'xul'
+diff --git a/dom/sync/nsISyncRegistry.idl b/dom/sync/nsISyncRegistry.idl
+new file mode 100644
+--- /dev/null
++++ b/dom/sync/nsISyncRegistry.idl
+@@ -0,0 +1,58 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#include "nsIArray.idl"
++#include "nsISupports.idl"
++
++[scriptable, uuid(671ea934-232d-47c6-87ba-b72715088914)]
++interface nsISyncRegistration : nsISupports
++{
++  attribute DOMString id;
++  attribute DOMString originSuffix;
++  attribute DOMString scope;
++  attribute DOMString tag;
++  attribute unsigned short state; // "pending" by default
++  attribute boolean lastChance;
++
++  void init(in DOMString id,
++            in DOMString originSuffix,
++            in DOMString scope,
++            in DOMString tag,
++            in unsigned short state,
++            in boolean lastChance);
++};
++
++[scriptable, uuid(3084a211-3ef4-4fa3-8a20-dab42f062571)]
++interface nsISyncRegistryListener : nsISupports
++{
++  attribute nsID requestId;
++  attribute unsigned long long actorId;
++
++  void notifyAddSuccess();
++  void notifyGetAllSuccess(in nsIArray registrations);
++  void notifyChangeStateSuccess(in nsISyncRegistration registration);
++  void notifyRemoveSuccess();
++  void notifyError(in uint32_t error);
++};
++
++[scriptable, uuid(dfcc3fb2-f40d-44f9-85ea-1127be79fbe9)]
++interface nsISyncRegistry : nsISupports
++{
++  const unsigned short STATE_PENDING                    = 1;
++  const unsigned short STATE_WAITING                    = 2;
++  const unsigned short STATE_FIRING                     = 3;
++  const unsigned short STATE_REREGISTERING_WHILE_FIRING = 4;
++
++  void add(in nsISyncRegistration registration,
++           in nsISyncRegistryListener listener);
++
++  void remove(in DOMString id,
++              in nsISyncRegistryListener listener);
++
++  void getAll(in nsISyncRegistryListener listener);
++
++  void changeState(in DOMString id,
++                   in unsigned short state,
++                   in nsISyncRegistryListener listener);
++};
+diff --git a/dom/sync/tests/mochitest.ini b/dom/sync/tests/mochitest.ini
+new file mode 100644
+--- /dev/null
++++ b/dom/sync/tests/mochitest.ini
+@@ -0,0 +1,7 @@
++[DEFAULT]
++support-files=
++  test_utils.js
++  worker.js
++
++[test_basic.html]
++[test_preference.html]
+diff --git a/dom/sync/tests/test_basic.html b/dom/sync/tests/test_basic.html
+new file mode 100644
+--- /dev/null
++++ b/dom/sync/tests/test_basic.html
+@@ -0,0 +1,113 @@
++<!DOCTYPE HTML>
++<html>
++<!--
++Bug 1217544: Background Sync.
++
++Any copyright is dedicated to the Public Domain.
++http://creativecommons.org/licenses/publicdomain/
++
++-->
++<head>
++  <title>Test for Bug 1217544</title>
++  <script type="text/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
++  <script type="text/javascript" src="/tests/SimpleTest/SpawnTask.js"></script>
++  <script type="text/javascript" src="/tests/dom/sync/tests/test_utils.js"></script>
++  <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
++  <meta http-equiv="Content-type" content="text/html;charset=UTF-8">
++</head>
++<a target="_blank" href="https://bugzilla.mozilla.org/show_bug.cgi?id=1217544">Mozilla Bug 1217544</a>
++<p id="display"></p>
++<div id="content" style="display: none">
++
++</div>
++<pre id="test">
++</pre>
++
++<script class="testbody" type="text/javascript">
++
++  // Load chrome script to change offline status in the
++  // parent process.
++  var chromeScript = SpecialPowers.loadChromeScript(_ => {
++    var { classes: Cc, interfaces: Ci } = Components;
++    var ioService = Cc["@mozilla.org/network/io-service;1"]
++                      .getService(Ci.nsIIOService);
++    addMessageListener("change-status", function(offline) {
++      ioService.offline = offline;
++    });
++  });
++
++  function offlineObserver(res) {
++    this._res = res;
++  }
++  offlineObserver.prototype = {
++    _res: null,
++
++    observe: function(subject, topic, data) {
++      debug("observe: " + subject + " " + topic + " " + data);
++      if (topic === "network:offline-status-changed") {
++        var obsService = SpecialPowers.Cc["@mozilla.org/observer-service;1"]
++                           .getService(SpecialPowers.Ci.nsIObserverService);
++        obsService.removeObserver(this, topic);
++        this._res(null);
++      }
++    }
++  }
++
++  function changeOfflineState(offline) {
++    return new Promise(function(res, rej) {
++      var obsService = SpecialPowers.Cc["@mozilla.org/observer-service;1"]
++                         .getService(SpecialPowers.Ci.nsIObserverService);
++      obsService.addObserver(SpecialPowers.wrapCallbackObject(new offlineObserver(res)),
++                             "network:offline-status-changed",
++                             false);
++      chromeScript.sendAsyncMessage("change-status", offline);
++    });
++  }
++
++  var registration;
++  add_task(function* start() {
++    yield setupPrefs(true /* backgroundSyncEnabled */);
++    var url = "worker.js" + "?" + (Math.random());
++    registration = yield navigator.serviceWorker.register(url, {scope: "."});
++  });
++
++  add_task(function* goOffline() {
++    yield changeOfflineState(true);
++  });
++
++  add_task(function* subscribe() {
++    yield registration.sync.register("tag");
++    var tags = yield registration.sync.getTags();
++    is(tags.length, 1, "Should have 1 registered tag");
++    is(tags[0], "tag", "Should have a tag named 'tag' registered");
++  });
++
++  add_task(function* subscribeFromWorker() {
++    var result = yield sendRequestToWorker({
++      type: "subscribe"
++    });
++    is(result.tags.length, 2, "Should have 2 registered tags");
++    ok(result.tags.indexOf("workerTag") > -1,
++       "Should have a tag named 'workerTag' registered");
++  });
++
++  add_task(function* goOnline() {
++    yield changeOfflineState(false);
++  });
++
++  add_task(function* getSyncEvents() {
++    yield sendRequestToWorker({
++      type: "waitForEvents",
++      expectedEvents: ["tag", "workerTag"]
++    });
++  });
++
++  add_task(function* testNoRegistrations() {
++    var tags = yield registration.sync.getTags();
++    is(tags.length, 0, "Should have 0 registered tag");
++    yield unregisterWorker(".");
++  });
++
++</script>
++</body>
++</html>
+diff --git a/dom/sync/tests/test_preference.html b/dom/sync/tests/test_preference.html
+new file mode 100644
+--- /dev/null
++++ b/dom/sync/tests/test_preference.html
+@@ -0,0 +1,38 @@
++<!DOCTYPE HTML>
++<html>
++<!--
++Bug 1217544: Background Sync.
++
++Any copyright is dedicated to the Public Domain.
++http://creativecommons.org/licenses/publicdomain/
++
++-->
++<head>
++  <title>Test for Bug 1217544</title>
++  <script type="text/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
++  <script type="text/javascript" src="/tests/SimpleTest/SpawnTask.js"></script>
++  <script type="text/javascript" src="/tests/dom/sync/tests/test_utils.js"></script>
++  <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
++  <meta http-equiv="Content-type" content="text/html;charset=UTF-8">
++</head>
++<a target="_blank" href="https://bugzilla.mozilla.org/show_bug.cgi?id=1217544">Mozilla Bug 1217544</a>
++<p id="display"></p>
++<div id="content" style="display: none">
++
++</div>
++<pre id="test">
++</pre>
++
++<script class="testbody" type="text/javascript">
++
++  add_task(function* testPermission() {
++    yield setupPrefs(false /* backgroundSyncEnabled */);
++    var url = "worker.js" + "?" + (Math.random());
++    var registration = yield navigator.serviceWorker.register(url, {scope: "."});
++    is(registration.sync, undefined, "Background Sync API is undefined");
++    yield unregisterWorker(".");
++  });
++
++</script>
++</body>
++</html>
+diff --git a/dom/sync/tests/test_sync_registry.js b/dom/sync/tests/test_sync_registry.js
+new file mode 100644
+--- /dev/null
++++ b/dom/sync/tests/test_sync_registry.js
+@@ -0,0 +1,224 @@
++/* Any copyright is dedicated to the Public Domain.
++ * http://creativecommons.org/publicdomain/zero/1.0/ */
++
++"use strict";
++
++let {classes: Cc, interfaces: Ci, utils: Cu} = Components;
++
++Cu.import("resource://gre/modules/XPCOMUtils.jsm");
++
++const registry = Cc["@mozilla.org/dom/sync/registry;1"]
++                  .createInstance(Ci.nsISyncRegistry);
++
++const registration1 = {
++  tag: "tag1",
++  scope: "scope1",
++  originSuffix: "originSuffix1"
++};
++
++add_test(function() {
++  do_print("= Sync Registry Tests =");
++
++  do_get_profile();
++
++  do_test_pending();
++
++  ok(registry);
++
++  const listener = {
++    QueryInterface: XPCOMUtils.generateQI([Ci.nsISyncRegistryListener]),
++    notifyAddSuccess() {
++      ok(false, "Unexpected notifyAddSuccess");
++    },
++    notifyGetAllSuccess(aRegistrations) {
++      ok(true, "Expected notifyGetAllSuccess");
++      equal(aRegistrations.length, 0, "No registrations");
++      do_test_finished();
++      run_next_test();
++    },
++    notifyChangeStateSuccess() {
++      ok(false, "Unexpected notifyChangeStateSuccess");
++    },
++    notifyRemoveSuccess() {
++      ok(false, "Unexpected notifyRemoveSuccess");
++    },
++    notifyError() {
++      ok(false, "Unexpected notifyError");
++    }
++  };
++
++  do_print("= Should have no registrations =");
++
++  registry.getAll(listener);
++});
++
++add_test(function() {
++  do_print("= Should add a new registration =");
++
++  do_test_pending();
++
++  const listener = {
++    QueryInterface: XPCOMUtils.generateQI([Ci.nsISyncRegistryListener]),
++    notifyAddSuccess() {
++      ok(true, "Expected notifyAddSuccess");
++      do_test_finished();
++      run_next_test();
++    },
++    notifyGetAllSuccess(aRegistrations) {
++      ok(false, "Unexpected notifyGetAllSuccess");
++    },
++    notifyChangeStateSuccess() {
++      ok(false, "Unexpected notifyChangeStateSuccess");
++    },
++    notifyRemoveSuccess() {
++      ok(false, "Unexpected notifyRemoveSuccess");
++    },
++    notifyError() {
++      ok(false, "Unexpected notifyError");
++    }
++  };
++
++  registry.add(registration1, listener);
++});
++
++add_test(function() {
++  do_print("= Should error adding a invalid registration =");
++
++  do_test_pending();
++
++  const listener = {
++    QueryInterface: XPCOMUtils.generateQI([Ci.nsISyncRegistryListener]),
++    notifyAddSuccess() {
++      ok(false, "Unexpected notifyAddSuccess");
++    },
++    notifyGetAllSuccess(aRegistrations) {
++      ok(false, "Unexpected notifyGetAllSuccess");
++    },
++    notifyChangeStateSuccess() {
++      ok(false, "Unexpected notifyChangeStateSuccess");
++    },
++    notifyRemoveSuccess() {
++      ok(false, "Unexpected notifyRemoveSuccess");
++    },
++    notifyError() {
++      ok(true, "Expected notifyError");
++      do_test_finished();
++      run_next_test();
++    }
++  };
++
++  registry.add({ tag: null }, listener);
++});
++
++add_test(function() {
++  do_print("= Should error adding same registration twice =");
++
++  do_test_pending();
++
++  const listener = {
++    QueryInterface: XPCOMUtils.generateQI([Ci.nsISyncRegistryListener]),
++    notifyAddSuccess() {
++      ok(false, "Unexpected notifyAddSuccess");
++    },
++    notifyGetAllSuccess(aRegistrations) {
++      ok(false, "Unexpected notifyGetAllSuccess");
++    },
++    notifyChangeStateSuccess() {
++      ok(false, "Unexpected notifyChangeStateSuccess");
++    },
++    notifyRemoveSuccess() {
++      ok(false, "Unexpected notifyRemoveSuccess");
++    },
++    notifyError() {
++      ok(true, "Expected notifyError");
++      do_test_finished();
++      run_next_test();
++    }
++  };
++
++  registry.add(registration1, listener);
++});
++
++add_test(function() {
++  do_print("= Should have one registration =");
++
++  do_test_pending();
++
++  let expectedGetAllSuccess = true;
++  let expectedChangeStateSuccess = false;
++  let expectedRemoveSuccess = false;
++
++  const listener = {
++    QueryInterface: XPCOMUtils.generateQI([Ci.nsISyncRegistryListener]),
++    notifyAddSuccess() {
++      ok(false, "Unexpected notifyAddSuccess");
++    },
++    notifyGetAllSuccess(aRegistrations) {
++      ok(expectedGetAllSuccess, "Got notifyGetAllSuccess");
++      equal(aRegistrations.length, 1, "Should have one registration");
++      let registration = aRegistrations.queryElementAt(0, Ci.nsISyncRegistration);
++      equal(registration.tag, registration1.tag);
++      equal(registration.scope, registration1.scope);
++      equal(registration.state, Ci.nsISyncRegistry.STATE_PENDING);
++      equal(registration.lastChance, true);
++      notEqual(registration.id, undefined);
++
++      do_print("= Should be able to change the state of a registration =");
++
++      expectedChangeStateSuccess = true;
++      expectedGetAllSuccess = false;
++
++      registry.changeState(registration.id, Ci.nsISyncRegistry.STATE_FIRING, this);
++    },
++    notifyChangeStateSuccess(aRegistration) {
++      ok(expectedChangeStateSuccess, "Got notifyChangeStateSuccess");
++
++      expectedRemoveSuccess = true;
++      expectedChangeStateSuccess = false;
++
++      do_print("= Should be able to remove registration =");
++
++      registry.remove(aRegistration.id, this);
++    },
++    notifyRemoveSuccess() {
++      ok(expectedRemoveSuccess, "Got notifyRemoveSuccess");
++      do_test_finished();
++      run_next_test();
++    },
++    notifyError() {
++      ok(false, "Unexpected notifyError");
++    }
++  };
++
++  registry.getAll(listener);
++});
++
++add_test(function() {
++  do_print("= Should have no registrations =");
++
++  do_test_pending();
++
++  const listener = {
++    QueryInterface: XPCOMUtils.generateQI([Ci.nsISyncRegistryListener]),
++    notifyAddSuccess() {
++      ok(false, "Unexpected notifyAddSuccess");
++    },
++    notifyGetAllSuccess(aRegistrations) {
++      ok(true, "Expected notifyGetAllSuccess");
++      equal(aRegistrations.length, 0, "No registrations");
++      do_test_finished();
++      run_next_test();
++    },
++    notifyChangeStateSuccess() {
++      ok(false, "Unexpected notifyChangeStateSuccess");
++    },
++    notifyRemoveSuccess() {
++      ok(false, "Unexpected notifyRemoveSuccess");
++    },
++    notifyError() {
++      ok(false, "Unexpected notifyError");
++    }
++  };
++
++  registry.getAll(listener);
++});
+diff --git a/dom/sync/tests/test_utils.js b/dom/sync/tests/test_utils.js
+new file mode 100644
+--- /dev/null
++++ b/dom/sync/tests/test_utils.js
+@@ -0,0 +1,41 @@
++function debug(str) {
++  console.log(str + "\n");
++}
++
++// Remove permissions and prefs when the test finishes.
++SimpleTest.registerCleanupFunction(() =>
++  new Promise(resolve => {
++    SpecialPowers.flushPermissions(_ => {
++      SpecialPowers.flushPrefEnv(resolve);
++    });
++  })
++);
++
++function setupPrefs(backgroundSyncEnabled) {
++  return new Promise(resolve => {
++    SpecialPowers.pushPrefEnv({"set": [
++      ["dom.backgroundSync.enabled", backgroundSyncEnabled],
++      ["dom.serviceWorkers.exemptFromPerDomainMax", true],
++      ["dom.serviceWorkers.enabled", true],
++      ["dom.serviceWorkers.testing.enabled", true]
++      ]}, resolve);
++  });
++}
++
++function sendRequestToWorker(request) {
++  return navigator.serviceWorker.ready.then(registration => {
++    return new Promise((resolve, reject) => {
++      var channel = new MessageChannel();
++      channel.port1.onmessage = e => {
++        (e.data.error ? reject : resolve)(e.data);
++      };
++      registration.active.postMessage(request, [channel.port2]);
++    });
++  });
++}
++
++function unregisterWorker(scope) {
++  return navigator.serviceWorker.getRegistration(scope).then(registration => {
++    return registration.unregister();
++  });
++}
+diff --git a/dom/sync/tests/worker.js b/dom/sync/tests/worker.js
+new file mode 100644
+--- /dev/null
++++ b/dom/sync/tests/worker.js
+@@ -0,0 +1,61 @@
++// Any copyright is dedicated to the Public Domain.
++// http://creativecommons.org/licenses/publicdomain/
++
++function assert(value, message) {
++  if (!value) {
++    throw new Error(message);
++  }
++}
++
++var waitForEventsPort;
++var expectedEvents;
++var receivedEvents = [];
++
++function checkExpectedEventsReceived() {
++  assert(waitForEventsPort);
++  assert(expectedEvents);
++
++  if (expectedEvents.toString() == receivedEvents.toString()) {
++    waitForEventsPort.postMessage({});
++  }
++}
++
++function reply(event, promise) {
++  event.waitUntil(Promise.resolve(promise).then(result => {
++    event.ports[0].postMessage(result);
++  }).catch(error => {
++    event.ports[0].postMessage({
++      error: String(error),
++    });
++  }));
++}
++
++self.addEventListener("message", function(event) {
++  switch (event.data.type) {
++    case "subscribe":
++      reply(event, self.registration.sync.register("workerTag").then(
++        () => {
++          return self.registration.sync.getTags();
++        }
++      ).then(tags => {
++        return {
++          tags: tags
++        };
++      }));
++      break;
++    case "waitForEvents":
++      waitForEventsPort = event.ports[0];
++      expectedEvents = event.data.expectedEvents;
++      checkExpectedEventsReceived();
++      break;
++    default:
++      reply(event, Promise.reject("Invalid message type: " + event.data.type));
++      break;
++  }
++});
++
++self.addEventListener("sync", function(event) {
++  console.log("Got sync event", event.tag);
++  receivedEvents.push(event.tag);
++  checkExpectedEventsReceived();
++});
+diff --git a/dom/sync/tests/xpcshell.ini b/dom/sync/tests/xpcshell.ini
+new file mode 100644
+--- /dev/null
++++ b/dom/sync/tests/xpcshell.ini
+@@ -0,0 +1,5 @@
++[DEFAULT]
++head =
++tail =
++
++[test_sync_registry.js]
+diff --git a/dom/tests/mochitest/general/test_interfaces.html b/dom/tests/mochitest/general/test_interfaces.html
+--- a/dom/tests/mochitest/general/test_interfaces.html
++++ b/dom/tests/mochitest/general/test_interfaces.html
+@@ -1294,16 +1294,18 @@ var interfaceNamesInGlobalScope =
+     "SVGUseElement",
+ // IMPORTANT: Do not change this list without review from a DOM peer!
+     "SVGViewElement",
+ // IMPORTANT: Do not change this list without review from a DOM peer!
+     "SVGZoomAndPan",
+ // IMPORTANT: Do not change this list without review from a DOM peer!
+     "SVGZoomEvent",
+ // IMPORTANT: Do not change this list without review from a DOM peer!
++    {name: "SyncManager", b2g: true},
++// IMPORTANT: Do not change this list without review from a DOM peer!
+     {name: "Telephony", b2g: true},
+ // IMPORTANT: Do not change this list without review from a DOM peer!
+     {name: "TelephonyCall", b2g: true},
+ // IMPORTANT: Do not change this list without review from a DOM peer!
+     {name: "TelephonyCallGroup", b2g: true},
+ // IMPORTANT: Do not change this list without review from a DOM peer!
+     {name: "TelephonyCallId", b2g: true},
+ // IMPORTANT: Do not change this list without review from a DOM peer!
+diff --git a/dom/webidl/ServiceWorkerRegistration.webidl b/dom/webidl/ServiceWorkerRegistration.webidl
+--- a/dom/webidl/ServiceWorkerRegistration.webidl
++++ b/dom/webidl/ServiceWorkerRegistration.webidl
+@@ -27,9 +27,11 @@ interface ServiceWorkerRegistration : Ev
+   attribute EventHandler onupdatefound;
+ };
+ 
+ partial interface ServiceWorkerRegistration {
+ #ifndef MOZ_SIMPLEPUSH
+   [Throws, Exposed=(Window,Worker), Func="nsContentUtils::PushEnabled"]
+   readonly attribute PushManager pushManager;
+ #endif
++  [Throws, Exposed=(Window,Worker), Func="SyncManager::PrefEnabled"]
++  readonly attribute SyncManager sync;
+ };
+diff --git a/dom/webidl/SyncEvent.webidl b/dom/webidl/SyncEvent.webidl
+new file mode 100644
+--- /dev/null
++++ b/dom/webidl/SyncEvent.webidl
+@@ -0,0 +1,20 @@
++/* -*- Mode: IDL; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
++ * You can obtain one at http://mozilla.org/MPL/2.0/.
++ *
++ * The origin of this IDL file is
++ * https://wicg.github.io/BackgroundSync/spec/
++ */
++
++[Constructor(DOMString type, optional SyncEventInit eventInitDict),
++ Exposed=ServiceWorker]
++interface SyncEvent : ExtendableEvent {
++  readonly attribute DOMString tag;
++  readonly attribute boolean lastChance;
++};
++
++dictionary SyncEventInit : ExtendableEventInit {
++  required DOMString tag;
++  boolean lastChance = false;
++};
+diff --git a/dom/webidl/SyncManager.webidl b/dom/webidl/SyncManager.webidl
+new file mode 100644
+--- /dev/null
++++ b/dom/webidl/SyncManager.webidl
+@@ -0,0 +1,17 @@
++/* -*- Mode: IDL; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++* License, v. 2.0. If a copy of the MPL was not distributed with this file,
++* You can obtain one at http://mozilla.org/MPL/2.0/.
++*
++* The origin of this IDL file is
++* https://wicg.github.io/BackgroundSync/spec/
++*/
++
++[Exposed=(Window,Worker),
++ Func="mozilla::dom::SyncManager::PrefEnabled"]
++interface SyncManager {
++  [Throws]
++  Promise<void> register(DOMString tag);
++  [Throws]
++  Promise<sequence<DOMString>> getTags();
++};
+diff --git a/dom/webidl/moz.build b/dom/webidl/moz.build
+--- a/dom/webidl/moz.build
++++ b/dom/webidl/moz.build
+@@ -528,16 +528,18 @@ WEBIDL_FILES = [
+     'SVGTransformList.webidl',
+     'SVGTSpanElement.webidl',
+     'SVGUnitTypes.webidl',
+     'SVGURIReference.webidl',
+     'SVGUseElement.webidl',
+     'SVGViewElement.webidl',
+     'SVGZoomAndPan.webidl',
+     'SVGZoomEvent.webidl',
++    'SyncEvent.webidl',
++    'SyncManager.webidl',
+     'SystemUpdate.webidl',
+     'TCPServerSocket.webidl',
+     'TCPServerSocketEvent.webidl',
+     'TCPSocket.webidl',
+     'TCPSocketErrorEvent.webidl',
+     'TCPSocketEvent.webidl',
+     'Telephony.webidl',
+     'TelephonyCall.webidl',
+diff --git a/dom/workers/PServiceWorkerManager.ipdl b/dom/workers/PServiceWorkerManager.ipdl
+--- a/dom/workers/PServiceWorkerManager.ipdl
++++ b/dom/workers/PServiceWorkerManager.ipdl
+@@ -28,18 +28,22 @@ parent:
+   async PropagateRemove(nsCString host);
+ 
+   async PropagateRemoveAll();
+ 
+   async Shutdown();
+ 
+ child:
+   async NotifyRegister(ServiceWorkerRegistrationData data);
+-  async NotifySoftUpdate(PrincipalOriginAttributes originAttributes, nsString scope);
++  async NotifySoftUpdate(PrincipalOriginAttributes originAttributes,
++                         nsString scope);
+   async NotifyUnregister(PrincipalInfo principalInfo, nsString scope);
+   async NotifyRemove(nsCString host);
+   async NotifyRemoveAll();
+-
++  async NotifySyncEvent(nsString originSuffix,
++                        nsString scope,
++                        nsString tag,
++                        bool lastChance);
+   async __delete__();
+ };
+ 
+ } // namespace dom
+ } // namespace mozilla
+diff --git a/dom/workers/ServiceWorkerEvents.cpp b/dom/workers/ServiceWorkerEvents.cpp
+--- a/dom/workers/ServiceWorkerEvents.cpp
++++ b/dom/workers/ServiceWorkerEvents.cpp
+@@ -1008,17 +1008,17 @@ ExtractBytesFromData(const OwningArrayBu
+     return NS_OK;
+   }
+   if (aDataInit.IsUSVString()) {
+     return ExtractBytesFromUSVString(aDataInit.GetAsUSVString(), aBytes);
+   }
+   NS_NOTREACHED("Unexpected push message data");
+   return NS_ERROR_FAILURE;
+ }
+-}
++} // namespace
+ 
+ PushMessageData::PushMessageData(nsISupports* aOwner,
+                                  nsTArray<uint8_t>&& aBytes)
+   : mOwner(aOwner), mBytes(Move(aBytes)) {}
+ 
+ PushMessageData::~PushMessageData()
+ {
+ }
+@@ -1151,16 +1151,40 @@ NS_IMPL_CYCLE_COLLECTION_INHERITED(PushE
+ JSObject*
+ PushEvent::WrapObjectInternal(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
+ {
+   return mozilla::dom::PushEventBinding::Wrap(aCx, this, aGivenProto);
+ }
+ 
+ #endif /* ! MOZ_SIMPLEPUSH */
+ 
++// Background Sync
++
++SyncEvent::SyncEvent(EventTarget* aOwner)
++  : ExtendableEvent(aOwner)
++{
++}
++
++already_AddRefed<SyncEvent>
++SyncEvent::Constructor(EventTarget* aOwner,
++                       const nsAString& aType,
++                       const SyncEventInit& aOptions,
++                       ErrorResult& aRv)
++{
++  RefPtr<SyncEvent> e = new SyncEvent(aOwner);
++  bool trusted = e->Init(aOwner);
++  e->InitEvent(aType, aOptions.mBubbles, aOptions.mCancelable);
++  e->SetTrusted(trusted);
++  e->mTag = aOptions.mTag;
++  e->mLastChance = aOptions.mLastChance;
++  return e.forget();
++}
++
++NS_IMPL_ISUPPORTS_INHERITED0(SyncEvent, ExtendableEvent)
++
+ ExtendableMessageEvent::ExtendableMessageEvent(EventTarget* aOwner)
+   : ExtendableEvent(aOwner)
+   , mData(JS::UndefinedValue())
+ {
+   mozilla::HoldJSObjects(this);
+ }
+ 
+ ExtendableMessageEvent::~ExtendableMessageEvent()
+diff --git a/dom/workers/ServiceWorkerEvents.h b/dom/workers/ServiceWorkerEvents.h
+--- a/dom/workers/ServiceWorkerEvents.h
++++ b/dom/workers/ServiceWorkerEvents.h
+@@ -14,16 +14,18 @@
+ #include "mozilla/dom/Promise.h"
+ #include "mozilla/dom/Response.h"
+ #include "mozilla/dom/workers/bindings/ServiceWorker.h"
+ 
+ #ifndef MOZ_SIMPLEPUSH
+ #include "mozilla/dom/File.h"
+ #endif
+ 
++#include "mozilla/dom/SyncEventBinding.h"
++
+ #include "nsProxyRelease.h"
+ #include "nsContentUtils.h"
+ 
+ class nsIInterceptedChannel;
+ 
+ namespace mozilla {
+ namespace dom {
+ class Blob;
+@@ -317,11 +319,59 @@ public:
+ 
+   void SetPorts(MessagePortList* aPorts);
+ 
+   void SetSource(ServiceWorkerClient* aClient);
+ 
+   void SetSource(ServiceWorker* aServiceWorker);
+ };
+ 
++class SyncEvent final : public ExtendableEvent
++{
++  nsString mTag;
++  bool mLastChance;
++
++protected:
++  explicit SyncEvent(EventTarget* aOwner);
++  ~SyncEvent() {}
++
++public:
++  NS_DECL_ISUPPORTS_INHERITED
++  NS_FORWARD_TO_EVENT
++
++  virtual JSObject* WrapObjectInternal(JSContext* aCx,
++                                       JS::Handle<JSObject*> aGivenProto) override
++  {
++    return mozilla::dom::SyncEventBinding_workers::Wrap(aCx, this, aGivenProto);
++  }
++
++  static already_AddRefed<SyncEvent>
++  Constructor(EventTarget* aOwner,
++              const nsAString& aType,
++              const SyncEventInit& aOptions,
++              ErrorResult& aRv);
++
++  static already_AddRefed<SyncEvent>
++  Constructor(const GlobalObject& aGlobal,
++              const nsAString& aType,
++              const SyncEventInit& aOptions,
++              ErrorResult& aRv)
++  {
++    nsCOMPtr<EventTarget> owner = do_QueryInterface(aGlobal.GetAsSupports());
++    return Constructor(owner, aType, aOptions, aRv);
++  }
++
++  void
++  GetTag(nsAString& aTag)
++  {
++    aTag = mTag;
++  }
++
++  bool
++  LastChance()
++  {
++    return mLastChance;
++  }
++};
++
+ END_WORKERS_NAMESPACE
+ 
+ #endif /* mozilla_dom_workers_serviceworkerevents_h__ */
+diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
+--- a/dom/workers/ServiceWorkerManager.cpp
++++ b/dom/workers/ServiceWorkerManager.cpp
+@@ -985,16 +985,40 @@ ServiceWorkerManager::SendNotificationCl
+   ServiceWorkerPrivate* workerPrivate = info->WorkerPrivate();
+   return workerPrivate->SendNotificationClickEvent(aID, aTitle, aDir,
+                                                    aLang, aBody, aTag,
+                                                    aIcon, aData, aBehavior,
+                                                    NS_ConvertUTF8toUTF16(aScope));
+ }
+ 
+ NS_IMETHODIMP
++ServiceWorkerManager::SendSyncEvent(const nsACString& aOriginAttributes,
++                                    const nsACString& aScope,
++                                    const nsAString& aTag,
++                                    const bool aLastChance)
++{
++  PrincipalOriginAttributes attrs;
++  if (!attrs.PopulateFromSuffix(aOriginAttributes)) {
++    return NS_ERROR_INVALID_ARG;
++  }
++
++  ServiceWorkerInfo* serviceWorker =
++    GetActiveWorkerInfoForScope(attrs, aScope);
++  if (NS_WARN_IF(!serviceWorker)) {
++    return NS_ERROR_FAILURE;
++  }
++
++  RefPtr<ServiceWorkerRegistrationInfo> registration =
++    GetRegistration(serviceWorker->GetPrincipal(), aScope);
++
++  return serviceWorker->WorkerPrivate()->SendSyncEvent(aTag, aLastChance,
++                                                       registration);
++}
++
++NS_IMETHODIMP
+ ServiceWorkerManager::GetReadyPromise(mozIDOMWindow* aWindow,
+                                       nsISupports** aPromise)
+ {
+   AssertIsOnMainThread();
+ 
+   if (NS_WARN_IF(!aWindow)) {
+     return NS_ERROR_DOM_INVALID_STATE_ERR;
+   }
+diff --git a/dom/workers/ServiceWorkerManagerChild.cpp b/dom/workers/ServiceWorkerManagerChild.cpp
+--- a/dom/workers/ServiceWorkerManagerChild.cpp
++++ b/dom/workers/ServiceWorkerManagerChild.cpp
+@@ -90,11 +90,30 @@ ServiceWorkerManagerChild::RecvNotifyRem
+ 
+   RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
+   MOZ_ASSERT(swm);
+ 
+   swm->RemoveAll();
+   return true;
+ }
+ 
++bool
++ServiceWorkerManagerChild::RecvNotifySyncEvent(const nsString& aOriginSuffix,
++                                               const nsString& aScope,
++                                               const nsString& aTag,
++                                               const bool& aLastChance)
++{
++  if (mShuttingDown) {
++    return true;
++  }
++
++  RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
++  MOZ_ASSERT(swm);
++
++  swm->SendSyncEvent(NS_ConvertUTF16toUTF8(aOriginSuffix),
++                     NS_ConvertUTF16toUTF8(aScope),
++                     aTag, aLastChance);
++  return true;
++}
++
+ } // namespace workers
+ } // namespace dom
+ } // namespace mozilla
+diff --git a/dom/workers/ServiceWorkerManagerChild.h b/dom/workers/ServiceWorkerManagerChild.h
+--- a/dom/workers/ServiceWorkerManagerChild.h
++++ b/dom/workers/ServiceWorkerManagerChild.h
+@@ -41,16 +41,21 @@ public:
+ 
+   virtual bool RecvNotifyUnregister(const PrincipalInfo& aPrincipalInfo,
+                                     const nsString& aScope) override;
+ 
+   virtual bool RecvNotifyRemove(const nsCString& aHost) override;
+ 
+   virtual bool RecvNotifyRemoveAll() override;
+ 
++  virtual bool RecvNotifySyncEvent(const nsString& aOriginSuffix,
++                                   const nsString& aScope,
++                                   const nsString& aTag,
++                                   const bool& aLastChance) override;
++
+ private:
+   ServiceWorkerManagerChild()
+     : mShuttingDown(false)
+   {}
+ 
+   ~ServiceWorkerManagerChild() {}
+ 
+   bool mShuttingDown;
+diff --git a/dom/workers/ServiceWorkerManagerParent.cpp b/dom/workers/ServiceWorkerManagerParent.cpp
+--- a/dom/workers/ServiceWorkerManagerParent.cpp
++++ b/dom/workers/ServiceWorkerManagerParent.cpp
+@@ -1,16 +1,17 @@
+ /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+ /* vim: set ts=8 sts=2 et sw=2 tw=80: */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "ServiceWorkerManagerParent.h"
+ #include "ServiceWorkerManagerService.h"
++#include "SyncService.h"
+ #include "mozilla/AppProcessChecker.h"
+ #include "mozilla/dom/ContentParent.h"
+ #include "mozilla/dom/ServiceWorkerRegistrar.h"
+ #include "mozilla/ipc/BackgroundParent.h"
+ #include "mozilla/ipc/BackgroundUtils.h"
+ #include "mozilla/unused.h"
+ #include "nsThreadUtils.h"
+ 
+@@ -148,22 +149,24 @@ private:
+   PrincipalInfo mPrincipalInfo;
+   RefPtr<Runnable> mCallback;
+   nsCOMPtr<nsIThread> mBackgroundThread;
+ };
+ 
+ } // namespace
+ 
+ ServiceWorkerManagerParent::ServiceWorkerManagerParent()
+-  : mService(ServiceWorkerManagerService::GetOrCreate())
++  : mServiceWorkerService(ServiceWorkerManagerService::GetOrCreate())
++  , mSyncService(SyncService::GetOrCreate())
+   , mID(++sServiceWorkerManagerParentID)
+   , mActorDestroyed(false)
+ {
+   AssertIsOnBackgroundThread();
+-  mService->RegisterActor(this);
++  mServiceWorkerService->RegisterActor(this);
++  mSyncService->RegisterActor(this);
+ }
+ 
+ ServiceWorkerManagerParent::~ServiceWorkerManagerParent()
+ {
+   AssertIsOnBackgroundThread();
+ }
+ 
+ already_AddRefed<ContentParent>
+@@ -246,89 +249,98 @@ ServiceWorkerManagerParent::RecvUnregist
+ }
+ 
+ bool
+ ServiceWorkerManagerParent::RecvPropagateSoftUpdate(const PrincipalOriginAttributes& aOriginAttributes,
+                                                     const nsString& aScope)
+ {
+   AssertIsOnBackgroundThread();
+ 
+-  if (NS_WARN_IF(!mService)) {
++  if (NS_WARN_IF(!mServiceWorkerService)) {
+     return false;
+   }
+ 
+-  mService->PropagateSoftUpdate(mID, aOriginAttributes, aScope);
++  mServiceWorkerService->PropagateSoftUpdate(mID, aOriginAttributes, aScope);
+   return true;
+ }
+ 
+ bool
+ ServiceWorkerManagerParent::RecvPropagateUnregister(const PrincipalInfo& aPrincipalInfo,
+                                                     const nsString& aScope)
+ {
+   AssertIsOnBackgroundThread();
+ 
+-  if (NS_WARN_IF(!mService)) {
++  if (NS_WARN_IF(!mServiceWorkerService)) {
+     return false;
+   }
+ 
+-  mService->PropagateUnregister(mID, aPrincipalInfo, aScope);
++  mServiceWorkerService->PropagateUnregister(mID, aPrincipalInfo, aScope);
+   return true;
+ }
+ 
+ bool
+ ServiceWorkerManagerParent::RecvPropagateRemove(const nsCString& aHost)
+ {
+   AssertIsOnBackgroundThread();
+ 
+-  if (NS_WARN_IF(!mService)) {
++  if (NS_WARN_IF(!mServiceWorkerService)) {
+     return false;
+   }
+ 
+-  mService->PropagateRemove(mID, aHost);
++  mServiceWorkerService->PropagateRemove(mID, aHost);
+   return true;
+ }
+ 
+ bool
+ ServiceWorkerManagerParent::RecvPropagateRemoveAll()
+ {
+   AssertIsOnBackgroundThread();
+ 
+-  if (NS_WARN_IF(!mService)) {
++  if (NS_WARN_IF(!mServiceWorkerService)) {
+     return false;
+   }
+ 
+-  mService->PropagateRemoveAll(mID);
++  mServiceWorkerService->PropagateRemoveAll(mID);
+   return true;
+ }
+ 
+ bool
+ ServiceWorkerManagerParent::RecvShutdown()
+ {
+   AssertIsOnBackgroundThread();
+ 
+-  if (NS_WARN_IF(!mService)) {
++  if (NS_WARN_IF(!mServiceWorkerService)) {
+     return false;
+   }
+ 
+-  mService->UnregisterActor(this);
+-  mService = nullptr;
++  mServiceWorkerService->UnregisterActor(this);
++  mServiceWorkerService = nullptr;
++
++  if (mSyncService) {
++    mSyncService->UnregisterActor(this);
++    mSyncService = nullptr;
++  }
+ 
+   Unused << Send__delete__(this);
+   return true;
+ }
+ 
+ void
+ ServiceWorkerManagerParent::ActorDestroy(ActorDestroyReason aWhy)
+ {
+   AssertIsOnBackgroundThread();
+ 
+   mActorDestroyed = true;
+ 
+-  if (mService) {
+-    // This object is about to be released and with it, also mService will be
++  if (mServiceWorkerService) {
++    // This object is about to be released and with it, also mServiceWorkerService will be
+     // released too.
+-    mService->UnregisterActor(this);
++    mServiceWorkerService->UnregisterActor(this);
++  }
++
++  if (mSyncService) {
++    mSyncService->UnregisterActor(this);
+   }
+ }
+ 
+ } // namespace workers
+ } // namespace dom
+ } // namespace mozilla
+diff --git a/dom/workers/ServiceWorkerManagerParent.h b/dom/workers/ServiceWorkerManagerParent.h
+--- a/dom/workers/ServiceWorkerManagerParent.h
++++ b/dom/workers/ServiceWorkerManagerParent.h
+@@ -13,16 +13,19 @@ namespace mozilla {
+ 
+ class PrincipalOriginAttributes;
+ 
+ namespace ipc {
+ class BackgroundParentImpl;
+ } // namespace ipc
+ 
+ namespace dom {
++
++class SyncService;
++
+ namespace workers {
+ 
+ class ServiceWorkerManagerService;
+ 
+ class ServiceWorkerManagerParent final : public PServiceWorkerManagerParent
+ {
+   friend class mozilla::ipc::BackgroundParentImpl;
+ 
+@@ -59,17 +62,18 @@ private:
+   virtual bool RecvPropagateRemove(const nsCString& aHost) override;
+ 
+   virtual bool RecvPropagateRemoveAll() override;
+ 
+   virtual bool RecvShutdown() override;
+ 
+   virtual void ActorDestroy(ActorDestroyReason aWhy) override;
+ 
+-  RefPtr<ServiceWorkerManagerService> mService;
++  RefPtr<ServiceWorkerManagerService> mServiceWorkerService;
++  RefPtr<SyncService> mSyncService;
+ 
+   // We use this ID in the Service in order to avoid the sending of messages to
+   // ourself.
+   uint64_t mID;
+ 
+   bool mActorDestroyed;
+ };
+ 
+diff --git a/dom/workers/ServiceWorkerPrivate.cpp b/dom/workers/ServiceWorkerPrivate.cpp
+--- a/dom/workers/ServiceWorkerPrivate.cpp
++++ b/dom/workers/ServiceWorkerPrivate.cpp
+@@ -79,17 +79,17 @@ private:
+ 
+   RefPtr<ServiceWorkerPrivate> mPrivate;
+ };
+ 
+ NS_IMPL_ISUPPORTS0(KeepAliveToken)
+ 
+ ServiceWorkerPrivate::ServiceWorkerPrivate(ServiceWorkerInfo* aInfo)
+   : mInfo(aInfo)
+-  , mIsPushWorker(false)
++  , mIsPushOrSyncWorker(false)
+   , mDebuggerCount(0)
+   , mTokenCount(0)
+ {
+   AssertIsOnMainThread();
+   MOZ_ASSERT(aInfo);
+ 
+   mIdleWorkerTimer = do_CreateInstance(NS_TIMER_CONTRACTID);
+   MOZ_ASSERT(mIdleWorkerTimer);
+@@ -1496,16 +1496,101 @@ ServiceWorkerPrivate::SendFetchEvent(nsI
+ 
+   if (NS_WARN_IF(!r->Dispatch())) {
+     return NS_ERROR_FAILURE;
+   }
+ 
+   return NS_OK;
+ }
+ 
++namespace {
++class SendSyncEventRunnable final : public ExtendableFunctionalEventWorkerRunnable
++{
++  nsString mTag;
++  bool mLastChance;
++
++public:
++  SendSyncEventRunnable(WorkerPrivate* aWorkerPrivate,
++                        KeepAliveToken* aKeepAliveToken,
++                        const nsAString& aTag,
++                        const bool aLastChance,
++                        nsMainThreadPtrHandle<ServiceWorkerRegistrationInfo> aRegistration)
++    : ExtendableFunctionalEventWorkerRunnable(
++        aWorkerPrivate, aKeepAliveToken, aRegistration)
++    , mTag(aTag)
++    , mLastChance(aLastChance)
++  {
++    AssertIsOnMainThread();
++    MOZ_ASSERT(aWorkerPrivate);
++    MOZ_ASSERT(aWorkerPrivate->IsServiceWorker());
++  }
++
++  bool
++  WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate) override
++  {
++    MOZ_ASSERT(aWorkerPrivate);
++    GlobalObject globalObj(aCx, aWorkerPrivate->GlobalScope()->GetWrapper());
++
++    SyncEventInit sei;
++    sei.mTag = mTag;
++    sei.mLastChance = mLastChance;
++    sei.mBubbles = false;
++    sei.mCancelable = false;
++
++    ErrorResult result;
++    RefPtr<SyncEvent> event =
++      SyncEvent::Constructor(globalObj, NS_LITERAL_STRING("sync"), sei, result);
++    if (NS_WARN_IF(result.Failed())) {
++      result.SuppressException();
++      return false;
++    }
++    event->SetTrusted(true);
++
++    DispatchExtendableEventOnWorkerScope(aCx, aWorkerPrivate->GlobalScope(),
++                                         event, nullptr);
++
++    return true;
++  }
++};
++} // anonymous namespace
++
++nsresult
++ServiceWorkerPrivate::SendSyncEvent(const nsAString& aTag,
++                                    const bool aLastChance,
++                                    ServiceWorkerRegistrationInfo* aRegistration)
++{
++  nsresult rv = SpawnWorkerIfNeeded(SyncEvent, nullptr);
++  NS_ENSURE_SUCCESS(rv, rv);
++
++  MOZ_ASSERT(mKeepAliveToken);
++
++  nsMainThreadPtrHandle<ServiceWorkerRegistrationInfo> regInfo(
++      new nsMainThreadPtrHolder<ServiceWorkerRegistrationInfo>(aRegistration, false));
++
++
++  RefPtr<WorkerRunnable> runnable = new SendSyncEventRunnable(mWorkerPrivate,
++                                                              mKeepAliveToken,
++                                                              aTag,
++                                                              aLastChance,
++                                                              regInfo);
++
++  if (mInfo->State() == ServiceWorkerState::Activating) {
++    mPendingFunctionalEvents.AppendElement(runnable.forget());
++    return NS_OK;
++  }
++
++  MOZ_ASSERT(mInfo->State() == ServiceWorkerState::Activated);
++
++  if (NS_WARN_IF(!runnable->Dispatch())) {
++    return NS_ERROR_FAILURE;
++  }
++
++  return NS_OK;
++}
++
+ nsresult
+ ServiceWorkerPrivate::SpawnWorkerIfNeeded(WakeUpReason aWhy,
+                                           nsIRunnable* aLoadFailedRunnable,
+                                           nsILoadGroup* aLoadGroup)
+ {
+   AssertIsOnMainThread();
+ 
+   // XXXcatalinb: We need to have a separate load group that's linked to
+@@ -1590,17 +1675,17 @@ ServiceWorkerPrivate::SpawnWorkerIfNeede
+   mWorkerPrivate = WorkerPrivate::Constructor(jsapi.cx(),
+                                               scriptSpec,
+                                               false, WorkerTypeService,
+                                               mInfo->Scope(), &info, error);
+   if (NS_WARN_IF(error.Failed())) {
+     return error.StealNSResult();
+   }
+ 
+-  mIsPushWorker = false;
++  mIsPushOrSyncWorker = false;
+   RenewKeepAliveToken(aWhy);
+ 
+   return NS_OK;
+ }
+ 
+ void
+ ServiceWorkerPrivate::StoreISupports(nsISupports* aSupports)
+ {
+@@ -1655,17 +1740,17 @@ ServiceWorkerPrivate::NoteDeadServiceWor
+   mInfo = nullptr;
+   TerminateWorker();
+ }
+ 
+ void
+ ServiceWorkerPrivate::NoteStoppedControllingDocuments()
+ {
+   AssertIsOnMainThread();
+-  if (mIsPushWorker || mDebuggerCount) {
++  if (mIsPushOrSyncWorker || mDebuggerCount) {
+     return;
+   }
+ 
+   TerminateWorker();
+ }
+ 
+ void
+ ServiceWorkerPrivate::Activated()
+@@ -1793,18 +1878,19 @@ ServiceWorkerPrivate::TerminateWorkerCal
+ }
+ 
+ void
+ ServiceWorkerPrivate::RenewKeepAliveToken(WakeUpReason aWhy)
+ {
+   // We should have an active worker if we're renewing the keep alive token.
+   MOZ_ASSERT(mWorkerPrivate);
+ 
+-  if (aWhy == PushEvent || aWhy == PushSubscriptionChangeEvent) {
+-    mIsPushWorker = true;
++  if (aWhy == PushEvent || aWhy == PushSubscriptionChangeEvent ||
++      aWhy == SyncEvent) {
++    mIsPushOrSyncWorker = true;
+   }
+ 
+   // If there is at least one debugger attached to the worker, the idle worker
+   // timeout was canceled when the first debugger attached to the worker. It
+   // should not be reset until the last debugger detaches from the worker.
+   if (!mDebuggerCount) {
+     ResetIdleTimeout();
+   }
+diff --git a/dom/workers/ServiceWorkerPrivate.h b/dom/workers/ServiceWorkerPrivate.h
+--- a/dom/workers/ServiceWorkerPrivate.h
++++ b/dom/workers/ServiceWorkerPrivate.h
+@@ -105,16 +105,21 @@ public:
+                              const nsAString& aScope);
+ 
+   nsresult
+   SendFetchEvent(nsIInterceptedChannel* aChannel,
+                  nsILoadGroup* aLoadGroup,
+                  const nsAString& aDocumentId,
+                  bool aIsReload);
+ 
++  nsresult
++  SendSyncEvent(const nsAString& aTag,
++                const bool aLastChance,
++                ServiceWorkerRegistrationInfo* aRegistration);
++
+   void
+   StoreISupports(nsISupports* aSupports);
+ 
+   void
+   RemoveISupports(nsISupports* aSupports);
+ 
+   // This will terminate the current running worker thread and drop the
+   // workerPrivate reference.
+@@ -145,17 +150,18 @@ public:
+ private:
+   enum WakeUpReason {
+     FetchEvent = 0,
+     PushEvent,
+     PushSubscriptionChangeEvent,
+     MessageEvent,
+     NotificationClickEvent,
+     LifeCycleEvent,
+-    AttachEvent
++    AttachEvent,
++    SyncEvent
+   };
+ 
+   // Timer callbacks
+   static void
+   NoteIdleWorkerCallback(nsITimer* aTimer, void* aPrivate);
+ 
+   static void
+   TerminateWorkerCallback(nsITimer* aTimer, void *aPrivate);
+@@ -188,20 +194,20 @@ private:
+ 
+   // The WorkerPrivate object can only be closed by this class or by the
+   // RuntimeService class if gecko is shutting down. Closing the worker
+   // multiple times is OK, since the second attempt will be a no-op.
+   RefPtr<WorkerPrivate> mWorkerPrivate;
+ 
+   nsCOMPtr<nsITimer> mIdleWorkerTimer;
+ 
+-  // We keep track if this worker received any push events since it was last
+-  // woken up. The flag is reset to false every time a new WorkerPrivate
+-  // is created.
+-  bool mIsPushWorker;
++  // We keep track if this worker received any push or sync events since it
++  // was last woken up. The flag is reset to false every time a new
++  // WorkerPrivate is created.
++  bool mIsPushOrSyncWorker;
+ 
+   // We keep a token for |dom.serviceWorkers.idle_timeout| seconds to give the
+   // worker a grace period after each event.
+   RefPtr<KeepAliveToken> mKeepAliveToken;
+ 
+   uint64_t mDebuggerCount;
+ 
+   uint64_t mTokenCount;
+diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWorkerRegistration.cpp
+--- a/dom/workers/ServiceWorkerRegistration.cpp
++++ b/dom/workers/ServiceWorkerRegistration.cpp
+@@ -28,16 +28,19 @@
+ #include "Workers.h"
+ #include "WorkerScope.h"
+ 
+ #ifndef MOZ_SIMPLEPUSH
+ #include "mozilla/dom/PushManagerBinding.h"
+ #include "mozilla/dom/PushManager.h"
+ #endif
+ 
++#include "mozilla/dom/SyncManagerBinding.h"
++#include "mozilla/dom/SyncManager.h"
++
+ using namespace mozilla::dom::workers;
+ 
+ namespace mozilla {
+ namespace dom {
+ 
+ bool
+ ServiceWorkerRegistrationVisible(JSContext* aCx, JSObject* aObj)
+ {
+@@ -87,20 +90,21 @@ ServiceWorkerRegistrationBase::ServiceWo
+ NS_IMPL_ADDREF_INHERITED(ServiceWorkerRegistrationMainThread, ServiceWorkerRegistrationBase)
+ NS_IMPL_RELEASE_INHERITED(ServiceWorkerRegistrationMainThread, ServiceWorkerRegistrationBase)
+ 
+ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(ServiceWorkerRegistrationMainThread)
+ NS_INTERFACE_MAP_END_INHERITING(ServiceWorkerRegistrationBase)
+ 
+ #ifndef MOZ_SIMPLEPUSH
+ NS_IMPL_CYCLE_COLLECTION_INHERITED(ServiceWorkerRegistrationMainThread, ServiceWorkerRegistrationBase,
+-                                   mPushManager,
++                                   mPushManager, mSyncManager,
+                                    mInstallingWorker, mWaitingWorker, mActiveWorker);
+ #else
+ NS_IMPL_CYCLE_COLLECTION_INHERITED(ServiceWorkerRegistrationMainThread, ServiceWorkerRegistrationBase,
++                                   mSyncManager,
+                                    mInstallingWorker, mWaitingWorker, mActiveWorker);
+ #endif
+ 
+ ServiceWorkerRegistrationMainThread::ServiceWorkerRegistrationMainThread(nsPIDOMWindowInner* aWindow,
+                                                                          const nsAString& aScope)
+   : ServiceWorkerRegistrationBase(aWindow, aScope)
+   , mListeningForEvents(false)
+ {
+@@ -777,16 +781,48 @@ ServiceWorkerRegistrationMainThread::Get
+   }
+ 
+   RefPtr<PushManager> ret = mPushManager;
+   return ret.forget();
+ 
+ #endif /* ! MOZ_SIMPLEPUSH */
+ }
+ 
++SyncManager*
++ServiceWorkerRegistrationMainThread::GetSync(ErrorResult& aRv)
++{
++  AssertIsOnMainThread();
++
++  if (!mSyncManager) {
++    nsCOMPtr<nsIGlobalObject> globalObject = do_QueryInterface(GetOwner());
++
++    if (!globalObject) {
++      aRv.Throw(NS_ERROR_FAILURE);
++      return nullptr;
++    }
++
++    nsCOMPtr<nsIDocument> document = GetOwner()->GetExtantDoc();
++    if (!document) {
++      aRv.Throw(NS_ERROR_FAILURE);
++      return nullptr;
++    }
++
++    nsCOMPtr<nsIPrincipal> principal = document->NodePrincipal();
++    if (!principal) {
++      aRv.Throw(NS_ERROR_FAILURE);
++      return nullptr;
++    }
++
++    mSyncManager = SyncManager::CreateOnMainThread(globalObject, principal,
++                                                   mScope, aRv);
++  }
++
++  return mSyncManager;
++}
++
+ ////////////////////////////////////////////////////
+ // Worker Thread implementation
+ class WorkerListener final : public ServiceWorkerRegistrationListener
+ {
+   // Accessed on the main thread.
+   WorkerPrivate* mWorkerPrivate;
+   nsString mScope;
+   bool mListeningForEvents;
+@@ -901,23 +937,25 @@ NS_INTERFACE_MAP_END_INHERITING(ServiceW
+ // Expanded macros since we need special behaviour to release the proxy.
+ NS_IMPL_CYCLE_COLLECTION_CLASS(ServiceWorkerRegistrationWorkerThread)
+ 
+ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(ServiceWorkerRegistrationWorkerThread,
+                                                   ServiceWorkerRegistrationBase)
+ #ifndef MOZ_SIMPLEPUSH
+   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPushManager)
+ #endif
++  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mSyncManager)
+ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+ 
+ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(ServiceWorkerRegistrationWorkerThread,
+                                                 ServiceWorkerRegistrationBase)
+ #ifndef MOZ_SIMPLEPUSH
+   NS_IMPL_CYCLE_COLLECTION_UNLINK(mPushManager)
+ #endif
++  NS_IMPL_CYCLE_COLLECTION_UNLINK(mSyncManager)
+   tmp->ReleaseListener(RegistrationIsGoingAway);
+ NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+ 
+ ServiceWorkerRegistrationWorkerThread::ServiceWorkerRegistrationWorkerThread(WorkerPrivate* aWorkerPrivate,
+                                                                              const nsAString& aScope)
+   : ServiceWorkerRegistrationBase(nullptr, aScope)
+   , mWorkerPrivate(aWorkerPrivate)
+ {
+@@ -1216,10 +1254,22 @@ ServiceWorkerRegistrationWorkerThread::G
+   }
+ 
+   RefPtr<PushManager> ret = mPushManager;
+   return ret.forget();
+ 
+ #endif /* ! MOZ_SIMPLEPUSH */
+ }
+ 
++SyncManager*
++ServiceWorkerRegistrationWorkerThread::GetSync(ErrorResult& aRv)
++{
++  if (!mSyncManager) {
++    mSyncManager = SyncManager::CreateOnWorker(mWorkerPrivate->GlobalScope(),
++                                               mWorkerPrivate,
++                                               mScope);
++  }
++
++  return mSyncManager;
++}
++
+ } // dom namespace
+ } // mozilla namespace
+diff --git a/dom/workers/ServiceWorkerRegistration.h b/dom/workers/ServiceWorkerRegistration.h
+--- a/dom/workers/ServiceWorkerRegistration.h
++++ b/dom/workers/ServiceWorkerRegistration.h
+@@ -17,16 +17,17 @@
+ 
+ class nsPIDOMWindowInner;
+ 
+ namespace mozilla {
+ namespace dom {
+ 
+ class Promise;
+ class PushManager;
++class SyncManager;
+ class WorkerListener;
+ 
+ namespace workers {
+ class ServiceWorker;
+ class WorkerPrivate;
+ } // namespace workers
+ 
+ bool
+@@ -120,16 +121,19 @@ public:
+   GetWaiting() override;
+ 
+   already_AddRefed<workers::ServiceWorker>
+   GetActive() override;
+ 
+   already_AddRefed<PushManager>
+   GetPushManager(JSContext* aCx, ErrorResult& aRv);
+ 
++  SyncManager*
++  GetSync(ErrorResult& aRv);
++
+   // DOMEventTargethelper
+   void DisconnectFromOwner() override
+   {
+     StopListeningForEvents();
+     ServiceWorkerRegistrationBase::DisconnectFromOwner();
+   }
+ 
+   // ServiceWorkerRegistrationListener
+@@ -170,16 +174,18 @@ private:
+   // These three may change to a new worker at any time.
+   RefPtr<workers::ServiceWorker> mInstallingWorker;
+   RefPtr<workers::ServiceWorker> mWaitingWorker;
+   RefPtr<workers::ServiceWorker> mActiveWorker;
+ 
+ #ifndef MOZ_SIMPLEPUSH
+   RefPtr<PushManager> mPushManager;
+ #endif
++
++  RefPtr<SyncManager> mSyncManager;
+ };
+ 
+ class ServiceWorkerRegistrationWorkerThread final : public ServiceWorkerRegistrationBase
+                                                   , public workers::WorkerFeature
+ {
+ public:
+   NS_DECL_ISUPPORTS_INHERITED
+   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(ServiceWorkerRegistrationWorkerThread,
+@@ -223,16 +229,19 @@ public:
+   }
+ 
+   bool
+   Notify(workers::Status aStatus) override;
+ 
+   already_AddRefed<PushManager>
+   GetPushManager(ErrorResult& aRv);
+ 
++  SyncManager*
++  GetSync(ErrorResult& aRv);
++
+ private:
+   enum Reason
+   {
+     RegistrationIsGoingAway = 0,
+     WorkerIsGoingAway,
+   };
+ 
+   ~ServiceWorkerRegistrationWorkerThread();
+@@ -244,14 +253,16 @@ private:
+   ReleaseListener(Reason aReason);
+ 
+   workers::WorkerPrivate* mWorkerPrivate;
+   RefPtr<WorkerListener> mListener;
+ 
+ #ifndef MOZ_SIMPLEPUSH
+   RefPtr<PushManager> mPushManager;
+ #endif
++
++  RefPtr<SyncManager> mSyncManager;
+ };
+ 
+ } // namespace dom
+ } // namespace mozilla
+ 
+ #endif /* mozilla_dom_ServiceWorkerRegistration_h */
+diff --git a/dom/workers/WorkerPrefs.h b/dom/workers/WorkerPrefs.h
+--- a/dom/workers/WorkerPrefs.h
++++ b/dom/workers/WorkerPrefs.h
+@@ -28,16 +28,17 @@ WORKER_SIMPLE_PREF("dom.caches.enabled",
+ WORKER_SIMPLE_PREF("dom.caches.testing.enabled", DOMCachesTestingEnabled, DOM_CACHES_TESTING)
+ WORKER_SIMPLE_PREF("dom.performance.enable_user_timing_logging", PerformanceLoggingEnabled, PERFORMANCE_LOGGING_ENABLED)
+ WORKER_SIMPLE_PREF("dom.webnotifications.enabled", DOMWorkerNotificationEnabled, DOM_WORKERNOTIFICATION)
+ WORKER_SIMPLE_PREF("dom.webnotifications.serviceworker.enabled", DOMServiceWorkerNotificationEnabled, DOM_SERVICEWORKERNOTIFICATION)
+ WORKER_SIMPLE_PREF("dom.serviceWorkers.enabled", ServiceWorkersEnabled, SERVICEWORKERS_ENABLED)
+ WORKER_SIMPLE_PREF("dom.serviceWorkers.testing.enabled", ServiceWorkersTestingEnabled, SERVICEWORKERS_TESTING_ENABLED)
+ WORKER_SIMPLE_PREF("dom.serviceWorkers.openWindow.enabled", OpenWindowEnabled, OPEN_WINDOW_ENABLED)
+ WORKER_SIMPLE_PREF("dom.push.enabled", PushEnabled, PUSH_ENABLED)
++WORKER_SIMPLE_PREF("dom.backgroundSync.enabled", BackgroundSyncEnabled, BACKGROUND_SYNC_ENABLED)
+ WORKER_SIMPLE_PREF("dom.requestcontext.enabled", RequestContextEnabled, REQUESTCONTEXT_ENABLED)
+ WORKER_SIMPLE_PREF("gfx.offscreencanvas.enabled", OffscreenCanvasEnabled, OFFSCREENCANVAS_ENABLED)
+ WORKER_PREF("dom.workers.latestJSVersion", JSVersionChanged)
+ WORKER_PREF("intl.accept_languages", PrefLanguagesChanged)
+ WORKER_PREF("general.appname.override", AppNameOverrideChanged)
+ WORKER_PREF("general.appversion.override", AppVersionOverrideChanged)
+ WORKER_PREF("general.platform.override", PlatformOverrideChanged)
+ #ifdef JS_GC_ZEAL
+diff --git a/dom/workers/moz.build b/dom/workers/moz.build
+--- a/dom/workers/moz.build
++++ b/dom/workers/moz.build
+@@ -98,16 +98,17 @@ IPDL_SOURCES += [
+     'PServiceWorkerManager.ipdl',
+     'ServiceWorkerRegistrarTypes.ipdlh',
+ ]
+ 
+ LOCAL_INCLUDES += [
+     '../base',
+     '../system',
+     '/dom/base',
++    '/dom/sync',
+     '/xpcom/build',
+     '/xpcom/threads',
+ ]
+ 
+ include('/ipc/chromium/chromium-config.mozbuild')
+ 
+ FINAL_LIBRARY = 'xul'
+ 
+diff --git a/ipc/glue/BackgroundChildImpl.cpp b/ipc/glue/BackgroundChildImpl.cpp
+--- a/ipc/glue/BackgroundChildImpl.cpp
++++ b/ipc/glue/BackgroundChildImpl.cpp
+@@ -2,16 +2,17 @@
+  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+  * You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "BackgroundChildImpl.h"
+ 
+ #include "ActorsChild.h" // IndexedDB
+ #include "BroadcastChannelChild.h"
+ #include "ServiceWorkerManagerChild.h"
++#include "SyncManagerChild.h"
+ #include "FileDescriptorSetChild.h"
+ #ifdef MOZ_WEBRTC
+ #include "CamerasChild.h"
+ #endif
+ #include "mozilla/media/MediaChild.h"
+ #include "mozilla/Assertions.h"
+ #include "mozilla/dom/PBlobChild.h"
+ #include "mozilla/dom/PFileSystemRequestChild.h"
+@@ -64,16 +65,17 @@ namespace ipc {
+ using mozilla::dom::UDPSocketChild;
+ using mozilla::net::PUDPSocketChild;
+ 
+ using mozilla::dom::asmjscache::PAsmJSCacheEntryChild;
+ using mozilla::dom::cache::PCacheChild;
+ using mozilla::dom::cache::PCacheStorageChild;
+ using mozilla::dom::cache::PCacheStreamControlChild;
+ using mozilla::dom::PNuwaChild;
++using mozilla::dom::SyncManagerChild;
+ 
+ // -----------------------------------------------------------------------------
+ // BackgroundChildImpl::ThreadLocal
+ // -----------------------------------------------------------------------------
+ 
+ BackgroundChildImpl::
+ ThreadLocal::ThreadLocal()
+   : mCurrentFileHandle(nullptr)
+@@ -463,16 +465,36 @@ BackgroundChildImpl::DeallocPFileSystemR
+ {
+   // The reference is increased in FileSystemTaskBase::Start of
+   // FileSystemTaskBase.cpp. We should decrease it after IPC.
+   RefPtr<dom::FileSystemTaskChildBase> child =
+     dont_AddRef(static_cast<dom::FileSystemTaskChildBase*>(aActor));
+   return true;
+ }
+ 
++// -----------------------------------------------------------------------------
++// Background Sync API
++// -----------------------------------------------------------------------------
++
++dom::PSyncManagerChild*
++BackgroundChildImpl::AllocPSyncManagerChild()
++{
++  RefPtr<SyncManagerChild> agent = new SyncManagerChild();
++  return agent.forget().take();
++}
++
++bool
++BackgroundChildImpl::DeallocPSyncManagerChild(PSyncManagerChild* aActor)
++{
++  RefPtr<SyncManagerChild> child =
++    dont_AddRef(static_cast<SyncManagerChild*>(aActor));
++  MOZ_ASSERT(child);
++  return true;
++}
++
+ } // namespace ipc
+ } // namespace mozilla
+ 
+ bool
+ TestChild::Recv__delete__(const nsCString& aTestArg)
+ {
+   MOZ_RELEASE_ASSERT(aTestArg == mTestArg,
+                      "BackgroundTest message was corrupted!");
+diff --git a/ipc/glue/BackgroundChildImpl.h b/ipc/glue/BackgroundChildImpl.h
+--- a/ipc/glue/BackgroundChildImpl.h
++++ b/ipc/glue/BackgroundChildImpl.h
+@@ -160,16 +160,21 @@ protected:
+   DeallocPQuotaChild(PQuotaChild* aActor) override;
+ 
+   virtual PFileSystemRequestChild*
+   AllocPFileSystemRequestChild(const FileSystemParams&) override;
+ 
+   virtual bool
+   DeallocPFileSystemRequestChild(PFileSystemRequestChild*) override;
+ 
++  virtual PSyncManagerChild*
++  AllocPSyncManagerChild() override;
++
++  virtual bool
++  DeallocPSyncManagerChild(PSyncManagerChild* aActor) override;
+ };
+ 
+ class BackgroundChildImpl::ThreadLocal final
+ {
+   friend class nsAutoPtr<ThreadLocal>;
+ 
+ public:
+   nsAutoPtr<mozilla::dom::indexedDB::ThreadLocal> mIndexedDBThreadLocal;
+diff --git a/ipc/glue/BackgroundParentImpl.cpp b/ipc/glue/BackgroundParentImpl.cpp
+--- a/ipc/glue/BackgroundParentImpl.cpp
++++ b/ipc/glue/BackgroundParentImpl.cpp
+@@ -36,16 +36,17 @@
+ #include "nsNetUtil.h"
+ #include "nsIScriptSecurityManager.h"
+ #include "nsProxyRelease.h"
+ #include "mozilla/RefPtr.h"
+ #include "nsThreadUtils.h"
+ #include "nsTraceRefcnt.h"
+ #include "nsXULAppAPI.h"
+ #include "ServiceWorkerManagerParent.h"
++#include "SyncManagerParent.h"
+ 
+ #ifdef DISABLE_ASSERTS_FOR_FUZZING
+ #define ASSERT_UNLESS_FUZZING(...) do { } while (0)
+ #else
+ #define ASSERT_UNLESS_FUZZING(...) MOZ_ASSERT(false)
+ #endif
+ 
+ using mozilla::ipc::AssertIsOnBackgroundThread;
+@@ -54,16 +55,17 @@ using mozilla::dom::cache::PCacheParent;
+ using mozilla::dom::cache::PCacheStorageParent;
+ using mozilla::dom::cache::PCacheStreamControlParent;
+ using mozilla::dom::FileSystemBase;
+ using mozilla::dom::FileSystemRequestParent;
+ using mozilla::dom::MessagePortParent;
+ using mozilla::dom::NuwaParent;
+ using mozilla::dom::PMessagePortParent;
+ using mozilla::dom::PNuwaParent;
++using mozilla::dom::SyncManagerParent;
+ using mozilla::dom::UDPSocketParent;
+ 
+ namespace {
+ 
+ void
+ AssertIsOnMainThread()
+ {
+   MOZ_ASSERT(NS_IsMainThread());
+@@ -92,16 +94,17 @@ public:
+ } // namespace
+ 
+ namespace mozilla {
+ namespace ipc {
+ 
+ using mozilla::dom::ContentParent;
+ using mozilla::dom::BroadcastChannelParent;
+ using mozilla::dom::ServiceWorkerRegistrationData;
++using mozilla::dom::SyncManagerParent;
+ using mozilla::dom::workers::ServiceWorkerManagerParent;
+ 
+ BackgroundParentImpl::BackgroundParentImpl()
+ {
+   AssertIsInMainProcess();
+   AssertIsOnMainThread();
+ 
+   MOZ_COUNT_CTOR(mozilla::ipc::BackgroundParentImpl);
+@@ -885,16 +888,40 @@ BackgroundParentImpl::DeallocPFileSystem
+   AssertIsInMainProcess();
+   AssertIsOnBackgroundThread();
+ 
+   RefPtr<FileSystemRequestParent> parent =
+     dont_AddRef(static_cast<FileSystemRequestParent*>(aDoomed));
+   return true;
+ }
+ 
++mozilla::dom::PSyncManagerParent*
++BackgroundParentImpl::AllocPSyncManagerParent()
++{
++  AssertIsInMainProcess();
++  AssertIsOnBackgroundThread();
++
++  RefPtr<SyncManagerParent> agent = new SyncManagerParent();
++  return agent.forget().take();
++}
++
++bool
++BackgroundParentImpl::DeallocPSyncManagerParent(PSyncManagerParent* aActor)
++{
++  AssertIsInMainProcess();
++  AssertIsOnBackgroundThread();
++  MOZ_ASSERT(aActor);
++
++  RefPtr<SyncManagerParent> parent =
++    dont_AddRef(static_cast<SyncManagerParent*>(aActor));
++  MOZ_ASSERT(parent);
++
++  return true;
++}
++
+ } // namespace ipc
+ } // namespace mozilla
+ 
+ void
+ TestParent::ActorDestroy(ActorDestroyReason aWhy)
+ {
+   mozilla::ipc::AssertIsInMainProcess();
+   AssertIsOnBackgroundThread();
+diff --git a/ipc/glue/BackgroundParentImpl.h b/ipc/glue/BackgroundParentImpl.h
+--- a/ipc/glue/BackgroundParentImpl.h
++++ b/ipc/glue/BackgroundParentImpl.h
+@@ -192,14 +192,19 @@ protected:
+ 
+   virtual bool
+   RecvPFileSystemRequestConstructor(PFileSystemRequestParent* aActor,
+                                     const FileSystemParams& aParams) override;
+ 
+   virtual bool
+   DeallocPFileSystemRequestParent(PFileSystemRequestParent*) override;
+ 
++  virtual PSyncManagerParent*
++  AllocPSyncManagerParent() override;
++
++  virtual bool
++  DeallocPSyncManagerParent(PSyncManagerParent* aActor) override;
+ };
+ 
+ } // namespace ipc
+ } // namespace mozilla
+ 
+ #endif // mozilla_ipc_backgroundparentimpl_h__
+diff --git a/ipc/glue/PBackground.ipdl b/ipc/glue/PBackground.ipdl
+--- a/ipc/glue/PBackground.ipdl
++++ b/ipc/glue/PBackground.ipdl
+@@ -13,16 +13,17 @@ include protocol PCacheStorage;
+ include protocol PCacheStreamControl;
+ include protocol PFileDescriptorSet;
+ include protocol PFileSystemRequest;
+ include protocol PMessagePort;
+ include protocol PCameras;
+ include protocol PNuwa;
+ include protocol PQuota;
+ include protocol PServiceWorkerManager;
++include protocol PSyncManager;
+ include protocol PUDPSocket;
+ include protocol PVsync;
+ 
+ include DOMTypes;
+ include PBackgroundSharedTypes;
+ include PBackgroundIDBSharedTypes;
+ include PFileSystemParams;
+ 
+@@ -53,16 +54,17 @@ sync protocol PBackground
+   manages PCacheStreamControl;
+   manages PFileDescriptorSet;
+   manages PFileSystemRequest;
+   manages PMessagePort;
+   manages PCameras;
+   manages PNuwa;
+   manages PQuota;
+   manages PServiceWorkerManager;
++  manages PSyncManager;
+   manages PUDPSocket;
+   manages PVsync;
+ 
+ parent:
+   // Only called at startup during mochitests to check the basic infrastructure.
+   async PBackgroundTest(nsCString testArg);
+ 
+   async PBackgroundIDBFactory(LoggingInfo loggingInfo);
+@@ -95,16 +97,18 @@ parent:
+   async PAsmJSCacheEntry(OpenMode openMode,
+                          WriteParams write,
+                          PrincipalInfo principalInfo);
+ 
+   async PQuota();
+ 
+   async PFileSystemRequest(FileSystemParams params);
+ 
++  async PSyncManager();
++
+ child:
+   async PCache();
+   async PCacheStreamControl();
+ 
+ both:
+   async PBlob(BlobConstructorParams params);
+ 
+   async PFileDescriptorSet(FileDescriptor fd);
+diff --git a/ipc/glue/moz.build b/ipc/glue/moz.build
+--- a/ipc/glue/moz.build
++++ b/ipc/glue/moz.build
+@@ -142,16 +142,17 @@ if CONFIG['_MSC_VER']:
+     # 'reinterpret_cast': conversion from 'DWORD' to 'HANDLE' of greater size
+     SOURCES['BackgroundChildImpl.cpp'].flags += ['-wd4312']
+     SOURCES['BackgroundParentImpl.cpp'].flags += ['-wd4312']
+ 
+ LOCAL_INCLUDES += [
+     '/caps',
+     '/dom/broadcastchannel',
+     '/dom/indexedDB',
++    '/dom/sync',
+     '/dom/workers',
+     '/media/webrtc/trunk',
+     '/xpcom/build',
+ ]
+ 
+ IPDL_SOURCES = [
+     'InputStreamParams.ipdlh',
+     'PBackground.ipdl',
