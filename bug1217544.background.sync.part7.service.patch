@@ -232,7 +232,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncService.cpp
-@@ -0,0 +1,288 @@
+@@ -0,0 +1,305 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -456,7 +456,7 @@ new file mode 100644
 +          return;
 +        }
 +      }
-+      break;      
++      break;
 +    default:
 +      break;
 +  }
@@ -489,7 +489,7 @@ new file mode 100644
 +        nsTArray<nsString> origins(
 +            aResponse.get_SyncGetAllOriginsResponse().mOrigins());
 +        for (uint32_t i = 0; i < origins.Length(); i++) {
-+          nsString origin = origins[i];          
++          nsString origin = origins[i];
 +        }
 +      }
 +      break;
@@ -516,6 +516,23 @@ new file mode 100644
 +
 +  // XXX If we are online we need to get the list of registered sync requests
 +  //     to trigger the corresponding 'sync' events.
++
++  // XXX register requests somewhere once we have a mChromeStorageManager alive
++  //     only when there are active requests.
++  nsresult rv;
++  nsCOMPtr<nsIUUIDGenerator> uuidGenerator =
++    do_GetService("@mozilla.org/uuid-generator;1", &rv);
++  if (NS_WARN_IF(NS_FAILED(rv))) {
++    return;
++  }
++
++  nsID id;
++  rv = uuidGenerator->GenerateUUIDInPlace(&id);
++  if (NS_WARN_IF(NS_FAILED(rv))) {
++    return;
++  }
++
++  mChromeStorageManager->GetAll(id);
 +}
 +
 +} // namespace backgroundsync
