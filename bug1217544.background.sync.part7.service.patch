@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  f674d820b624318e3faf856e1c6a122ee171f368
+# Parent  c0f1001518b7da4cfc17c1ce85a7a3dee0c22b41
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: BackgroundSyncService. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/BackgroundSyncParent.cpp
@@ -211,7 +211,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncService.cpp
-@@ -0,0 +1,252 @@
+@@ -0,0 +1,286 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -317,7 +317,11 @@ new file mode 100644
 +
 +  mOnlineStateObserver->Shutdown(this);
 +
++  // XXX do construction and destruction of mChromeStorageManager
++  //     based on requests status.
++  mChromeStorageManager->RemoveListener(this);
 +  mChromeStorageManager = nullptr;
++
 +  sInstance = nullptr;
 +}
 +
@@ -339,7 +343,7 @@ new file mode 100644
 +BackgroundSyncService::Init()
 +{
 +  mOnlineStateObserver = OnlineStateObserver::Init(this);
-+  mChromeStorageManager = ChromeStorageManager::GetOrCreate();
++  mChromeStorageManager = ChromeStorageManager::GetOrCreate(this);
 +}
 +
 +// --------------------------------------------------------------------------
@@ -411,17 +415,19 @@ new file mode 100644
 +  switch (aResponse.type()) {
 +    case SyncOpResponse::TSyncRegisterResponse:
 +      if (aResponse.get_SyncRegisterResponse().mFirstRegistration()) {
-+        mChromeStorageManager->Register(
++        mChromeStorageManager->Register(aRequestId,
 +            aResponse.get_SyncRegisterResponse().mOrigin());
 +      }
++      // XXX maybe do not complete the request here.
 +      break;
 +    case SyncOpResponse::TSyncRemoveResponse:
 +      nsString origin = aResponse.get_SyncRemoveResponse().mOrigin();
 +      // We only get the origin value when there are no more registrations for
 +      // this origin.
 +      if (origin.Length()) {
-+        mChromeStorageManager->Unregister(origin);
++        mChromeStorageManager->Unregister(aRequestId, origin);
 +      }
++      // XXX maybe do not complete the request here.
 +      break;
 +  }
 +
@@ -461,6 +467,34 @@ new file mode 100644
 +  //     to trigger the corresponding 'sync' events.
 +}
 +
++// --------------------------------------------------------------------------
++
++/**
++ * ChromeStorageManager::Listener implementation.
++ */
++
++void
++BackgroundSyncService::OnRegisterSuccess(const nsID& aRequestId)
++{
++}
++
++void
++BackgroundSyncService::OnUnregisterSuccess(const nsID& aRequestId)
++{
++}
++
++void
++BackgroundSyncService::OnGetAllOrigins(const nsID& aRequestId,
++                                       nsTArray<nsString>& aOrigins)
++{
++}
++
++void
++BackgroundSyncService::OnStorageActionError(const nsID& aRequestId,
++                                            nsresult aRv)
++{
++}
++
 +} // namespace backgroundsync
 +} // namespace dom
 +} // namespace mozilla
@@ -468,7 +502,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.h b/dom/backgroundsync/Bac
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncService.h
-@@ -0,0 +1,86 @@
+@@ -0,0 +1,99 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -478,16 +512,17 @@ new file mode 100644
 +#ifndef mozilla_dom_BackgroundSyncService_h
 +#define mozilla_dom_BackgroundSyncService_h
 +
++#include "ChromeStorageManager.h"
 +#include "OnlineStateObserver.h"
 +
 +namespace mozilla {
 +namespace dom {
 +namespace backgroundsync {
 +
-+class ChromeStorageManager;
 +class StorageManager;
 +
 +class BackgroundSyncService final : public OnlineStateObserver::Listener
++                                  , public ChromeStorageManager::Listener
 +{
 +  friend class StorageManager;
 +
@@ -548,6 +583,18 @@ new file mode 100644
 +
 +  RefPtr<OnlineStateObserver> mOnlineStateObserver;
 +  OnlineStateObserver::OnlineState mOnlineState;
++
++  // --------------------------------------------------------------------------
++  // ChromeStorageManager::Listener methods
++  virtual void
++  OnRegisterSuccess(const nsID& aRequestId) override;
++  virtual void
++  OnUnregisterSuccess(const nsID& aRequestId) override;
++  virtual void
++  OnGetAllOrigins(const nsID& aRequestId,
++                  nsTArray<nsString>& aOrigins) override;
++  virtual void
++  OnStorageActionError(const nsID& aRequestId, nsresult aRv) override;
 +};
 +
 +} // namespace backgroundsync
