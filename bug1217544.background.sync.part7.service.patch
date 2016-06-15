@@ -3,6 +3,27 @@
 # Parent  e0ee988b017627e893bb0f06d3fc0f5f2f79c09c
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: BackgroundSyncService. r=baku
 
+diff --git a/dom/backgroundsync/BackgroundSyncChild.cpp b/dom/backgroundsync/BackgroundSyncChild.cpp
+--- a/dom/backgroundsync/BackgroundSyncChild.cpp
++++ b/dom/backgroundsync/BackgroundSyncChild.cpp
+@@ -108,16 +108,17 @@ BackgroundSyncChild::RecvResponse(const 
+   Promise* p = GetPendingRequest(aRequestId);
+   if (NS_WARN_IF(!p)) {
+     // This should never happen.
+     return false;
+   }
+ 
+   switch(aResponse.type()) {
+     case SyncOpResponse::TSyncRegisterResponse:
++    case SyncOpResponse::TSyncRegisterOriginResponse:
+       p->MaybeResolve(true);
+       return true;
+     case SyncOpResponse::TSyncGetTagsResponse:
+       p->MaybeResolve(aResponse.get_SyncGetTagsResponse().mTags());
+       return true;
+     case SyncOpResponse::TSyncOpError:
+       p->MaybeReject(
+           static_cast<nsresult>(aResponse.get_SyncOpError().mCode()));
 diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/BackgroundSyncParent.cpp
 --- a/dom/backgroundsync/BackgroundSyncParent.cpp
 +++ b/dom/backgroundsync/BackgroundSyncParent.cpp
@@ -211,7 +232,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncService.cpp
-@@ -0,0 +1,268 @@
+@@ -0,0 +1,288 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -423,14 +444,13 @@ new file mode 100644
 +            aResponse.get_SyncRegisterResponse().mOrigin());
 +        return;
 +      }
-+      // XXX maybe do not complete the request here.
 +      break;
 +    case SyncOpResponse::TSyncRemoveResponse:
 +      {
 +        nsString origin = aResponse.get_SyncRemoveResponse().mOrigin();
 +        // We only get the origin value when there are no more registrations for
-+        // this origin. If that's the case, we need to remove that origin from the
-+        // 'origins' DB before we can progress the response to the DOM side.
++        // this origin. If that's the case, we need to remove that origin from
++        // the 'origins' DB before we can progress the response to the DOM side.
 +        if (origin.Length()) {
 +          mChromeStorageManager->Unregister(aRequestId, origin);
 +          return;
@@ -451,9 +471,30 @@ new file mode 100644
 +  // Otherwise, this is a response to an internal request that can be handled
 +  // here.
 +
-+  // So far, we only care about GetAll responses.
-+  if (aResponse.type() != SyncOpResponse::TSyncGetAllResponse) {
-+    return;
++  // XXX Maybe release ChromeStorageManager.
++
++  // So far, we only care about GetAll and GetAllOrigins responses.
++  switch (aResponse.type()) {
++    case SyncOpResponse::TSyncGetAllResponse:
++      break;
++    case SyncOpResponse::TSyncGetAllOriginsResponse:
++      {
++        // If we went offline while getting the origins, we don't care about
++        // getting the sync registrations anymore, so we bail out here.
++        if (mOnlineState !=  OnlineStateObserver::ONLINE) {
++          return;
++        }
++        // If we are still online, we need to get the list of sync registrations
++        // per origin.
++        nsTArray<nsString> origins(
++            aResponse.get_SyncGetAllOriginsResponse().mOrigins());
++        for (uint32_t i = 0; i < origins.Length(); i++) {
++          nsString origin = origins[i];
++        }
++      }
++      break;
++    default:
++      break;
 +  }
 +}
 +
