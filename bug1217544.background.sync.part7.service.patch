@@ -489,7 +489,7 @@ new file mode 100644
 +        nsTArray<nsString> origins(
 +            aResponse.get_SyncGetAllOriginsResponse().mOrigins());
 +        for (uint32_t i = 0; i < origins.Length(); i++) {
-+          nsString origin = origins[i];
++          nsString origin = origins[i];          
 +        }
 +      }
 +      break;
