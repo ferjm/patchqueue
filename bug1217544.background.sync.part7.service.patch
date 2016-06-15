@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  de534fd60a93e4fc76c552719afc89e894696376
+# Parent  e0ee988b017627e893bb0f06d3fc0f5f2f79c09c
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: BackgroundSyncService. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/BackgroundSyncParent.cpp
@@ -211,7 +211,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncService.cpp
-@@ -0,0 +1,297 @@
+@@ -0,0 +1,268 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -319,7 +319,6 @@ new file mode 100644
 +
 +  // XXX do construction and destruction of mChromeStorageManager
 +  //     based on requests status.
-+  mChromeStorageManager->RemoveListener(this);
 +  mChromeStorageManager = nullptr;
 +
 +  sInstance = nullptr;
@@ -478,34 +477,6 @@ new file mode 100644
 +  //     to trigger the corresponding 'sync' events.
 +}
 +
-+// --------------------------------------------------------------------------
-+
-+/**
-+ * ChromeStorageManager::Listener implementation.
-+ */
-+
-+void
-+BackgroundSyncService::OnRegisterSuccess(const nsID& aRequestId)
-+{
-+}
-+
-+void
-+BackgroundSyncService::OnUnregisterSuccess(const nsID& aRequestId)
-+{
-+}
-+
-+void
-+BackgroundSyncService::OnGetAllOrigins(const nsID& aRequestId,
-+                                       nsTArray<nsString>& aOrigins)
-+{
-+}
-+
-+void
-+BackgroundSyncService::OnStorageActionError(const nsID& aRequestId,
-+                                            nsresult aRv)
-+{
-+}
-+
 +} // namespace backgroundsync
 +} // namespace dom
 +} // namespace mozilla
@@ -513,7 +484,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.h b/dom/backgroundsync/Bac
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncService.h
-@@ -0,0 +1,99 @@
+@@ -0,0 +1,86 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -533,7 +504,6 @@ new file mode 100644
 +class StorageManager;
 +
 +class BackgroundSyncService final : public OnlineStateObserver::Listener
-+                                  , public ChromeStorageManager::Listener
 +{
 +  friend class StorageManager;
 +
@@ -594,18 +564,6 @@ new file mode 100644
 +
 +  RefPtr<OnlineStateObserver> mOnlineStateObserver;
 +  OnlineStateObserver::OnlineState mOnlineState;
-+
-+  // --------------------------------------------------------------------------
-+  // ChromeStorageManager::Listener methods
-+  virtual void
-+  OnRegisterSuccess(const nsID& aRequestId) override;
-+  virtual void
-+  OnUnregisterSuccess(const nsID& aRequestId) override;
-+  virtual void
-+  OnGetAllOrigins(const nsID& aRequestId,
-+                  nsTArray<nsString>& aOrigins) override;
-+  virtual void
-+  OnStorageActionError(const nsID& aRequestId, nsresult aRv) override;
 +};
 +
 +} // namespace backgroundsync
@@ -613,6 +571,109 @@ new file mode 100644
 +} // namespace mozilla
 +
 +#endif // mozilla_dom_SyncService_h
+diff --git a/dom/backgroundsync/ChromeStorageManager.cpp b/dom/backgroundsync/ChromeStorageManager.cpp
+--- a/dom/backgroundsync/ChromeStorageManager.cpp
++++ b/dom/backgroundsync/ChromeStorageManager.cpp
+@@ -245,51 +245,54 @@ private:
+   RefPtr<ChromeStorageAction> mAction;
+ };
+ 
+ NS_IMPL_ISUPPORTS(StorageActionRunnable, nsICancelableRunnable, nsIRunnable)
+ 
+ //-----------------------------------------------------------------------------
+ // PBackground thread
+ 
+-ChromeStorageManager::ChromeStorageManager()
++ChromeStorageManager::ChromeStorageManager(BackgroundSyncService* aService)
++  : mService(aService)
+ {
+   AssertIsOnBackgroundThread();
++  MOZ_ASSERT(aService);
+ 
+   Init();
+ }
+ 
+ ChromeStorageManager::~ChromeStorageManager()
+ {
+   AssertIsOnBackgroundThread();
+ 
+   if (mDBConn) {
+     RefPtr<ShutdownRunnable> runnable = new ShutdownRunnable(mDBConn);
+     mIOThread->Dispatch(runnable, nsIThread::DISPATCH_NORMAL);
+     mDBConn = nullptr;
+   }
+ 
+   mPendingActions.Clear();
+ 
++  mService = nullptr;
+   /*
+   nsCOMPtr<nsIThread> ioThread;
+   mIOThread.swap(ioThread);
+   MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(
+         NewRunnableMethod(ioThread, &nsIThread::Shutdown)));*/
+ }
+ 
+ // static
+ already_AddRefed<ChromeStorageManager>
+-ChromeStorageManager::GetOrCreate()
++ChromeStorageManager::GetOrCreate(BackgroundSyncService* aService)
+ {
+   AssertIsOnBackgroundThread();
+ 
+   RefPtr<ChromeStorageManager> instance = csmInstance;
+   if (!instance) {
+-    instance = new ChromeStorageManager();
++    instance = new ChromeStorageManager(aService);
+   }
+   return instance.forget();
+ }
+ 
+ void
+ ChromeStorageManager::Init()
+ {
+   AssertIsOnBackgroundThread();
+diff --git a/dom/backgroundsync/ChromeStorageManager.h b/dom/backgroundsync/ChromeStorageManager.h
+--- a/dom/backgroundsync/ChromeStorageManager.h
++++ b/dom/backgroundsync/ChromeStorageManager.h
+@@ -31,34 +31,36 @@ class ChromeStorageManager final
+ {
+   friend class InitRunnable;
+   friend class StorageActionRunnable;
+ 
+ public:
+   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(ChromeStorageManager)
+ 
+   static already_AddRefed<ChromeStorageManager>
+-  GetOrCreate();
++  GetOrCreate(BackgroundSyncService* aService);
+ 
+   void Register(const nsID& aRequestId, const nsAString& aOrigin);
+   void Unregister(const nsID& aRequestId, const nsAString& aOrigin);
+   void GetAll(const nsID& aRequestId);
+ 
+ private:
+-  ChromeStorageManager();
++  ChromeStorageManager(BackgroundSyncService* aService);
+   ~ChromeStorageManager();
+ 
+   void Init();
+   void OnInitialized(mozIStorageConnection* aConn);
+ 
+   void ExecuteStorageAction(ChromeStorageAction* aAction);
+ 
+   void OnRequestComplete(const nsID& aRequestId,
+                          const SyncOpResponse& aResponse);
+ 
++  RefPtr<BackgroundSyncService> mService;
++
+   nsCOMPtr<nsIThread> mIOThread;
+   nsCOMPtr<mozIStorageConnection> mDBConn;
+ 
+   nsTArray<RefPtr<ChromeStorageAction>> mPendingActions;
+ };
+ 
+ } // namespace backgroundsync
+ } // namespace dom
 diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageManager.cpp
 --- a/dom/backgroundsync/StorageManager.cpp
 +++ b/dom/backgroundsync/StorageManager.cpp
@@ -792,7 +853,7 @@ diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageMan
      Closing
    };
  
-@@ -74,33 +75,35 @@ private:
+@@ -74,33 +75,36 @@ private:
    class BaseAction;
    class ChangeStateAction;
    class Factory;
@@ -823,6 +884,7 @@ diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageMan
    void ExecuteRequest(const nsID& aRequestId, const SyncInternalOp& aOp);
  
 +  RefPtr<BackgroundSyncService> mService;
++
    RefPtr<StorageManagerId> mManagerId;
    nsCOMPtr<nsIThread> mIOThread;
  
