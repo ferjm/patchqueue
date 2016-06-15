@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  1042f45e76b06ef35a2a0d741efadfc7f516731c
+# Parent  de534fd60a93e4fc76c552719afc89e894696376
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: BackgroundSyncService. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/BackgroundSyncParent.cpp
@@ -211,7 +211,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncService.cpp
-@@ -0,0 +1,288 @@
+@@ -0,0 +1,297 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -416,20 +416,29 @@ new file mode 100644
 +{
 +  switch (aResponse.type()) {
 +    case SyncOpResponse::TSyncRegisterResponse:
++      // If this is the first registration for this origin, we need to store
++      // it in the 'origins' db before we can progress the response to the
++      // DOM side.
 +      if (aResponse.get_SyncRegisterResponse().mFirstRegistration()) {
 +        mChromeStorageManager->Register(aRequestId,
 +            aResponse.get_SyncRegisterResponse().mOrigin());
++        return;
 +      }
 +      // XXX maybe do not complete the request here.
 +      break;
 +    case SyncOpResponse::TSyncRemoveResponse:
-+      nsString origin = aResponse.get_SyncRemoveResponse().mOrigin();
-+      // We only get the origin value when there are no more registrations for
-+      // this origin.
-+      if (origin.Length()) {
-+        mChromeStorageManager->Unregister(aRequestId, origin);
++      {
++        nsString origin = aResponse.get_SyncRemoveResponse().mOrigin();
++        // We only get the origin value when there are no more registrations for
++        // this origin. If that's the case, we need to remove that origin from the
++        // 'origins' DB before we can progress the response to the DOM side.
++        if (origin.Length()) {
++          mChromeStorageManager->Unregister(aRequestId, origin);
++          return;
++        }
 +      }
-+      // XXX maybe do not complete the request here.
++      break;      
++    default:
 +      break;
 +  }
 +
