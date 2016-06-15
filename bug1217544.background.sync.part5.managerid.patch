@@ -132,7 +132,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncChild.h b/dom/backgroundsync/Backg
 diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh
 --- a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh
 +++ b/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh
-@@ -1,55 +1,112 @@
+@@ -1,55 +1,128 @@
  /* This Source Code Form is subject to the terms of the Mozilla Public
   * License, v. 2.0. If a copy of the MPL was not distributed with this
   * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -202,6 +202,19 @@ diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsyn
 +  nsString mOrigin;
 +};
 +
++struct SyncRegisterOriginResponse
++{
++};
++
++struct SyncUnregisterOriginResponse
++{
++};
++
++struct SyncGetAllOriginsResponse
++{
++  nsString[] mOrigins;
++};
++
  struct SyncOpError
  {
    uint32_t mCode;
@@ -214,6 +227,9 @@ diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsyn
    SyncGetTagsResponse;
 +  SyncGetAllResponse;
 +  SyncRemoveResponse;
++  SyncRegisterOriginResponse;
++  SyncUnregisterOriginResponse;
++  SyncGetAllOriginsResponse;
    SyncOpError;
  };
  
@@ -716,7 +732,7 @@ diff --git a/dom/backgroundsync/ChromeStorageManager.cpp b/dom/backgroundsync/Ch
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/ChromeStorageManager.cpp
-@@ -0,0 +1,417 @@
+@@ -0,0 +1,379 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -913,17 +929,21 @@ new file mode 100644
 +      case ChromeStorageAction::Type::Register:
 +        rv = chromedb::Register(mConn, mAction->Origin());
 +        if (NS_WARN_IF(NS_FAILED(rv))) {
-+          mManager->OnStorageActionError(mAction->RequestId(), rv);
++          mManager->OnRequestComplete(mAction->RequestId(),
++                                      SyncOpError(static_cast<uint32_t>(rv)));
 +        } else {
-+          mManager->OnRegisterSuccess(mAction->RequestId());
++          mManager->OnRequestComplete(mAction->RequestId(),
++                                      SyncRegisterOriginResponse());
 +        }
 +        break;
 +      case ChromeStorageAction::Type::Unregister:
 +        rv = chromedb::Unregister(mConn, mAction->Origin());
 +        if (NS_WARN_IF(NS_FAILED(rv))) {
-+          mManager->OnStorageActionError(mAction->RequestId(), rv);
++          mManager->OnRequestComplete(mAction->RequestId(),
++                                      SyncOpError(static_cast<uint32_t>(rv)));
 +        } else {
-+          mManager->OnUnregisterSuccess(mAction->RequestId());
++          mManager->OnRequestComplete(mAction->RequestId(),
++                                      SyncUnregisterOriginResponse());
 +        }
 +        break;
 +      case ChromeStorageAction::Type::GetAll:
@@ -931,9 +951,11 @@ new file mode 100644
 +          nsTArray<nsString> origins;
 +          rv = chromedb::GetAll(mConn, origins);
 +          if (NS_WARN_IF(NS_FAILED(rv))) {
-+            mManager->OnStorageActionError(mAction->RequestId(), rv);
++            mManager->OnRequestComplete(mAction->RequestId(),
++                                        SyncOpError(static_cast<uint32_t>(rv)));
 +          } else {
-+            mManager->OnGetAllOrigins(mAction->RequestId(), origins);
++            mManager->OnRequestComplete(mAction->RequestId(),
++                                        SyncGetAllOriginsResponse(origins));
 +          }
 +          break;
 +        }
@@ -963,12 +985,9 @@ new file mode 100644
 +//-----------------------------------------------------------------------------
 +// PBackground thread
 +
-+ChromeStorageManager::ChromeStorageManager(Listener* aListener)
++ChromeStorageManager::ChromeStorageManager()
 +{
-+  MOZ_ASSERT(aListener);
 +  AssertIsOnBackgroundThread();
-+
-+  mListenerList.AppendElement(aListener);
 +
 +  Init();
 +}
@@ -985,8 +1004,6 @@ new file mode 100644
 +
 +  mPendingActions.Clear();
 +
-+  MOZ_ASSERT(mListenerList.IsEmpty());
-+
 +  /*
 +  nsCOMPtr<nsIThread> ioThread;
 +  mIOThread.swap(ioThread);
@@ -996,13 +1013,13 @@ new file mode 100644
 +
 +// static
 +already_AddRefed<ChromeStorageManager>
-+ChromeStorageManager::GetOrCreate(Listener* aListener)
++ChromeStorageManager::GetOrCreate()
 +{
 +  AssertIsOnBackgroundThread();
 +
 +  RefPtr<ChromeStorageManager> instance = csmInstance;
 +  if (!instance) {
-+    instance = new ChromeStorageManager(aListener);
++    instance = new ChromeStorageManager();
 +  }
 +  return instance.forget();
 +}
@@ -1022,6 +1039,7 @@ new file mode 100644
 +void
 +ChromeStorageManager::OnInitialized(mozIStorageConnection* aConn)
 +{
++  AssertIsOnBackgroundThread();
 +  MOZ_ASSERT(aConn);
 +
 +  mDBConn = aConn;
@@ -1033,27 +1051,10 @@ new file mode 100644
 +}
 +
 +void
-+ChromeStorageManager::AddListener(Listener* aListener)
-+{
-+  AssertIsOnBackgroundThread();
-+  MOZ_ASSERT(aListener);
-+  MOZ_ASSERT(mListenerList.Contains(aListener));
-+
-+  mListenerList.AppendElement(aListener);
-+}
-+
-+void
-+ChromeStorageManager::RemoveListener(Listener* aListener)
-+{
-+  AssertIsOnBackgroundThread();
-+  MOZ_ASSERT(aListener);
-+
-+  MOZ_ALWAYS_TRUE(mListenerList.RemoveElement(aListener));
-+}
-+
-+void
 +ChromeStorageManager::ExecuteStorageAction(ChromeStorageAction* aAction)
 +{
++  AssertIsOnBackgroundThread();
++
 +  if (!mDBConn) {
 +    mPendingActions.AppendElement(aAction);
 +    return;
@@ -1069,6 +1070,8 @@ new file mode 100644
 +ChromeStorageManager::Register(const nsID& aRequestId,
 +                               const nsAString& aOrigin)
 +{
++  AssertIsOnBackgroundThread();
++
 +  RefPtr<ChromeStorageAction> action =
 +    new ChromeStorageAction(ChromeStorageAction::Type::Register, aRequestId,
 +                            aOrigin);
@@ -1079,6 +1082,8 @@ new file mode 100644
 +ChromeStorageManager::Unregister(const nsID& aRequestId,
 +                                 const nsAString& aOrigin)
 +{
++  AssertIsOnBackgroundThread();
++
 +  RefPtr<ChromeStorageAction> action =
 +    new ChromeStorageAction(ChromeStorageAction::Type::Unregister, aRequestId,
 +                            aOrigin);
@@ -1088,47 +1093,20 @@ new file mode 100644
 +void
 +ChromeStorageManager::GetAll(const nsID& aRequestId)
 +{
++  AssertIsOnBackgroundThread();
++
 +  RefPtr<ChromeStorageAction> action =
 +    new ChromeStorageAction(ChromeStorageAction::Type::GetAll, aRequestId);
 +  ExecuteStorageAction(action);
 +}
 +
 +void
-+ChromeStorageManager::OnRegisterSuccess(const nsID& aRequestId)
++ChromeStorageManager::OnRequestComplete(const nsID& aRequestId,
++                                        const SyncOpResponse& aResponse)
 +{
-+  ListenerList::ForwardIterator iter(mListenerList);
-+  while (iter.HasMore()) {
-+    iter.GetNext()->OnRegisterSuccess(aRequestId);
-+  }
-+}
++  AssertIsOnBackgroundThread();
 +
-+void
-+ChromeStorageManager::OnUnregisterSuccess(const nsID& aRequestId)
-+{
-+  ListenerList::ForwardIterator iter(mListenerList);
-+  while (iter.HasMore()) {
-+    iter.GetNext()->OnUnregisterSuccess(aRequestId);
-+  }
-+}
-+
-+void
-+ChromeStorageManager::OnGetAllOrigins(const nsID& aRequestId,
-+                                      nsTArray<nsString>& aOrigins)
-+{
-+  ListenerList::ForwardIterator iter(mListenerList);
-+  while (iter.HasMore()) {
-+    iter.GetNext()->OnGetAllOrigins(aRequestId, aOrigins);
-+  }
-+}
-+
-+void
-+ChromeStorageManager::OnStorageActionError(const nsID& aRequestId,
-+                                           nsresult aRv)
-+{
-+  ListenerList::ForwardIterator iter(mListenerList);
-+  while (iter.HasMore()) {
-+    iter.GetNext()->OnStorageActionError(aRequestId, aRv);
-+  }
++  // XXX Notify listener.
 +}
 +
 +} // namespace backgroundsync
@@ -1138,7 +1116,7 @@ diff --git a/dom/backgroundsync/ChromeStorageManager.h b/dom/backgroundsync/Chro
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/ChromeStorageManager.h
-@@ -0,0 +1,91 @@
+@@ -0,0 +1,67 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -1176,33 +1154,15 @@ new file mode 100644
 +public:
 +  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(ChromeStorageManager)
 +
-+    // An interface to be implemented by code wishing to use the
-+    // ChromeStorageManager. The Listener implementatino is responsible
-+    // for calling RemoveListener() to clear the weak reference.
-+    // For now we only have one listener: BackgroundSyncService.
-+  class Listener
-+  {
-+  public:
-+    virtual void OnRegisterSuccess(const nsID& aRequestId) = 0;
-+    virtual void OnUnregisterSuccess(const nsID& aRequestId) = 0;
-+    virtual void OnGetAllOrigins(const nsID& aRequestId,
-+                                 nsTArray<nsString>& aOrigins) = 0;
-+    virtual void OnStorageActionError(const nsID& aRequestId,
-+                                      nsresult aRv) = 0;
-+  };
-+
 +  static already_AddRefed<ChromeStorageManager>
-+  GetOrCreate(Listener* aListener);
-+
-+  void AddListener(Listener* aListener);
-+  void RemoveListener(Listener* aListener);
++  GetOrCreate();
 +
 +  void Register(const nsID& aRequestId, const nsAString& aOrigin);
 +  void Unregister(const nsID& aRequestId, const nsAString& aOrigin);
 +  void GetAll(const nsID& aRequestId);
 +
 +private:
-+  ChromeStorageManager(Listener* aListener);
++  ChromeStorageManager();
 +  ~ChromeStorageManager();
 +
 +  void Init();
@@ -1210,19 +1170,13 @@ new file mode 100644
 +
 +  void ExecuteStorageAction(ChromeStorageAction* aAction);
 +
-+  void OnRegisterSuccess(const nsID& aRequestId);
-+  void OnUnregisterSuccess(const nsID& aRequestId);
-+  void OnGetAllOrigins(const nsID& aRequestId, nsTArray<nsString>& aOrigins);
-+  void OnStorageActionError(const nsID& aRequestId, nsresult aRv);
++  void OnRequestComplete(const nsID& aRequestId,
++                         const SyncOpResponse& aResponse);
 +
 +  nsCOMPtr<nsIThread> mIOThread;
 +  nsCOMPtr<mozIStorageConnection> mDBConn;
 +
 +  nsTArray<RefPtr<ChromeStorageAction>> mPendingActions;
-+
-+  // Weak reference cleared by RemoveListener().
-+  typedef nsTObserverArray<Listener*> ListenerList;
-+  ListenerList mListenerList;
 +};
 +
 +} // namespace backgroundsync
