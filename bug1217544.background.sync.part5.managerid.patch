@@ -732,7 +732,7 @@ diff --git a/dom/backgroundsync/ChromeStorageManager.cpp b/dom/backgroundsync/Ch
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/ChromeStorageManager.cpp
-@@ -0,0 +1,379 @@
+@@ -0,0 +1,384 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -913,10 +913,12 @@ new file mode 100644
 +                        mozIStorageConnection* aConn,
 +                        ChromeStorageAction* aAction)
 +    : mManager(aManager)
++    , mInitiatingThread(do_GetCurrentThread())
 +    , mConn(aConn)
 +    , mAction(aAction)
 +  {
 +    MOZ_ASSERT(aManager);
++    MOZ_ASSERT(mInitiatingThread);
 +    MOZ_ASSERT(aConn);
 +    MOZ_ASSERT(aAction);
 +  }
@@ -925,25 +927,26 @@ new file mode 100644
 +  Run() override
 +  {
 +    nsresult rv = NS_OK;
++    if (mInitiatingThread == nsCOMPtr<nsIThread>(do_GetCurrentThread())) {
++      mManager->OnRequestComplete(mAction->RequestId(), mResponse);
++      return rv;
++    }
++
 +    switch (mAction->Type()) {
 +      case ChromeStorageAction::Type::Register:
 +        rv = chromedb::Register(mConn, mAction->Origin());
 +        if (NS_WARN_IF(NS_FAILED(rv))) {
-+          mManager->OnRequestComplete(mAction->RequestId(),
-+                                      SyncOpError(static_cast<uint32_t>(rv)));
++          mResponse = SyncOpError(static_cast<uint32_t>(rv));
 +        } else {
-+          mManager->OnRequestComplete(mAction->RequestId(),
-+                                      SyncRegisterOriginResponse());
++          mResponse = SyncRegisterOriginResponse();
 +        }
 +        break;
 +      case ChromeStorageAction::Type::Unregister:
 +        rv = chromedb::Unregister(mConn, mAction->Origin());
 +        if (NS_WARN_IF(NS_FAILED(rv))) {
-+          mManager->OnRequestComplete(mAction->RequestId(),
-+                                      SyncOpError(static_cast<uint32_t>(rv)));
++          mResponse = SyncOpError(static_cast<uint32_t>(rv));
 +        } else {
-+          mManager->OnRequestComplete(mAction->RequestId(),
-+                                      SyncUnregisterOriginResponse());
++          mResponse = SyncUnregisterOriginResponse();
 +        }
 +        break;
 +      case ChromeStorageAction::Type::GetAll:
@@ -951,17 +954,17 @@ new file mode 100644
 +          nsTArray<nsString> origins;
 +          rv = chromedb::GetAll(mConn, origins);
 +          if (NS_WARN_IF(NS_FAILED(rv))) {
-+            mManager->OnRequestComplete(mAction->RequestId(),
-+                                        SyncOpError(static_cast<uint32_t>(rv)));
++            mResponse = SyncOpError(static_cast<uint32_t>(rv));
 +          } else {
-+            mManager->OnRequestComplete(mAction->RequestId(),
-+                                        SyncGetAllOriginsResponse(origins));
++            mResponse = SyncGetAllOriginsResponse(origins);
 +          }
 +          break;
 +        }
 +      default:
 +        MOZ_CRASH("BackgroundSync: Unexpected ChromeStorageAction");
 +    }
++
++    rv = mInitiatingThread->Dispatch(this, nsIThread::DISPATCH_NORMAL);
 +
 +    return rv;
 +  }
@@ -976,8 +979,10 @@ new file mode 100644
 +  ~StorageActionRunnable() {}
 +
 +  RefPtr<ChromeStorageManager> mManager;
++  nsCOMPtr<nsIThread> mInitiatingThread;
 +  nsCOMPtr<mozIStorageConnection> mConn;
 +  RefPtr<ChromeStorageAction> mAction;
++  SyncOpResponse mResponse;
 +};
 +
 +NS_IMPL_ISUPPORTS(StorageActionRunnable, nsICancelableRunnable, nsIRunnable)
