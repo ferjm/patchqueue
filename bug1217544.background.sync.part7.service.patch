@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  c0f1001518b7da4cfc17c1ce85a7a3dee0c22b41
+# Parent  1042f45e76b06ef35a2a0d741efadfc7f516731c
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: BackgroundSyncService. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/BackgroundSyncParent.cpp
@@ -211,7 +211,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncService.cpp
-@@ -0,0 +1,286 @@
+@@ -0,0 +1,288 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -343,6 +343,8 @@ new file mode 100644
 +BackgroundSyncService::Init()
 +{
 +  mOnlineStateObserver = OnlineStateObserver::Init(this);
++  // XXX do construction and destruction of mChromeStorageManager
++  //     based on requests status.
 +  mChromeStorageManager = ChromeStorageManager::GetOrCreate(this);
 +}
 +
