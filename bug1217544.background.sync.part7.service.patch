@@ -244,7 +244,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncService.cpp
-@@ -0,0 +1,487 @@
+@@ -0,0 +1,500 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -620,6 +620,19 @@ new file mode 100644
 +  // So far, we only care about GetAll and GetAllOrigins responses.
 +  switch (aResponse.type()) {
 +    case SyncOpResponse::TSyncGetAllResponse:
++      {
++        // If we went offline while getting the sync registrations, it is
++        // useless to continue, as no sync event will be triggered for these
++        // registrations. So we just bail out here.
++        if (mOnlineState !=  OnlineStateObserver::ONLINE) {
++          return;
++        }
++
++        // If we are still online, we try to trigger a sync event per each
++        // registration.
++        nsTArray<Registration> registrations(
++            aResponse.get_SyncGetAllResponse().mRegistrations());
++      }
 +      break;
 +    case SyncOpResponse::TSyncGetAllOriginsResponse:
 +      {
