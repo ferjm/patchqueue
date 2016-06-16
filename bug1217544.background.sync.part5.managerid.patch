@@ -2072,7 +2072,7 @@ new file mode 100644
 +nsresult
 +Remove(mozIStorageConnection* aConn,
 +       const SyncRemoveArgs& aArgs,
-+       nsAString& aOrigin)
++       nsString& aOrigin)
 +{
 +  MOZ_ASSERT(!NS_IsMainThread());
 +  MOZ_ASSERT(aConn);

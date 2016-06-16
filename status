@@ -2,6 +2,4 @@
 e0ed033657485be18fbfed90fadfcd77a62d1e88:bug1217544.background.sync.part2.serviceworkerregistration.patch
 bd181c42ff3ae92b9cc23368dce63f11dd9f9b5c:bug1217544.background.sync.part3.ipc.patch
 fd0aafcee5c77818bfc1442d9de38e5b67a96b6a:bug1217544.background.sync.part4.syncevent.patch
-2bd396b3d4d695d8a672c64fa969aa73f7f056a7:bug1217544.background.sync.part5.managerid.patch
-9cb4d68758c87df8df2b35a6769222feb1afe369:bug1217544.background.sync.part6.onlineobserver.patch
-21aeaeb847f3d43997ceb1cfdfcf44a76cf7e919:bug1217544.background.sync.part7.service.patch
+b8379e2c91f2235d787f9c9766353dc0e3b1e394:bug1217544.background.sync.part5.managerid.patch
