@@ -1,16 +1,20 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  44c7febb8f544c0f23fb1a84291ce04a4359407e
+# Parent  efe73d830e9abd6b14d0c5fcde188be618d05949
 
 diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/BackgroundSyncService.cpp
 --- a/dom/backgroundsync/BackgroundSyncService.cpp
 +++ b/dom/backgroundsync/BackgroundSyncService.cpp
-@@ -239,27 +239,29 @@ BackgroundSyncService::OnRequestComplete
+@@ -239,35 +239,38 @@ BackgroundSyncService::OnRequestComplete
+   // Otherwise, this is a response to an internal request that can be handled
+   // here.
+ 
    // XXX Maybe release ChromeStorageManager.
  
    // So far, we only care about GetAll and GetAllOrigins responses.
    switch (aResponse.type()) {
      case SyncOpResponse::TSyncGetAllResponse:
++      printf_stderr("GetAllResponse");
        break;
      case SyncOpResponse::TSyncGetAllOriginsResponse:
        {
@@ -20,32 +24,37 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
          if (mOnlineState !=  OnlineStateObserver::ONLINE) {
            return;
          }
+ 
+         nsIScriptSecurityManager *securityManager =
+           nsContentUtils::GetSecurityManager();
+ 
+         MOZ_ASSERT(securityManager);
+ 
          // If we are still online, we need to get the list of sync registrations
          // per origin.
          nsTArray<nsString> origins(
              aResponse.get_SyncGetAllOriginsResponse().mOrigins());
          for (uint32_t i = 0; i < origins.Length(); i++) {
-           nsString origin = origins[i];
-+          printf_stderr("Origin %s", NS_ConvertUTF16toUTF8(origin).get());
-         }
-       }
-       break;
-     default:
-       break;
-   }
- }
- 
-@@ -292,14 +294,15 @@ BackgroundSyncService::OnOnlineStateChan
-   }
- 
++          printf_stderr("Origin %s", NS_ConvertUTF16toUTF8(origins[i]).get());
+           // To do that, we first need to get the StorageManager responsible of
+           // each origin.
+           nsCOMPtr<nsIPrincipal> principal;
+           securityManager->CreateCodebasePrincipalFromOrigin(
+             NS_ConvertUTF16toUTF8(origins[i]), getter_AddRefs(principal));
+           if (NS_WARN_IF(!principal)) {
+             return;
+           }
+@@ -358,14 +361,15 @@ BackgroundSyncService::OnStorageManagerI
    nsID id;
    rv = uuidGenerator->GenerateUUIDInPlace(&id);
    if (NS_WARN_IF(NS_FAILED(rv))) {
      return;
    }
  
-+  printf_stderr("mChromeStorageManager->GetAll()\n");
-   mChromeStorageManager->GetAll(id);
+   AddStorageManagerRef(id, 0 /* internal request */, manager);
+ 
++  printf_stderr("Execute SyncInternalOp(SyncGetAllArgs)\n");
+   manager->ExecuteRequest(id, SyncInternalOp(SyncGetAllArgs()));
  }
  
  } // namespace backgroundsync
