@@ -610,7 +610,7 @@ new file mode 100644
 +
 +  AddStorageManagerRef(id, 0 /* internal request */, manager);
 +
-+  //manager->ExecuteRequest(id, SyncOpArgs);
++  manager->ExecuteRequest(id, SyncInternalOp(SyncGetAllArgs()));
 +}
 +
 +} // namespace backgroundsync
@@ -1002,12 +1002,17 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
 diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageManager.h
 --- a/dom/backgroundsync/StorageManager.h
 +++ b/dom/backgroundsync/StorageManager.h
-@@ -29,17 +29,18 @@ namespace backgroundsync {
+@@ -26,20 +26,23 @@ namespace backgroundsync {
+  *
+  * The StorageManager instances are kept alive by the BackgroundSyncService,
+  * which keeps a reference to the StorageManager dealing with a storage request
   * until that request is completed or the actor requesting it is destroyed.
   */
  
  class StorageManager final
  {
++  friend class BackgroundSyncService;
++
  public:
    NS_INLINE_DECL_REFCOUNTING(StorageManager)
  
@@ -1022,7 +1027,7 @@ diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageMan
      Closing
    };
  
-@@ -74,33 +75,36 @@ private:
+@@ -74,33 +77,36 @@ private:
    class BaseAction;
    class ChangeStateAction;
    class Factory;
