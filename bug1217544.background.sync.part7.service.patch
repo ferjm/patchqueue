@@ -1022,7 +1022,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
    MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(
          NewRunnableMethod(ioThread, &nsIThread::Shutdown)));*/
  }
-@@ -751,20 +757,30 @@ StorageManager::OnRequestComplete(const 
+@@ -751,20 +757,19 @@ StorageManager::OnRequestComplete(const 
    NS_ASSERT_OWNINGTHREAD(StorageManager);
    MOZ_ASSERT(mPendingRequests.Contains(aRequestId));
  
@@ -1038,18 +1038,8 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
 +                                  const SyncOpResponse& aResponse)
  {
 -  // XXX Notify listener
-+  switch(aResponse.type()) {
-+    case SyncOpResponse::TSyncRegisterResponse:
-+    case SyncOpResponse::TSyncGetTagsResponse:
-+    case SyncOpResponse::TSyncOpError:
-+      mService->OnRequestComplete(aRequestId, SyncOpResponse(aResponse));
-+      break;
-+    case SyncOpResponse::TSyncGetAllResponse:
-+      break;
-+    default:
-+      break;
-+  }
- 
+-
++  mService->OnRequestComplete(aRequestId, SyncOpResponse(aResponse));
    OnRequestComplete(aRequestId);
  }
  
