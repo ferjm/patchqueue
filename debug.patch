@@ -1,11 +1,11 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  9fc448b163a990cba56dcc57d129ce518d2769f7
+# Parent  2f76a535149ee64b1dd4d88c245a89b37488fc23
 
 diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/BackgroundSyncService.cpp
 --- a/dom/backgroundsync/BackgroundSyncService.cpp
 +++ b/dom/backgroundsync/BackgroundSyncService.cpp
-@@ -311,19 +311,21 @@ BackgroundSyncService::OnRequestComplete
+@@ -312,19 +312,21 @@ BackgroundSyncService::OnRequestComplete
    // Otherwise, this is a response to an internal request that can be handled
    // here.
  
@@ -42,9 +42,9 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
  
  void
  BackgroundSyncService::AddStorageManagerIdFactory(
-     StorageManagerIdFactory* aFactory, PrincipalInfo& aPrincipalInfo)
+     StorageManagerIdFactory* aFactory)
  {
-   mStorageManagerIdFactories.Put(aFactory, &aPrincipalInfo);
+   mStorageManagerIdFactories.PutEntry(aFactory);
 diff --git a/dom/backgroundsync/ChromeStorageManager.cpp b/dom/backgroundsync/ChromeStorageManager.cpp
 --- a/dom/backgroundsync/ChromeStorageManager.cpp
 +++ b/dom/backgroundsync/ChromeStorageManager.cpp
