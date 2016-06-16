@@ -1,7 +1,80 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  7b989cc9040b2e104a2e7594c100a42aa664500a
+# Parent  44c7febb8f544c0f23fb1a84291ce04a4359407e
 
+diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/BackgroundSyncService.cpp
+--- a/dom/backgroundsync/BackgroundSyncService.cpp
++++ b/dom/backgroundsync/BackgroundSyncService.cpp
+@@ -239,27 +239,29 @@ BackgroundSyncService::OnRequestComplete
+   // XXX Maybe release ChromeStorageManager.
+ 
+   // So far, we only care about GetAll and GetAllOrigins responses.
+   switch (aResponse.type()) {
+     case SyncOpResponse::TSyncGetAllResponse:
+       break;
+     case SyncOpResponse::TSyncGetAllOriginsResponse:
+       {
++        printf_stderr("GetAllOriginsResponse");
+         // If we went offline while getting the origins, we don't care about
+         // getting the sync registrations anymore, so we bail out here.
+         if (mOnlineState !=  OnlineStateObserver::ONLINE) {
+           return;
+         }
+         // If we are still online, we need to get the list of sync registrations
+         // per origin.
+         nsTArray<nsString> origins(
+             aResponse.get_SyncGetAllOriginsResponse().mOrigins());
+         for (uint32_t i = 0; i < origins.Length(); i++) {
+           nsString origin = origins[i];
++          printf_stderr("Origin %s", NS_ConvertUTF16toUTF8(origin).get());
+         }
+       }
+       break;
+     default:
+       break;
+   }
+ }
+ 
+@@ -292,14 +294,15 @@ BackgroundSyncService::OnOnlineStateChan
+   }
+ 
+   nsID id;
+   rv = uuidGenerator->GenerateUUIDInPlace(&id);
+   if (NS_WARN_IF(NS_FAILED(rv))) {
+     return;
+   }
+ 
++  printf_stderr("mChromeStorageManager->GetAll()\n");
+   mChromeStorageManager->GetAll(id);
+ }
+ 
+ } // namespace backgroundsync
+ } // namespace dom
+ } // namespace mozilla
+diff --git a/dom/backgroundsync/ChromeStorageManager.cpp b/dom/backgroundsync/ChromeStorageManager.cpp
+--- a/dom/backgroundsync/ChromeStorageManager.cpp
++++ b/dom/backgroundsync/ChromeStorageManager.cpp
+@@ -186,18 +186,20 @@ public:
+     MOZ_ASSERT(mInitiatingThread);
+     MOZ_ASSERT(aConn);
+     MOZ_ASSERT(aAction);
+   }
+ 
+   NS_IMETHODIMP
+   Run() override
+   {
++    printf_stderr("StorageActionRunnable::Run\n");
+     nsresult rv = NS_OK;
+     if (mInitiatingThread == nsCOMPtr<nsIThread>(do_GetCurrentThread())) {
++      printf_stderr("Calling mManager->OnRequestComplete\n");
+       mManager->OnRequestComplete(mAction->RequestId(), mResponse);
+       return rv;
+     }
+ 
+     switch (mAction->Type()) {
+       case ChromeStorageAction::Type::Register:
+         rv = chromedb::Register(mConn, mAction->Origin());
+         if (NS_WARN_IF(NS_FAILED(rv))) {
 diff --git a/dom/backgroundsync/StorageContext.cpp b/dom/backgroundsync/StorageContext.cpp
 --- a/dom/backgroundsync/StorageContext.cpp
 +++ b/dom/backgroundsync/StorageContext.cpp
