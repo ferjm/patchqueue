@@ -1,11 +1,11 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  efe73d830e9abd6b14d0c5fcde188be618d05949
+# Parent  9fc448b163a990cba56dcc57d129ce518d2769f7
 
 diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/BackgroundSyncService.cpp
 --- a/dom/backgroundsync/BackgroundSyncService.cpp
 +++ b/dom/backgroundsync/BackgroundSyncService.cpp
-@@ -239,35 +239,38 @@ BackgroundSyncService::OnRequestComplete
+@@ -311,19 +311,21 @@ BackgroundSyncService::OnRequestComplete
    // Otherwise, this is a response to an internal request that can be handled
    // here.
  
@@ -25,26 +25,9 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
            return;
          }
  
-         nsIScriptSecurityManager *securityManager =
-           nsContentUtils::GetSecurityManager();
- 
-         MOZ_ASSERT(securityManager);
- 
          // If we are still online, we need to get the list of sync registrations
          // per origin.
-         nsTArray<nsString> origins(
-             aResponse.get_SyncGetAllOriginsResponse().mOrigins());
-         for (uint32_t i = 0; i < origins.Length(); i++) {
-+          printf_stderr("Origin %s", NS_ConvertUTF16toUTF8(origins[i]).get());
-           // To do that, we first need to get the StorageManager responsible of
-           // each origin.
-           nsCOMPtr<nsIPrincipal> principal;
-           securityManager->CreateCodebasePrincipalFromOrigin(
-             NS_ConvertUTF16toUTF8(origins[i]), getter_AddRefs(principal));
-           if (NS_WARN_IF(!principal)) {
-             return;
-           }
-@@ -358,14 +361,15 @@ BackgroundSyncService::OnStorageManagerI
+@@ -407,16 +409,17 @@ BackgroundSyncService::OnStorageManagerI
    nsID id;
    rv = uuidGenerator->GenerateUUIDInPlace(&id);
    if (NS_WARN_IF(NS_FAILED(rv))) {
@@ -57,9 +40,11 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
    manager->ExecuteRequest(id, SyncInternalOp(SyncGetAllArgs()));
  }
  
- } // namespace backgroundsync
- } // namespace dom
- } // namespace mozilla
+ void
+ BackgroundSyncService::AddStorageManagerIdFactory(
+     StorageManagerIdFactory* aFactory, PrincipalInfo& aPrincipalInfo)
+ {
+   mStorageManagerIdFactories.Put(aFactory, &aPrincipalInfo);
 diff --git a/dom/backgroundsync/ChromeStorageManager.cpp b/dom/backgroundsync/ChromeStorageManager.cpp
 --- a/dom/backgroundsync/ChromeStorageManager.cpp
 +++ b/dom/backgroundsync/ChromeStorageManager.cpp
