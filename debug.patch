@@ -5,7 +5,35 @@
 diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/BackgroundSyncService.cpp
 --- a/dom/backgroundsync/BackgroundSyncService.cpp
 +++ b/dom/backgroundsync/BackgroundSyncService.cpp
-@@ -270,16 +270,17 @@ BackgroundSyncService::Response(const ui
+@@ -159,25 +159,27 @@ BackgroundSyncService::ReleaseStorageMan
+   }
+ }
+ 
+ // ----------------------------------------------------------------------------
+ 
+ BackgroundSyncService::BackgroundSyncService()
+   : mOnlineState(OnlineStateObserver::UNKNOWN)
+ {
++  printf_stderr("BackgroundSyncService CONSTRUCTOR\n");
+   AssertIsOnBackgroundThread();
+ 
+   // sInstance is a raw BackgroundSyncService*.
+   MOZ_ASSERT(!sInstance);
+   sInstance = this;
+ }
+ 
+ BackgroundSyncService::~BackgroundSyncService()
+ {
++  printf_stderr("BackgroundSyncService DESTRUCTOR\n");
+   AssertIsOnBackgroundThread();
+   MOZ_ASSERT(sInstance == this);
+   MOZ_ASSERT(mBackgroundSyncActors.Count() == 0);
+ 
+   mOnlineStateObserver->Shutdown(this);
+ 
+   // XXX do construction and destruction of mChromeStorageManager
+   //     based on requests status.
+@@ -270,16 +272,17 @@ BackgroundSyncService::Response(const ui
      parent->NotifyResponse(aRequestId, aResponse);
    }
  }
@@ -23,7 +51,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
        if (aResponse.get_SyncRegisterResponse().mFirstRegistration()) {
          mChromeStorageManager->Register(aRequestId,
              aResponse.get_SyncRegisterResponse().mOrigin());
-@@ -298,43 +299,47 @@ BackgroundSyncService::OnRequestComplete
+@@ -298,43 +301,47 @@ BackgroundSyncService::OnRequestComplete
          }
        }
        break;
@@ -71,7 +99,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
        break;
    }
  }
-@@ -380,16 +385,17 @@ BackgroundSyncService::OnOnlineStateChan
+@@ -380,16 +387,17 @@ BackgroundSyncService::OnOnlineStateChan
  
  /**
   * StorageManagerIdFactory::Listener implementation.
@@ -89,7 +117,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
    RefPtr<StorageManager> manager;
    nsresult rv = StorageManager::GetOrCreate(this,
                                              aManagerId,
-@@ -407,16 +413,17 @@ BackgroundSyncService::OnStorageManagerI
+@@ -407,16 +415,17 @@ BackgroundSyncService::OnStorageManagerI
    nsID id;
    rv = uuidGenerator->GenerateUUIDInPlace(&id);
    if (NS_WARN_IF(NS_FAILED(rv))) {
@@ -131,6 +159,33 @@ diff --git a/dom/backgroundsync/ChromeStorageManager.cpp b/dom/backgroundsync/Ch
        case ChromeStorageAction::Type::Register:
          rv = chromedb::Register(mConn, mAction->Origin());
          if (NS_WARN_IF(NS_FAILED(rv))) {
+@@ -253,24 +255,26 @@ private:
+ NS_IMPL_ISUPPORTS(StorageActionRunnable, nsICancelableRunnable, nsIRunnable)
+ 
+ //-----------------------------------------------------------------------------
+ // PBackground thread
+ 
+ ChromeStorageManager::ChromeStorageManager(BackgroundSyncService* aService)
+   : mService(aService)
+ {
++  printf_stderr("ChromeStorageManager CONSTRUCTOR\n");
+   AssertIsOnBackgroundThread();
+   MOZ_ASSERT(aService);
+ 
+   Init();
+ }
+ 
+ ChromeStorageManager::~ChromeStorageManager()
+ {
++  printf_stderr("ChromeStorageManager DESTRUCTOR\n");
+   AssertIsOnBackgroundThread();
+ 
+   if (mDBConn) {
+     RefPtr<ShutdownRunnable> runnable = new ShutdownRunnable(mDBConn);
+     mIOThread->Dispatch(runnable, nsIThread::DISPATCH_NORMAL);
+     mDBConn = nullptr;
+   }
+ 
 diff --git a/dom/backgroundsync/DBSchema.cpp b/dom/backgroundsync/DBSchema.cpp
 --- a/dom/backgroundsync/DBSchema.cpp
 +++ b/dom/backgroundsync/DBSchema.cpp
