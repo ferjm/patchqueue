@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  3f805fcfefadf542e70f40349f06206bdfe628b5
+# Parent  53b423b5c3339928fa6109dd7b0cf34d6eb5284b
 
 diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/BackgroundSyncService.cpp
 --- a/dom/backgroundsync/BackgroundSyncService.cpp
@@ -51,7 +51,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
  
    mOnlineStateObserver->Shutdown(this);
  
-@@ -300,16 +303,17 @@ BackgroundSyncService::Response(const ui
+@@ -320,16 +323,17 @@ BackgroundSyncService::Response(const ui
      parent->NotifyResponse(aRequestId, aResponse);
    }
  }
@@ -69,7 +69,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
        if (aResponse.get_SyncRegisterResponse().mFirstRegistration()) {
          RefPtr<ChromeStorageManager> manager =
            ChromeStorageManager::GetOrCreate(this);
-@@ -334,43 +338,47 @@ BackgroundSyncService::OnRequestComplete
+@@ -354,56 +358,61 @@ BackgroundSyncService::OnRequestComplete
          }
        }
        break;
@@ -93,7 +93,21 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
    // So far, we only care about GetAll and GetAllOrigins responses.
    switch (aResponse.type()) {
      case SyncOpResponse::TSyncGetAllResponse:
-+      printf_stderr("GetAllResponse\n");
+       {
++        printf_stderr("GetAllResponse\n");
+         // If we went offline while getting the sync registrations, it is
+         // useless to continue, as no sync event will be triggered for these
+         // registrations. So we just bail out here.
+         if (mOnlineState !=  OnlineStateObserver::ONLINE) {
+           return;
+         }
+ 
+         // If we are still online, we try to trigger a sync event per each
+         // registration.
+         nsTArray<Registration> registrations(
+             aResponse.get_SyncGetAllResponse().mRegistrations());
++        printf_stderr("Registrations number %zu\n", registrations.Length());
+       }
        break;
      case SyncOpResponse::TSyncGetAllOriginsResponse:
        {
@@ -117,7 +131,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
        break;
    }
  }
-@@ -420,16 +428,17 @@ BackgroundSyncService::OnOnlineStateChan
+@@ -453,16 +462,17 @@ BackgroundSyncService::OnOnlineStateChan
  
  /**
   * StorageManagerIdFactory::Listener implementation.
@@ -135,7 +149,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
    RefPtr<StorageManager> manager;
    nsresult rv = StorageManager::GetOrCreate(this,
                                              aManagerId,
-@@ -447,16 +456,17 @@ BackgroundSyncService::OnStorageManagerI
+@@ -480,16 +490,17 @@ BackgroundSyncService::OnStorageManagerI
    nsID id;
    rv = uuidGenerator->GenerateUUIDInPlace(&id);
    if (NS_WARN_IF(NS_FAILED(rv))) {
