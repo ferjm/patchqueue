@@ -59,7 +59,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
    explicit PendingRequest(const nsID& aRequestId,
                            const SyncOp& aOp)
      : mRequestId(aRequestId)
-@@ -39,67 +44,92 @@ public:
+@@ -39,76 +44,102 @@ public:
  private:
    ~PendingRequest() {}
  
@@ -155,8 +155,19 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
  
  void
  BackgroundSyncParent::OnStorageManagerIdCreated(
-     StorageManagerId* aManagerId)
+-    StorageManagerId* aManagerId)
++    StorageManagerId* aManagerId, StorageManagerIdFactory* aFactory)
  {
+   MOZ_ASSERT(mStorageManagerIdFactory);
++  MOZ_ASSERT(mStorageManagerIdFactory == aFactory);
+   MOZ_ASSERT(!mStorageManagerId);
+ 
+   mStorageManagerId = aManagerId;
+   mStorageManagerIdFactory->RemoveListener(this);
+   mStorageManagerIdFactory = nullptr;
+ 
+   // Flush pending requests.
+   for (uint32_t i = 0, len = mPendingRequests.Length(); i < len; i++) {
 diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/BackgroundSyncParent.h
 --- a/dom/backgroundsync/BackgroundSyncParent.h
 +++ b/dom/backgroundsync/BackgroundSyncParent.h
@@ -179,7 +190,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/Back
  
  public:
    NS_INLINE_DECL_REFCOUNTING(BackgroundSyncParent)
-@@ -36,28 +38,47 @@ public:
+@@ -36,27 +38,47 @@ public:
    virtual bool RecvRequest(const nsID& aRequestId,
                             const SyncOp& aOp) override;
  
@@ -209,8 +220,10 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/Back
  
    // StorageManagerId method
    virtual void
-   OnStorageManagerIdCreated(StorageManagerId* aManagerId) override;
- 
+-  OnStorageManagerIdCreated(StorageManagerId* aManagerId) override;
++  OnStorageManagerIdCreated(StorageManagerId* aManagerId,
++                            StorageManagerIdFactory* aManagerIdFactory) override;
++
 +  // BackgroundSyncParent objects keep BackgroundSyncService alive.
 +  RefPtr<BackgroundSyncService> mService;
 +
@@ -219,7 +232,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/Back
 +  uint64_t mId;
 +
 +  bool mActorDestroyed;
-+
+ 
    RefPtr<StorageManagerIdFactory> mStorageManagerIdFactory;
    // We use this Id to ensure that we have a single StorageManager
    // per principal.
@@ -227,12 +240,11 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/Back
  
    class PendingRequest;
    nsTArray<RefPtr<PendingRequest>> mPendingRequests;
- };
 diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/BackgroundSyncService.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncService.cpp
-@@ -0,0 +1,305 @@
+@@ -0,0 +1,371 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -254,6 +266,9 @@ new file mode 100644
 +#include "BackgroundSyncService.h"
 +#include "ChromeStorageManager.h"
 +#include "StorageManager.h"
++
++#include "mozilla/ipc/BackgroundUtils.h"
++#include "nsContentUtils.h"
 +
 +namespace mozilla {
 +namespace dom {
@@ -484,12 +499,35 @@ new file mode 100644
 +        if (mOnlineState !=  OnlineStateObserver::ONLINE) {
 +          return;
 +        }
++
++        nsIScriptSecurityManager *securityManager =
++          nsContentUtils::GetSecurityManager();
++
++        MOZ_ASSERT(securityManager);
++
 +        // If we are still online, we need to get the list of sync registrations
 +        // per origin.
 +        nsTArray<nsString> origins(
 +            aResponse.get_SyncGetAllOriginsResponse().mOrigins());
 +        for (uint32_t i = 0; i < origins.Length(); i++) {
-+          nsString origin = origins[i];
++          // To do that, we first need to get the StorageManager responsible of
++          // each origin.
++          nsCOMPtr<nsIPrincipal> principal;
++          securityManager->CreateCodebasePrincipalFromOrigin(
++            NS_ConvertUTF16toUTF8(origins[i]), getter_AddRefs(principal));
++          if (NS_WARN_IF(!principal)) {
++            return;
++          }
++
++          PrincipalInfo principalInfo;
++          nsresult rv = PrincipalToPrincipalInfo(principal, &principalInfo);
++          if (NS_WARN_IF(NS_FAILED(rv))) {
++            return;
++          }
++
++          RefPtr<StorageManagerIdFactory> factory =
++            StorageManagerIdFactory::Create(this, principalInfo);
++          mStorageManagerIdFactories.Put(factory, &principalInfo);
 +        }
 +      }
 +      break;
@@ -535,6 +573,46 @@ new file mode 100644
 +  mChromeStorageManager->GetAll(id);
 +}
 +
++// --------------------------------------------------------------------------
++
++/**
++ * StorageManagerIdFactory::Listener implementation.
++ */
++void
++BackgroundSyncService::OnStorageManagerIdCreated(
++  StorageManagerId* aManagerId, StorageManagerIdFactory* aFactory)
++{
++  MOZ_ASSERT(mStorageManagerIdFactories.Contains(aFactory));
++
++  aFactory->RemoveListener(this);
++  nsAutoPtr<PrincipalInfo> principalInfo;
++  mStorageManagerIdFactories.RemoveAndForget(aFactory, principalInfo);
++
++  RefPtr<StorageManager> manager;
++  nsresult rv = StorageManager::GetOrCreate(this,
++                                            aManagerId,
++                                            getter_AddRefs(manager));
++  if (NS_WARN_IF(NS_FAILED(rv))) {
++    return;
++  }
++
++  nsCOMPtr<nsIUUIDGenerator> uuidGenerator =
++    do_GetService("@mozilla.org/uuid-generator;1", &rv);
++  if (NS_WARN_IF(NS_FAILED(rv))) {
++    return;
++  }
++
++  nsID id;
++  rv = uuidGenerator->GenerateUUIDInPlace(&id);
++  if (NS_WARN_IF(NS_FAILED(rv))) {
++    return;
++  }
++
++  AddStorageManagerRef(id, 0 /* internal request */, manager);
++
++  //manager->ExecuteRequest(id, SyncOpArgs);
++}
++
 +} // namespace backgroundsync
 +} // namespace dom
 +} // namespace mozilla
@@ -542,7 +620,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.h b/dom/backgroundsync/Bac
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncService.h
-@@ -0,0 +1,87 @@
+@@ -0,0 +1,101 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -562,6 +640,7 @@ new file mode 100644
 +class StorageManager;
 +
 +class BackgroundSyncService final : public OnlineStateObserver::Listener
++                                  , StorageManagerIdFactory::Listener
 +{
 +  friend class ChromeStorageManager;
 +  friend class StorageManager;
@@ -599,7 +678,7 @@ new file mode 100644
 +  nsTHashtable<nsRefPtrHashKey<BackgroundSyncParent>> mBackgroundSyncActors;
 +
 +  // --------------------------------------------------------------------------
-+  // StorageManager stuff
++  // StorageManager
 +
 +  void AddStorageManagerRef(const nsID& aRequestId,
 +                            const uint64_t aActorId,
@@ -614,15 +693,28 @@ new file mode 100644
 +  nsClassHashtable<nsIDHashKey, StorageManagerRef> mStorageManagers;
 +
 +  // --------------------------------------------------------------------------
++  // ChromeStorageManager
++
 +  RefPtr<ChromeStorageManager> mChromeStorageManager;
 +
 +  // --------------------------------------------------------------------------
 +  // OnlineStateObserver::Listener method
++
 +  virtual void
 +  OnOnlineStateChanged(OnlineStateObserver::OnlineState aState) override;
 +
 +  RefPtr<OnlineStateObserver> mOnlineStateObserver;
 +  OnlineStateObserver::OnlineState mOnlineState;
++
++  // --------------------------------------------------------------------------
++  // StorageManagerId
++
++  void OnStorageManagerIdCreated(StorageManagerId* aManagerId,
++                                 StorageManagerIdFactory* aFactory) override;
++
++  nsClassHashtable<nsRefPtrHashKey<StorageManagerIdFactory>, PrincipalInfo>
++    mStorageManagerIdFactories;
++  nsTHashtable<nsRefPtrHashKey<StorageManagerId>> mStorageManagerIds;
 +};
 +
 +} // namespace backgroundsync
@@ -970,6 +1062,51 @@ diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageMan
    StorageContext* MOZ_NON_OWNING_REF mContext;
  
    bool mShuttingDown;
+diff --git a/dom/backgroundsync/StorageManagerId.cpp b/dom/backgroundsync/StorageManagerId.cpp
+--- a/dom/backgroundsync/StorageManagerId.cpp
++++ b/dom/backgroundsync/StorageManagerId.cpp
+@@ -59,17 +59,17 @@ StorageManagerIdFactory::Run()
+   // Execute twice. First on the main thread and the back on the originating
+   // thread.
+ 
+   if (mManagerId) {
+     AssertIsOnBackgroundThread();
+ 
+     ListenerList::ForwardIterator iter(mListenerList);
+     while (iter.HasMore()) {
+-      iter.GetNext()->OnStorageManagerIdCreated(mManagerId);
++      iter.GetNext()->OnStorageManagerIdCreated(mManagerId, this);
+     }
+ 
+     // The listener must clear its reference in
+     // OnStorageManagerIdCreated().
+     MOZ_ASSERT(mListenerList.IsEmpty());
+ 
+     return NS_OK;
+   }
+diff --git a/dom/backgroundsync/StorageManagerId.h b/dom/backgroundsync/StorageManagerId.h
+--- a/dom/backgroundsync/StorageManagerId.h
++++ b/dom/backgroundsync/StorageManagerId.h
+@@ -53,17 +53,18 @@ public:
+   // An interface to be implemented by code wishing to use the
+   // StorageManagerIdFactory.
+   // Note, the Listener implementation is responsible for calling
+   // RemoveListener() on the StorageManagerIdFactory to clear the weak
+   // reference.
+   class Listener
+   {
+   public:
+-    virtual void OnStorageManagerIdCreated(StorageManagerId* aManagerId) = 0;
++    virtual void OnStorageManagerIdCreated(StorageManagerId* aManagerId,
++                                           StorageManagerIdFactory* aFactory) = 0;
+   };
+ 
+   static already_AddRefed<StorageManagerIdFactory>
+   Create(Listener* aListener, const PrincipalInfo& aPrincipalInfo);
+ 
+   void AddListener(Listener* aListener);
+   // The Listener must call RemoveListener() when
+   // OnStorageManagerIdCreated is called or when
 diff --git a/dom/backgroundsync/moz.build b/dom/backgroundsync/moz.build
 --- a/dom/backgroundsync/moz.build
 +++ b/dom/backgroundsync/moz.build
