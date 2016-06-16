@@ -1,15 +1,33 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  a91843c596e66b1080f368031ed066e57fa14698
+# Parent  3f805fcfefadf542e70f40349f06206bdfe628b5
 
 diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/BackgroundSyncService.cpp
 --- a/dom/backgroundsync/BackgroundSyncService.cpp
 +++ b/dom/backgroundsync/BackgroundSyncService.cpp
-@@ -159,25 +159,27 @@ BackgroundSyncService::ReleaseStorageMan
-   }
+@@ -60,16 +60,17 @@ public:
+     MOZ_ASSERT(NS_IsMainThread());
+ 
+     nsIScriptSecurityManager *securityManager =
+       nsContentUtils::GetSecurityManager();
+ 
+     MOZ_ASSERT(securityManager);
+ 
+     for (uint32_t i = 0; i < mOrigins.Length(); i++) {
++      printf_stderr("ORIGIN %s\n", NS_ConvertUTF16toUTF8(mOrigins[i]).get());
+       // To do that, we first need to get the StorageManager responsible of
+       // each origin.
+       nsCOMPtr<nsIPrincipal> principal;
+       securityManager->CreateCodebasePrincipalFromOrigin(
+         NS_ConvertUTF16toUTF8(mOrigins[i]), getter_AddRefs(principal));
+ 
+       MOZ_ASSERT(principal);
+ 
+@@ -194,25 +195,27 @@ BackgroundSyncService::ReleaseChromeStor
  }
  
  // ----------------------------------------------------------------------------
+ 
  
  BackgroundSyncService::BackgroundSyncService()
    : mOnlineState(OnlineStateObserver::UNKNOWN)
@@ -28,12 +46,12 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
    AssertIsOnBackgroundThread();
    MOZ_ASSERT(sInstance == this);
    MOZ_ASSERT(mBackgroundSyncActors.Count() == 0);
+   MOZ_ASSERT(mStorageManagers.Count() == 0);
+   MOZ_ASSERT(mChromeStorageManagers.Count() == 0);
  
    mOnlineStateObserver->Shutdown(this);
  
-   // XXX do construction and destruction of mChromeStorageManager
-   //     based on requests status.
-@@ -270,16 +272,17 @@ BackgroundSyncService::Response(const ui
+@@ -300,16 +303,17 @@ BackgroundSyncService::Response(const ui
      parent->NotifyResponse(aRequestId, aResponse);
    }
  }
@@ -49,9 +67,9 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
        // it in the 'origins' db before we can progress the response to the
        // DOM side.
        if (aResponse.get_SyncRegisterResponse().mFirstRegistration()) {
-         mChromeStorageManager->Register(aRequestId,
-             aResponse.get_SyncRegisterResponse().mOrigin());
-@@ -298,43 +301,47 @@ BackgroundSyncService::OnRequestComplete
+         RefPtr<ChromeStorageManager> manager =
+           ChromeStorageManager::GetOrCreate(this);
+@@ -334,43 +338,47 @@ BackgroundSyncService::OnRequestComplete
          }
        }
        break;
@@ -70,7 +88,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
    // Otherwise, this is a response to an internal request that can be handled
    // here.
  
-   // XXX Maybe release ChromeStorageManager.
+   ReleaseChromeStorageManagerRef(aRequestId);
  
    // So far, we only care about GetAll and GetAllOrigins responses.
    switch (aResponse.type()) {
@@ -99,7 +117,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
        break;
    }
  }
-@@ -380,16 +387,17 @@ BackgroundSyncService::OnOnlineStateChan
+@@ -420,16 +428,17 @@ BackgroundSyncService::OnOnlineStateChan
  
  /**
   * StorageManagerIdFactory::Listener implementation.
@@ -117,7 +135,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
    RefPtr<StorageManager> manager;
    nsresult rv = StorageManager::GetOrCreate(this,
                                              aManagerId,
-@@ -407,16 +415,17 @@ BackgroundSyncService::OnStorageManagerI
+@@ -447,16 +456,17 @@ BackgroundSyncService::OnStorageManagerI
    nsID id;
    rv = uuidGenerator->GenerateUUIDInPlace(&id);
    if (NS_WARN_IF(NS_FAILED(rv))) {
