@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  e0ee988b017627e893bb0f06d3fc0f5f2f79c09c
+# Parent  9cb4d68758c87df8df2b35a6769222feb1afe369
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: BackgroundSyncService. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSyncChild.cpp b/dom/backgroundsync/BackgroundSyncChild.cpp
@@ -542,7 +542,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.h b/dom/backgroundsync/Bac
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncService.h
-@@ -0,0 +1,86 @@
+@@ -0,0 +1,87 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -563,6 +563,7 @@ new file mode 100644
 +
 +class BackgroundSyncService final : public OnlineStateObserver::Listener
 +{
++  friend class ChromeStorageManager;
 +  friend class StorageManager;
 +
 +public:
@@ -632,8 +633,8 @@ new file mode 100644
 diff --git a/dom/backgroundsync/ChromeStorageManager.cpp b/dom/backgroundsync/ChromeStorageManager.cpp
 --- a/dom/backgroundsync/ChromeStorageManager.cpp
 +++ b/dom/backgroundsync/ChromeStorageManager.cpp
-@@ -245,51 +245,54 @@ private:
-   RefPtr<ChromeStorageAction> mAction;
+@@ -250,51 +250,54 @@ private:
+   SyncOpResponse mResponse;
  };
  
  NS_IMPL_ISUPPORTS(StorageActionRunnable, nsICancelableRunnable, nsIRunnable)
@@ -690,6 +691,24 @@ diff --git a/dom/backgroundsync/ChromeStorageManager.cpp b/dom/backgroundsync/Ch
  ChromeStorageManager::Init()
  {
    AssertIsOnBackgroundThread();
+@@ -370,15 +373,16 @@ ChromeStorageManager::GetAll(const nsID&
+   ExecuteStorageAction(action);
+ }
+ 
+ void
+ ChromeStorageManager::OnRequestComplete(const nsID& aRequestId,
+                                         const SyncOpResponse& aResponse)
+ {
+   AssertIsOnBackgroundThread();
++  MOZ_ASSERT(mService);
+ 
+-  // XXX Notify listener.
++  mService->OnRequestComplete(aRequestId, aResponse);
+ }
+ 
+ } // namespace backgroundsync
+ } // namespace dom
+ } // namespace mozilla
 diff --git a/dom/backgroundsync/ChromeStorageManager.h b/dom/backgroundsync/ChromeStorageManager.h
 --- a/dom/backgroundsync/ChromeStorageManager.h
 +++ b/dom/backgroundsync/ChromeStorageManager.h
