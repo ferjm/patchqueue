@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  2f76a535149ee64b1dd4d88c245a89b37488fc23
+# Parent  a91843c596e66b1080f368031ed066e57fa14698
 
 diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/BackgroundSyncService.cpp
 --- a/dom/backgroundsync/BackgroundSyncService.cpp
@@ -913,7 +913,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
  
    if (NS_WARN_IF(mState == Closing)) {
      OnRequestComplete(aRequestId,
-@@ -761,16 +780,17 @@ StorageManager::OnRequestComplete(const 
+@@ -761,15 +780,16 @@ StorageManager::OnRequestComplete(const 
  
    MaybeAllowContextToClose();
  }
@@ -923,11 +923,10 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
                                    const SyncOpResponse& aResponse)
  {
 +  printf_stderr("StorageManager::OnRequestComplete\n");
-   switch(aResponse.type()) {
-     case SyncOpResponse::TSyncRegisterResponse:
-     case SyncOpResponse::TSyncGetTagsResponse:
-     case SyncOpResponse::TSyncOpError:
-       mService->OnRequestComplete(aRequestId, SyncOpResponse(aResponse));
-       break;
-     case SyncOpResponse::TSyncGetAllResponse:
-       break;
+   mService->OnRequestComplete(aRequestId, SyncOpResponse(aResponse));
+   OnRequestComplete(aRequestId);
+ }
+ 
+ } // namespace backgroundsync
+ } // namespace dom
+ } // namespace mozilla
