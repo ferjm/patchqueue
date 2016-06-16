@@ -244,7 +244,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncService.cpp
-@@ -0,0 +1,427 @@
+@@ -0,0 +1,467 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -407,6 +407,41 @@ new file mode 100644
 +}
 +
 +// ----------------------------------------------------------------------------
++// ChromeStorageManager
++
++struct BackgroundSyncService::ChromeStorageManagerRef final
++{
++  explicit ChromeStorageManagerRef(ChromeStorageManager* aChromeStorageManager)
++    : mChromeStorageManager(aChromeStorageManager)
++  {}
++
++  RefPtr<ChromeStorageManager> mChromeStorageManager;
++};
++
++
++void
++BackgroundSyncService::AddChromeStorageManagerRef(
++    const nsID& aRequestId, ChromeStorageManager* aChromeStorageManager)
++{
++  ChromeStorageManagerRef* ref =
++    new ChromeStorageManagerRef(aChromeStorageManager);
++  mChromeStorageManagers.Put(aRequestId, ref);
++}
++
++void
++BackgroundSyncService::ReleaseChromeStorageManagerRef(const nsID& aRequestId)
++{
++  if (!mChromeStorageManagers.Contains(aRequestId)) {
++    return;
++  }
++  ChromeStorageManagerRef* ref;
++  mChromeStorageManagers.Get(aRequestId, &ref);
++  nsAutoPtr<ChromeStorageManagerRef> doomed;
++  mChromeStorageManagers.RemoveAndForget(aRequestId, doomed);
++}
++
++// ----------------------------------------------------------------------------
++
 +
 +BackgroundSyncService::BackgroundSyncService()
 +  : mOnlineState(OnlineStateObserver::UNKNOWN)
@@ -423,12 +458,10 @@ new file mode 100644
 +  AssertIsOnBackgroundThread();
 +  MOZ_ASSERT(sInstance == this);
 +  MOZ_ASSERT(mBackgroundSyncActors.Count() == 0);
++  MOZ_ASSERT(mStorageManagers.Count() == 0);
++  MOZ_ASSERT(mChromeStorageManagers.Count() == 0);
 +
 +  mOnlineStateObserver->Shutdown(this);
-+
-+  // XXX do construction and destruction of mChromeStorageManager
-+  //     based on requests status.
-+  mChromeStorageManager = nullptr;
 +
 +  sInstance = nullptr;
 +}
@@ -451,9 +484,6 @@ new file mode 100644
 +BackgroundSyncService::Init()
 +{
 +  mOnlineStateObserver = OnlineStateObserver::Init(this);
-+  // XXX do construction and destruction of mChromeStorageManager
-+  //     based on requests status.
-+  mChromeStorageManager = ChromeStorageManager::GetOrCreate(this);
 +}
 +
 +// --------------------------------------------------------------------------
@@ -528,7 +558,10 @@ new file mode 100644
 +      // it in the 'origins' db before we can progress the response to the
 +      // DOM side.
 +      if (aResponse.get_SyncRegisterResponse().mFirstRegistration()) {
-+        mChromeStorageManager->Register(aRequestId,
++        RefPtr<ChromeStorageManager> manager =
++          ChromeStorageManager::GetOrCreate(this);
++        AddChromeStorageManagerRef(aRequestId, manager);
++        manager->Register(aRequestId,
 +            aResponse.get_SyncRegisterResponse().mOrigin());
 +        return;
 +      }
@@ -540,7 +573,10 @@ new file mode 100644
 +        // this origin. If that's the case, we need to remove that origin from
 +        // the 'origins' DB before we can progress the response to the DOM side.
 +        if (origin.Length()) {
-+          mChromeStorageManager->Unregister(aRequestId, origin);
++          RefPtr<ChromeStorageManager> manager =
++            ChromeStorageManager::GetOrCreate(this);
++          AddChromeStorageManagerRef(aRequestId, manager);
++          manager->Unregister(aRequestId, origin);
 +          return;
 +        }
 +      }
@@ -559,7 +595,7 @@ new file mode 100644
 +  // Otherwise, this is a response to an internal request that can be handled
 +  // here.
 +
-+  // XXX Maybe release ChromeStorageManager.
++  ReleaseChromeStorageManagerRef(aRequestId);
 +
 +  // So far, we only care about GetAll and GetAllOrigins responses.
 +  switch (aResponse.type()) {
@@ -620,7 +656,11 @@ new file mode 100644
 +    return;
 +  }
 +
-+  mChromeStorageManager->GetAll(id);
++  RefPtr<ChromeStorageManager> manager =
++    ChromeStorageManager::GetOrCreate(this);
++  AddChromeStorageManagerRef(id, manager);
++
++  manager->GetAll(id);
 +}
 +
 +// --------------------------------------------------------------------------
@@ -676,7 +716,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.h b/dom/backgroundsync/Bac
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncService.h
-@@ -0,0 +1,102 @@
+@@ -0,0 +1,110 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -752,7 +792,15 @@ new file mode 100644
 +  // --------------------------------------------------------------------------
 +  // ChromeStorageManager
 +
-+  RefPtr<ChromeStorageManager> mChromeStorageManager;
++  void AddChromeStorageManagerRef(const nsID& aRequestId,
++                                  ChromeStorageManager* aChromeStorageManager);
++  void ReleaseChromeStorageManagerRef(const nsID& aRequestId);
++
++  // References to the ChromeStorageManager managing the system principal
++  // storage.
++  struct ChromeStorageManagerRef;
++  nsClassHashtable<nsIDHashKey, ChromeStorageManagerRef>
++    mChromeStorageManagers;
 +
 +  // --------------------------------------------------------------------------
 +  // OnlineStateObserver::Listener method
