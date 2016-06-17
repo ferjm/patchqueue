@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  fd0aafcee5c77818bfc1442d9de38e5b67a96b6a
+# Parent  bc2eb828506e498502e17a8db98103a490d06b7a
 Bug 1217544 - Implement one-off BackgroundSync API. Part 5: Storage. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
@@ -1860,7 +1860,7 @@ diff --git a/dom/backgroundsync/DBSchema.cpp b/dom/backgroundsync/DBSchema.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/DBSchema.cpp
-@@ -0,0 +1,355 @@
+@@ -0,0 +1,358 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -2191,20 +2191,23 @@ new file mode 100644
 +    rv = state->GetString(1, aRegistrationOut.mOrigin());
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
-+    rv = state->GetString(2, aRegistrationOut.mScope());
++    rv = state->GetString(2, aRegistrationOut.mOriginSuffix());
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
-+    rv = state->GetString(3, aRegistrationOut.mTag());
++    rv = state->GetString(3, aRegistrationOut.mScope());
++    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++    rv = state->GetString(4, aRegistrationOut.mTag());
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +    int32_t registrationState;
-+    rv = state->GetInt32(4, &registrationState);
++    rv = state->GetInt32(5, &registrationState);
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +    aRegistrationOut.mState() =
 +      RegistrationState(registrationState);
 +
 +    int32_t lastChance;
-+    rv = state->GetInt32(5, &lastChance);
++    rv = state->GetInt32(6, &lastChance);
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +    aRegistrationOut.mLastChance() = bool(lastChance);
 +  }
