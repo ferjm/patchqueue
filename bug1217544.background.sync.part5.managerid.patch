@@ -44,7 +44,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
      RefPtr<SyncOpRunnable> runnable = mPendingOperations[i];
      MOZ_ASSERT(runnable);
      runnable->SetActor(mActor);
-@@ -422,17 +422,30 @@ BackgroundSync::ExecuteOp(const SyncOpAr
+@@ -422,17 +422,38 @@ BackgroundSync::ExecuteOp(const SyncOpAr
  
  // WebIDL interface methods.
  
@@ -60,13 +60,21 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
 +  if (NS_WARN_IF(NS_FAILED(rv))) {
 +    // XXX create and reject promise
 +  }
++
 +  nsAutoCString origin;
 +  rv = principal->GetOrigin(origin);
 +  if (NS_WARN_IF(NS_FAILED(rv))) {
 +    // XXX create and reject promise
 +  }
 +
++  nsAutoCString originSuffix;
++  rv = principal->GetOriginSuffix(originSuffix);
++  if (NS_WARN_IF(NS_FAILED(rv))) {
++    // XXX create and reject promise
++  }
++
 +  const SyncRegisterArgs args(NS_ConvertUTF8toUTF16(origin),
++                              NS_ConvertUTF8toUTF16(originSuffix),
 +                              mScope, (nsString(aTag)));
    return ExecuteOp(SyncOpArgs(args), aRv);
  }
@@ -132,7 +140,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncChild.h b/dom/backgroundsync/Backg
 diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh
 --- a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh
 +++ b/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh
-@@ -1,55 +1,128 @@
+@@ -1,55 +1,130 @@
  /* This Source Code Form is subject to the terms of the Mozilla Public
   * License, v. 2.0. If a copy of the MPL was not distributed with this
   * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -149,6 +157,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsyn
  struct SyncRegisterArgs
  {
 +  nsString mOrigin;
++  nsString mOriginSuffix;
    nsString mScope;
    nsString mTag;
  };
@@ -186,6 +195,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsyn
 +{
 +  nsString mId;
 +  nsString mOrigin;
++  nsString mOriginSuffix;
 +  nsString mScope;
 +  nsString mTag;
 +  RegistrationState mState;
@@ -1843,7 +1853,7 @@ diff --git a/dom/backgroundsync/DBSchema.cpp b/dom/backgroundsync/DBSchema.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/DBSchema.cpp
-@@ -0,0 +1,304 @@
+@@ -0,0 +1,315 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -1874,6 +1884,7 @@ new file mode 100644
 +  "CREATE TABLE registrations ("
 +    "id TEXT NOT NULL PRIMARY KEY, " // Concatenation of scope + tag
 +    "origin TEXT NOT NULL, "
++    "originSuffix TEXT NOT NULL, "
 +    "scope TEXT NOT NULL, "
 +    "tag TEXT NOT NULL, "
 +    "state INTEGER NOT NULL, "
@@ -1928,6 +1939,7 @@ new file mode 100644
 +      "INSERT INTO registrations ("
 +        "id, "
 +        "origin, "
++        "originSuffix, "
 +        "scope, "
 +        "tag, "
 +        "state, "
@@ -1935,6 +1947,7 @@ new file mode 100644
 +      ") VALUES ("
 +        ":id, "
 +        ":origin, "
++        ":originSuffix, "
 +        ":scope, "
 +        ":tag, "
 +        ":state, "
@@ -1951,6 +1964,10 @@ new file mode 100644
 +
 +    rv = state->BindStringByName(NS_LITERAL_CSTRING("origin"),
 +                                 aArgs.mOrigin());
++    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++    rv = state->BindStringByName(NS_LITERAL_CSTRING("originSuffix"),
++                                 aArgs.mOriginSuffix());
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +    rv = state->BindStringByName(NS_LITERAL_CSTRING("scope"),
@@ -2044,24 +2061,28 @@ new file mode 100644
 +    rv = state->GetString(1, origin);
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
++    nsString originSuffix;
++    rv = state->GetString(2, originSuffix);
++    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
 +    nsString scope;
-+    rv = state->GetString(2, scope);
++    rv = state->GetString(3, scope);
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +    nsString tag;
-+    rv = state->GetString(3, tag);
++    rv = state->GetString(4, tag);
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +    int32_t registrationState;
-+    rv = state->GetInt32(4, &registrationState);
++    rv = state->GetInt32(5, &registrationState);
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +    int32_t lastChance;
-+    rv = state->GetInt32(5, &lastChance);
++    rv = state->GetInt32(6, &lastChance);
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
-+    Registration registration(id, origin, scope, tag,
-+      static_cast<RegistrationState>(registrationState),
++    Registration registration(id, origin, originSuffix,
++      scope, tag, static_cast<RegistrationState>(registrationState),
 +      lastChance);
 +    aRegistrations.AppendElement(registration);
 +  }
