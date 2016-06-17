@@ -38,7 +38,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsyn
  
 +struct SyncChangeStateResponse
 +{
-+  Registration registration;
++  Registration mRegistration;
 +};
 +
  struct SyncRegisterOriginResponse
@@ -307,7 +307,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncService.cpp
-@@ -0,0 +1,567 @@
+@@ -0,0 +1,622 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -503,7 +503,6 @@ new file mode 100644
 +  RefPtr<ChromeStorageManager> mChromeStorageManager;
 +};
 +
-+
 +void
 +BackgroundSyncService::AddChromeStorageManagerRef(
 +    const nsID& aRequestId, ChromeStorageManager* aChromeStorageManager)
@@ -530,7 +529,6 @@ new file mode 100644
 +}
 +
 +// ----------------------------------------------------------------------------
-+
 +
 +BackgroundSyncService::BackgroundSyncService()
 +  : mOnlineState(OnlineStateObserver::UNKNOWN)
@@ -750,6 +748,30 @@ new file mode 100644
 +      }
 +      break;
 +    case SyncOpResponse::TSyncChangeStateResponse:
++      {
++        // For now we only care about a change of state to FIRING.
++        Registration registration =
++          aResponse.get_SyncChangeStateResponse().mRegistration();
++        if (registration.mState() != RegistrationState::FIRING) {
++          return;
++        }
++
++        // If we changed the state to FIRING, that means that we are trying to
++        // trigger a sync event for a specific registration.
++        // In that case, we need to check if we still are online and so we can
++        // continue with the process of firing the sync event. Otherwise, we
++        // need to get back to the PENDING state and bail out here.
++        if (mOnlineState != OnlineStateObserver::ONLINE) {
++          RefPtr<GetStorageManagerRunnable> runnable =
++            new GetStorageManagerRunnable(this, registration.mOrigin(),
++                SyncInternalOp(SyncChangeStateArgs(registration.mId(),
++                               RegistrationState::PENDING)));
++          MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(runnable));
++          return;
++        }
++
++        ContinueTriggeringSyncEvent(registration);
++      }
 +      break;
 +    default:
 +      break;
@@ -782,6 +804,39 @@ new file mode 100644
 +      SyncChangeStateArgs(aRegistration.mId(),RegistrationState::FIRING)
 +    ));
 +  MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(runnable));
++}
++
++void
++BackgroundSyncService::ContinueTriggeringSyncEvent(
++    const Registration& aRegistration)
++{
++  AssertIsOnBackgroundThread();
++
++  if (mOnlineState != OnlineStateObserver::ONLINE) {
++    if (aRegistration.mState() == RegistrationState::FIRING) {
++      RefPtr<GetStorageManagerRunnable> runnable =
++        new GetStorageManagerRunnable(this, aRegistration.mOrigin(), SyncInternalOp(
++          SyncChangeStateArgs(aRegistration.mId(),RegistrationState::FIRING)
++        ));
++      MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(runnable));
++    }
++    return;
++  }
++
++  for (auto iter = mServiceWorkerManagerActors.Iter(); !iter.Done();
++       iter.Next()) {
++    RefPtr<ServiceWorkerManagerParent> parent = iter.Get()->GetKey();
++    MOZ_ASSERT(parent);
++    Unused << parent->SendNotifyBackgroundSyncEvent(aRegistration.mOrigin(),
++                                                    aRegistration.mScope(),
++                                                    aRegistration.mTag(),
++                                                    aRegistration.mLastChance());
++  }
++
++  // XXX Bug 1260141. For now we simply remove the sync registration, but
++  // we need to implement the sync event handling logic.
++  //
++  // XXX
 +}
 +
 +// --------------------------------------------------------------------------
@@ -879,7 +934,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.h b/dom/backgroundsync/Bac
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncService.h
-@@ -0,0 +1,131 @@
+@@ -0,0 +1,132 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -950,6 +1005,7 @@ new file mode 100644
 +  // --------------------------------------------------------------------------
 +
 +  void MaybeTriggerSyncEvent(const Registration& aRegistration);
++  void ContinueTriggeringSyncEvent(const Registration& aRegistration);
 +
 +  // --------------------------------------------------------------------------
 +
