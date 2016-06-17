@@ -140,7 +140,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncChild.h b/dom/backgroundsync/Backg
 diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh
 --- a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh
 +++ b/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh
-@@ -1,55 +1,137 @@
+@@ -1,55 +1,138 @@
  /* This Source Code Form is subject to the terms of the Mozilla Public
   * License, v. 2.0. If a copy of the MPL was not distributed with this
   * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -219,6 +219,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsyn
 +
 +struct SyncRegisterOriginResponse
 +{
++  Registration mRegistration;
 +};
 +
 +struct SyncUnregisterOriginResponse
@@ -753,7 +754,7 @@ diff --git a/dom/backgroundsync/ChromeStorageManager.cpp b/dom/backgroundsync/Ch
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/ChromeStorageManager.cpp
-@@ -0,0 +1,384 @@
+@@ -0,0 +1,402 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -762,6 +763,7 @@ new file mode 100644
 +
 +#include "ChromeDBSchema.h"
 +#include "ChromeStorageManager.h"
++#include "mozilla/dom/backgroundsync/BackgroundSyncIPCTypes.h"
 +
 +#include "nsAppDirectoryServiceDefs.h"
 +#include "nsIThread.h"
@@ -804,6 +806,14 @@ new file mode 100644
 +    , mOrigin(aOrigin)
 +  {}
 +
++  ChromeStorageAction(Type aType,
++                      const nsID& aRequestId,
++                      const Registration& aRegistration)
++    : mType(aType)
++    , mRequestId(aRequestId)
++    , mRegistration(aRegistration)
++  {}
++
 +  Type Type()
 +  {
 +    return mType;
@@ -819,12 +829,18 @@ new file mode 100644
 +    return mRequestId;
 +  }
 +
++  Registration& GetRegistration()
++  {
++    return mRegistration;
++  }
++
 +private:
 +  ~ChromeStorageAction() {}
 +
 +  enum Type mType;
 +  nsID mRequestId;
 +  nsString mOrigin;
++  Registration mRegistration;
 +};
 +
 +//-----------------------------------------------------------------------------
@@ -955,11 +971,14 @@ new file mode 100644
 +
 +    switch (mAction->Type()) {
 +      case ChromeStorageAction::Type::Register:
-+        rv = chromedb::Register(mConn, mAction->Origin());
-+        if (NS_WARN_IF(NS_FAILED(rv))) {
-+          mResponse = SyncOpError(static_cast<uint32_t>(rv));
-+        } else {
-+          mResponse = SyncRegisterOriginResponse();
++        {
++          Registration registration = mAction->GetRegistration();
++          rv = chromedb::Register(mConn, registration.mOrigin());
++          if (NS_WARN_IF(NS_FAILED(rv))) {
++            mResponse = SyncOpError(static_cast<uint32_t>(rv));
++          } else {
++            mResponse = SyncRegisterOriginResponse(registration);
++          }
 +        }
 +        break;
 +      case ChromeStorageAction::Type::Unregister:
@@ -1094,13 +1113,13 @@ new file mode 100644
 +
 +void
 +ChromeStorageManager::Register(const nsID& aRequestId,
-+                               const nsAString& aOrigin)
++                               const Registration& aRegistration)
 +{
 +  AssertIsOnBackgroundThread();
 +
 +  RefPtr<ChromeStorageAction> action =
 +    new ChromeStorageAction(ChromeStorageAction::Type::Register, aRequestId,
-+                            aOrigin);
++                            aRegistration);
 +  ExecuteStorageAction(action);
 +}
 +
@@ -1142,7 +1161,7 @@ diff --git a/dom/backgroundsync/ChromeStorageManager.h b/dom/backgroundsync/Chro
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/ChromeStorageManager.h
-@@ -0,0 +1,67 @@
+@@ -0,0 +1,68 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -1171,6 +1190,7 @@ new file mode 100644
 +namespace backgroundsync {
 +
 +class ChromeStorageAction;
++class Registration;
 +
 +class ChromeStorageManager final
 +{
@@ -1183,7 +1203,7 @@ new file mode 100644
 +  static already_AddRefed<ChromeStorageManager>
 +  GetOrCreate();
 +
-+  void Register(const nsID& aRequestId, const nsAString& aOrigin);
++  void Register(const nsID& aRequestId, const Registration& aRegistration);
 +  void Unregister(const nsID& aRequestId, const nsAString& aOrigin);
 +  void GetAll(const nsID& aRequestId);
 +
