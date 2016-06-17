@@ -556,7 +556,7 @@ diff --git a/dom/backgroundsync/ChromeDBSchema.cpp b/dom/backgroundsync/ChromeDB
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/ChromeDBSchema.cpp
-@@ -0,0 +1,132 @@
+@@ -0,0 +1,136 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -646,6 +646,10 @@ new file mode 100644
 +  nsresult rv = aConn->CreateStatement(NS_LITERAL_CSTRING(
 +    "DELETE FROM origins WHERE origin=:origin;"
 +  ), getter_AddRefs(state));
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  nsString origin;
++  rv = state->BindStringByName(NS_LITERAL_CSTRING("origin"), aOrigin);
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +  rv = state->Execute();
@@ -1860,7 +1864,7 @@ diff --git a/dom/backgroundsync/DBSchema.cpp b/dom/backgroundsync/DBSchema.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/DBSchema.cpp
-@@ -0,0 +1,357 @@
+@@ -0,0 +1,359 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -2117,17 +2121,19 @@ new file mode 100644
 +  rv = getOriginState->BindStringByName(NS_LITERAL_CSTRING("id"), aArgs.mId());
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
++  int32_t count = 0;
 +  bool hasMoreData = false;
 +  while (NS_SUCCEEDED(getOriginState->ExecuteStep(&hasMoreData))
 +         && hasMoreData) {
-+    // We only get the origin if there's one registration. If there are
-+    // more than one, we just bail out.
-+    if (!hasMoreData) {
-+      printf_stderr("YAY\n");
++    // We only set the origin if there's one registration.
++    if (count == 0) {
 +      rv = getOriginState->GetString(0, aOrigin);
 +      if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++    } else if (!aOrigin.IsEmpty() && hasMoreData){
++      aOrigin = EmptyString();
 +    }
 +    hasMoreData = false;
++    count++;
 +  }
 +
 +  nsCOMPtr<mozIStorageStatement> state;
