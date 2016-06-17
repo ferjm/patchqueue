@@ -307,7 +307,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncService.cpp
-@@ -0,0 +1,564 @@
+@@ -0,0 +1,567 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -354,6 +354,7 @@ new file mode 100644
 +                            const SyncInternalOp& aOp)
 +    : mService(aService)
 +    , mOrigins(nsTArray<nsString>())
++    , mInitiatingThread(do_GetCurrentThread())
 +    , mOp(aOp)
 +  {
 +    mOrigins.AppendElement(aOrigins);
@@ -399,6 +400,8 @@ new file mode 100644
 +      if (NS_WARN_IF(NS_FAILED(rv))) {
 +        return rv;
 +      }
++
++      MOZ_ASSERT(mInitiatingThread);
 +
 +      rv = mInitiatingThread->Dispatch(this, nsIThread::DISPATCH_NORMAL);
 +      if (NS_WARN_IF(NS_FAILED(rv))) {
@@ -1145,7 +1148,7 @@ diff --git a/dom/backgroundsync/ChromeStorageManager.h b/dom/backgroundsync/Chro
 diff --git a/dom/backgroundsync/DBSchema.cpp b/dom/backgroundsync/DBSchema.cpp
 --- a/dom/backgroundsync/DBSchema.cpp
 +++ b/dom/backgroundsync/DBSchema.cpp
-@@ -269,17 +269,18 @@ Remove(mozIStorageConnection* aConn,
+@@ -269,36 +269,79 @@ Remove(mozIStorageConnection* aConn,
    rv = state->Execute();
    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
  
@@ -1163,9 +1166,13 @@ diff --git a/dom/backgroundsync/DBSchema.cpp b/dom/backgroundsync/DBSchema.cpp
  
    nsCOMPtr<mozIStorageStatement> state;
    nsresult rv = aConn->CreateStatement(NS_LITERAL_CSTRING(
-     "UPDATE state SET state=:regstate WHERE id=:id;"
+-    "UPDATE state SET state=:regstate WHERE id=:id;"
++    "UPDATE registrations SET state=:regstate WHERE id=:id;"
    ), getter_AddRefs(state));
-@@ -290,15 +291,57 @@ ChangeState(mozIStorageConnection* aConn
+   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+ 
+   rv = state->BindInt32ByName(NS_LITERAL_CSTRING("regstate"),
+                               static_cast<int32_t>(aArgs.mState()));
    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
  
    rv = state->BindStringByName(NS_LITERAL_CSTRING("id"), aArgs.mId());
