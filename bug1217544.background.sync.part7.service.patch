@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  46da78bfeec1b2a9bf9a0fc881612e98b52339c0
+# Parent  7aaac086f3478f3970845590ada349aa491218bc
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: BackgroundSyncService. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSyncChild.cpp b/dom/backgroundsync/BackgroundSyncChild.cpp
@@ -246,7 +246,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncService.cpp
-@@ -0,0 +1,622 @@
+@@ -0,0 +1,624 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -766,7 +766,7 @@ new file mode 100644
 +       iter.Next()) {
 +    RefPtr<ServiceWorkerManagerParent> parent = iter.Get()->GetKey();
 +    MOZ_ASSERT(parent);
-+    Unused << parent->SendNotifyBackgroundSyncEvent(aRegistration.mOrigin(),
++    Unused << parent->SendNotifyBackgroundSyncEvent(aRegistration.mOriginSuffix(),
 +                                                    aRegistration.mScope(),
 +                                                    aRegistration.mTag(),
 +                                                    aRegistration.mLastChance());
@@ -775,7 +775,9 @@ new file mode 100644
 +  // XXX Bug 1260141. For now we simply remove the sync registration, but
 +  // we need to implement the sync event handling logic.
 +  //
-+  // XXX
++  RefPtr<GetStorageManagerRunnable> runnable =
++    new GetStorageManagerRunnable(this, aRegistration.mOrigin(),
++        SyncInternalOp(SyncRemoveArgs(aRegistration.mId())));
 +}
 +
 +// --------------------------------------------------------------------------
@@ -1182,35 +1184,9 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
        ref->Init(oldManager);
  
        MOZ_ASSERT(!sFactory->mManagerList.Contains(ref));
-@@ -468,44 +469,46 @@ public:
-     : BaseAction(aRequestId, aManager)
-     , mArgs(aChangeStateArgs)
-   {}
- 
-   virtual nsresult
-   RunSyncOnTarget(const QuotaInfo& aQuotaInfo,
-                   mozIStorageConnection* aConn) override
-   {
--    nsresult rv = db::ChangeState(aConn, mArgs);
-+    nsresult rv = db::ChangeState(aConn, mArgs, mRegistration);
-     NS_WARN_IF(NS_FAILED(rv));
-     return rv;
-   }
- 
-   virtual void
-   Complete(nsresult aRv) override
-   {
-     NS_WARN_IF(NS_FAILED(aRv));
-     // We need to remove the reference to the request independently of
-     // its result so we can close the context.
-     mManager->OnRequestComplete(mRequestId,
--      SyncOpResponse(void_t()));
-+        SyncChangeStateResponse(mRegistration));
-   }
- 
- private:
+@@ -492,21 +493,22 @@ private:
    SyncChangeStateArgs mArgs;
-+  Registration mRegistration;
+   Registration mRegistration;
  };
  
  // ---------------------------------------------------------------------------
@@ -1233,7 +1209,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
  {
    mozilla::ipc::AssertIsOnBackgroundThread();
  
-@@ -522,34 +525,39 @@ StorageManager::ShutdownAll()
+@@ -523,34 +525,39 @@ StorageManager::ShutdownAll()
  void
  StorageManager::Abort(const nsACString& aOrigin)
  {
@@ -1275,7 +1251,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
    MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(
          NewRunnableMethod(ioThread, &nsIThread::Shutdown)));*/
  }
-@@ -751,20 +759,19 @@ StorageManager::OnRequestComplete(const 
+@@ -752,20 +759,19 @@ StorageManager::OnRequestComplete(const 
    NS_ASSERT_OWNINGTHREAD(StorageManager);
    MOZ_ASSERT(mPendingRequests.Contains(aRequestId));
  
