@@ -179,18 +179,6 @@ diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsyn
    SyncOpArgs mArgs;
  };
  
- struct SyncRegisterResponse
- {
--  bool mSuccess;
-+  nsString mOrigin;
-+  bool mFirstRegistration;
- };
- 
- struct SyncGetTagsResponse
- {
-   nsString[] mTags;
- };
- 
 +struct Registration
 +{
 +  nsString mId;
@@ -202,6 +190,18 @@ diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsyn
 +  bool mLastChance;
 +};
 +
+ struct SyncRegisterResponse
+ {
+-  bool mSuccess;
++  Registration mRegistration;
++  bool mFirstRegistration;
+ };
+ 
+ struct SyncGetTagsResponse
+ {
+   nsString[] mTags;
+ };
+ 
 +struct SyncGetAllResponse
 +{
 +  Registration[] mRegistrations;
@@ -1884,7 +1884,7 @@ diff --git a/dom/backgroundsync/DBSchema.cpp b/dom/backgroundsync/DBSchema.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/DBSchema.cpp
-@@ -0,0 +1,359 @@
+@@ -0,0 +1,372 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -1892,6 +1892,7 @@ new file mode 100644
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 +
 +#include "DBSchema.h"
++#include "mozilla/dom/backgroundsync/BackgroundSyncIPCTypes.h"
 +
 +#include "ipc/IPCMessageUtils.h"
 +#include "mozIStorageConnection.h"
@@ -1902,6 +1903,8 @@ new file mode 100644
 +namespace dom {
 +namespace backgroundsync {
 +namespace db {
++
++using mozilla::dom::backgroundsync::Registration;
 +
 +const int32_t kFirstShippedSchemaVersion = 1;
 +
@@ -1957,7 +1960,8 @@ new file mode 100644
 +nsresult
 +Register(mozIStorageConnection* aConn,
 +         const SyncRegisterArgs& aArgs,
-+         bool& firstRegistrationForOrigin)
++         bool& firstRegistrationForOrigin,
++         Registration& aRegistration)
 +{
 +  MOZ_ASSERT(!NS_IsMainThread());
 +  MOZ_ASSERT(aConn);
@@ -1990,23 +1994,32 @@ new file mode 100644
 +    nsString id;
 +    GetId(aArgs.mScope(), aArgs.mTag(), id);
 +
-+    rv = state->BindStringByName(NS_LITERAL_CSTRING("id"), id);
++    Registration registration(id, aArgs.mOrigin(),
++                              aArgs.mOriginSuffix(),
++                              aArgs.mScope(),
++                              aArgs.mTag(),
++                              RegistrationState::PENDING,
++                              false);
++    aRegistration = registration;
++
++    rv = state->BindStringByName(NS_LITERAL_CSTRING("id"),
++                                 registration.mId());
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +    rv = state->BindStringByName(NS_LITERAL_CSTRING("origin"),
-+                                 aArgs.mOrigin());
++                                 registration.mOrigin());
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +    rv = state->BindStringByName(NS_LITERAL_CSTRING("originSuffix"),
-+                                 aArgs.mOriginSuffix());
++                                 registration.mOriginSuffix());
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +    rv = state->BindStringByName(NS_LITERAL_CSTRING("scope"),
-+                                 aArgs.mScope());
++                                 registration.mScope());
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +    rv = state->BindStringByName(NS_LITERAL_CSTRING("tag"),
-+                                 aArgs.mTag());
++                                 registration.mTag());
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +    rv = state->BindInt32ByName(NS_LITERAL_CSTRING("state"),
@@ -2248,7 +2261,7 @@ diff --git a/dom/backgroundsync/DBSchema.h b/dom/backgroundsync/DBSchema.h
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/DBSchema.h
-@@ -0,0 +1,68 @@
+@@ -0,0 +1,72 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -2264,6 +2277,9 @@ new file mode 100644
 +namespace mozilla {
 +namespace dom {
 +namespace backgroundsync {
++
++class Registration;
++
 +namespace db {
 +
 +struct Expect;
@@ -2282,7 +2298,8 @@ new file mode 100644
 +nsresult
 +Register(mozIStorageConnection* aConn,
 +         const SyncRegisterArgs& aArgs,
-+         bool& firstRegistrationForOrigin);
++         bool& firstRegistrationForOrigin,
++         Registration& aRegistration);
 +
 +nsresult
 +GetTags(mozIStorageConnection* aConn,
@@ -4482,7 +4499,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/StorageManager.cpp
-@@ -0,0 +1,771 @@
+@@ -0,0 +1,773 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -4813,7 +4830,8 @@ new file mode 100644
 +  RunSyncOnTarget(const QuotaInfo& aQuotaInfo,
 +                  mozIStorageConnection* aConn) override
 +  {
-+    nsresult rv = db::Register(aConn, mArgs, mFirstRegistration);
++    nsresult rv = db::Register(aConn, mArgs, mFirstRegistration,
++                               mRegistration);
 +    NS_WARN_IF(NS_FAILED(rv));
 +    return rv;
 +  }
@@ -4826,13 +4844,14 @@ new file mode 100644
 +        SyncOpError(static_cast<uint32_t>(aRv)));
 +    } else {
 +      mManager->OnRequestComplete(mRequestId,
-+          SyncRegisterResponse(mArgs.mOrigin(), mFirstRegistration));
++          SyncRegisterResponse(mRegistration, mFirstRegistration));
 +    }
 +  }
 +
 +private:
 +  SyncRegisterArgs mArgs;
 +  bool mFirstRegistration;
++  Registration mRegistration;
 +};
 +
 +// ---------------------------------------------------------------------------
