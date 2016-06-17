@@ -1,11 +1,11 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  a510036045dcaa2ca1b77a0d32de69941e869a56
+# Parent  cec63eaa97c526d8e8fdfe8e538ea08f0a411218
 
 diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/BackgroundSyncService.cpp
 --- a/dom/backgroundsync/BackgroundSyncService.cpp
 +++ b/dom/backgroundsync/BackgroundSyncService.cpp
-@@ -72,16 +72,17 @@ public:
+@@ -73,16 +73,17 @@ public:
      MOZ_ASSERT(NS_IsMainThread());
  
      nsIScriptSecurityManager *securityManager =
@@ -23,11 +23,11 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
  
        MOZ_ASSERT(principal);
  
-@@ -217,25 +218,27 @@ BackgroundSyncService::ReleaseChromeStor
+@@ -218,25 +219,27 @@ BackgroundSyncService::ReleaseChromeStor
+   mChromeStorageManagers.RemoveAndForget(aRequestId, doomed);
  }
  
  // ----------------------------------------------------------------------------
- 
  
  BackgroundSyncService::BackgroundSyncService()
    : mOnlineState(OnlineStateObserver::UNKNOWN)
@@ -51,7 +51,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
  
    mOnlineStateObserver->Shutdown(this);
  
-@@ -347,16 +350,17 @@ BackgroundSyncService::Response(const ui
+@@ -348,16 +351,17 @@ BackgroundSyncService::Response(const ui
      parent->NotifyResponse(aRequestId, aResponse);
    }
  }
@@ -69,7 +69,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
        // it in the 'origins' db before we can progress the response to the
        // DOM side.
        if (aResponse.get_SyncRegisterResponse().mFirstRegistration()) {
-@@ -383,65 +387,71 @@ BackgroundSyncService::OnRequestComplete
+@@ -384,70 +388,77 @@ BackgroundSyncService::OnRequestComplete
          }
        }
        break;
@@ -132,16 +132,40 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
        }
        break;
      case SyncOpResponse::TSyncChangeStateResponse:
-+      printf_stderr("ChangeStateResponse\n");
-       break;
-     default:
-       break;
+       {
++        printf_stderr("ChangeStateResponse\n");
+         // For now we only care about a change of state to FIRING.
+         Registration registration =
+           aResponse.get_SyncChangeStateResponse().mRegistration();
+         if (registration.mState() != RegistrationState::FIRING) {
++          printf_stderr("Registration not FIRING but %d\n", registration.mState());
+           return;
+         }
+ 
+         // If we changed the state to FIRING, that means that we are trying to
+         // trigger a sync event for a specific registration.
+         // In that case, we need to check if we still are online and so we can
+         // continue with the process of firing the sync event. Otherwise, we
+         // need to get back to the PENDING state and bail out here.
+@@ -479,16 +490,17 @@ BackgroundSyncService::MaybeTriggerSyncE
+     return;
    }
- }
  
- // --------------------------------------------------------------------------
+   // First thing we need to do is to change the state of the registration to
+   // FIRING.
  
-@@ -517,16 +527,17 @@ BackgroundSyncService::OnOnlineStateChan
+   // We only can do that if the registration is in PENDING state though.
+   if (NS_WARN_IF(aRegistration.mState() != RegistrationState::PENDING)) {
++    printf_stderr("Registration should be %d is %d\n", aRegistration::PENDING, aRegistration.mState());
+     return;
+   }
+ 
+   // We need to get the appropriate StorageManager for the registration origin,
+   // so we need to jump to the main thread for that.
+   RefPtr<GetStorageManagerRunnable> runnable =
+     new GetStorageManagerRunnable(this, aRegistration.mOrigin(), SyncInternalOp(
+       SyncChangeStateArgs(aRegistration.mId(),RegistrationState::FIRING)
+@@ -575,16 +587,17 @@ BackgroundSyncService::OnOnlineStateChan
  /**
   * StorageManagerIdFactory::Listener implementation.
   */
@@ -159,7 +183,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
    RefPtr<StorageManager> manager;
    nsresult rv = StorageManager::GetOrCreate(this,
                                              aManagerId,
-@@ -544,16 +555,17 @@ BackgroundSyncService::OnStorageManagerI
+@@ -602,16 +615,17 @@ BackgroundSyncService::OnStorageManagerI
    nsID id;
    rv = uuidGenerator->GenerateUUIDInPlace(&id);
    if (NS_WARN_IF(NS_FAILED(rv))) {
