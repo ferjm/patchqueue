@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  005b8b777fc77ebf25b10a07411414bb7dfa8077
+# Parent  1f9dfab0f578abf2be581531e5c91ca78f3bd692
 
 diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/BackgroundSyncService.cpp
 --- a/dom/backgroundsync/BackgroundSyncService.cpp
@@ -156,7 +156,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
  
    // We only can do that if the registration is in PENDING state though.
    if (NS_WARN_IF(aRegistration.mState() != RegistrationState::PENDING)) {
-+    printf_stderr("Registration should be %d is %d\n", aRegistration::PENDING, aRegistration.mState());
++    printf_stderr("Registration should be %d is %d\n", RegistrationState::PENDING, aRegistration.mState());
      return;
    }
  
