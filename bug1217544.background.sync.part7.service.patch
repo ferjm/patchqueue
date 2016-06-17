@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  06c0dbae9d8bf5fe1f405962b58134ca8533a43e
+# Parent  63e61d24d55fd7e0b03b7a00bb6e81f6895a8240
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: BackgroundSyncService. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSyncChild.cpp b/dom/backgroundsync/BackgroundSyncChild.cpp
@@ -624,7 +624,7 @@ new file mode 100644
 +        // We only get the origin value when there are no more registrations for
 +        // this origin. If that's the case, we need to remove that origin from
 +        // the 'origins' DB before we can progress the response to the DOM side.
-+        if (origin.Length()) {
++        if (!origin.IsEmpty()) {
 +          RefPtr<ChromeStorageManager> manager =
 +            ChromeStorageManager::GetOrCreate(this);
 +          AddChromeStorageManagerRef(aRequestId, manager);
