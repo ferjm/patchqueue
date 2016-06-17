@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  63e61d24d55fd7e0b03b7a00bb6e81f6895a8240
+# Parent  09a4d833c367fa08ec6b9e84f61f2e7e68c3faf1
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: BackgroundSyncService. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSyncChild.cpp b/dom/backgroundsync/BackgroundSyncChild.cpp
@@ -1012,7 +1012,7 @@ new file mode 100644
 diff --git a/dom/backgroundsync/ChromeStorageManager.cpp b/dom/backgroundsync/ChromeStorageManager.cpp
 --- a/dom/backgroundsync/ChromeStorageManager.cpp
 +++ b/dom/backgroundsync/ChromeStorageManager.cpp
-@@ -250,51 +250,54 @@ private:
+@@ -268,51 +268,54 @@ private:
    SyncOpResponse mResponse;
  };
  
@@ -1070,7 +1070,7 @@ diff --git a/dom/backgroundsync/ChromeStorageManager.cpp b/dom/backgroundsync/Ch
  ChromeStorageManager::Init()
  {
    AssertIsOnBackgroundThread();
-@@ -370,15 +373,16 @@ ChromeStorageManager::GetAll(const nsID&
+@@ -388,15 +391,16 @@ ChromeStorageManager::GetAll(const nsID&
    ExecuteStorageAction(action);
  }
  
@@ -1091,20 +1091,7 @@ diff --git a/dom/backgroundsync/ChromeStorageManager.cpp b/dom/backgroundsync/Ch
 diff --git a/dom/backgroundsync/ChromeStorageManager.h b/dom/backgroundsync/ChromeStorageManager.h
 --- a/dom/backgroundsync/ChromeStorageManager.h
 +++ b/dom/backgroundsync/ChromeStorageManager.h
-@@ -20,45 +20,49 @@
- #include "mozilla/ipc/BackgroundParent.h"
- #include "mozilla/storage.h"
- #include "nsISupportsImpl.h"
- 
- namespace mozilla {
- namespace dom {
- namespace backgroundsync {
- 
-+class BackgroundSyncService;
- class ChromeStorageAction;
-+class SyncOpResponse;
- 
- class ChromeStorageManager final
+@@ -32,34 +32,36 @@ class ChromeStorageManager final
  {
    friend class InitRunnable;
    friend class StorageActionRunnable;
@@ -1116,7 +1103,7 @@ diff --git a/dom/backgroundsync/ChromeStorageManager.h b/dom/backgroundsync/Chro
 -  GetOrCreate();
 +  GetOrCreate(BackgroundSyncService* aService);
  
-   void Register(const nsID& aRequestId, const nsAString& aOrigin);
+   void Register(const nsID& aRequestId, const Registration& aRegistration);
    void Unregister(const nsID& aRequestId, const nsAString& aOrigin);
    void GetAll(const nsID& aRequestId);
  
