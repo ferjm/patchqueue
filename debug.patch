@@ -147,7 +147,17 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
          // In that case, we need to check if we still are online and so we can
          // continue with the process of firing the sync event. Otherwise, we
          // need to get back to the PENDING state and bail out here.
-@@ -490,16 +501,17 @@ BackgroundSyncService::MaybeTriggerSyncE
+@@ -481,25 +492,27 @@ BackgroundSyncService::OnRequestComplete
+ 
+ // --------------------------------------------------------------------------
+ 
+ void
+ BackgroundSyncService::MaybeTriggerSyncEvent(const Registration& aRegistration)
+ {
+   AssertIsOnBackgroundThread();
+ 
++  printf_stderr("BackgroundSyncService::MaybeTriggerSyncEvent Online %d ONLINE %d\n", mOnlineState, OnlineStateObserver::ONLINE);
+   if (mOnlineState !=  OnlineStateObserver::ONLINE) {
      return;
    }
  
@@ -165,7 +175,26 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
    RefPtr<GetStorageManagerRunnable> runnable =
      new GetStorageManagerRunnable(this, aRegistration.mOrigin(), SyncInternalOp(
        SyncChangeStateArgs(aRegistration.mId(),RegistrationState::FIRING)
-@@ -589,16 +601,17 @@ BackgroundSyncService::OnOnlineStateChan
+@@ -552,16 +565,18 @@ BackgroundSyncService::ContinueTriggerin
+ void
+ BackgroundSyncService::OnOnlineStateChanged(
+     OnlineStateObserver::OnlineState aState)
+ {
+   AssertIsOnBackgroundThread();
+ 
+   mOnlineState = aState;
+ 
++  printf_stderr("Online state changed to %d\n", mOnlineState);
++
+   if (mOnlineState != OnlineStateObserver::ONLINE) {
+     return;
+   }
+ 
+   // If we are online, we need to get the list of sync registrations and
+   // trigger the corresponding sync events.
+ 
+   nsresult rv;
+@@ -589,16 +604,17 @@ BackgroundSyncService::OnOnlineStateChan
  /**
   * StorageManagerIdFactory::Listener implementation.
   */
@@ -183,7 +212,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
    RefPtr<StorageManager> manager;
    nsresult rv = StorageManager::GetOrCreate(this,
                                              aManagerId,
-@@ -616,16 +629,17 @@ BackgroundSyncService::OnStorageManagerI
+@@ -616,16 +632,17 @@ BackgroundSyncService::OnStorageManagerI
    nsID id;
    rv = uuidGenerator->GenerateUUIDInPlace(&id);
    if (NS_WARN_IF(NS_FAILED(rv))) {
