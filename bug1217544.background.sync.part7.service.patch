@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  09a4d833c367fa08ec6b9e84f61f2e7e68c3faf1
+# Parent  b89fce0df79ad524d2750c71a13afd217b209f66
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: BackgroundSyncService. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSyncChild.cpp b/dom/backgroundsync/BackgroundSyncChild.cpp
@@ -246,7 +246,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncService.cpp
-@@ -0,0 +1,636 @@
+@@ -0,0 +1,638 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -267,7 +267,9 @@ new file mode 100644
 +
 +#include "BackgroundSyncService.h"
 +#include "ChromeStorageManager.h"
++#include "OnlineStateObserver.h"
 +#include "StorageManager.h"
++#include "StorageManagerId.h"
 +
 +#include "mozilla/ipc/BackgroundUtils.h"
 +#include "nsContentUtils.h"
@@ -614,7 +616,7 @@ new file mode 100644
 +          ChromeStorageManager::GetOrCreate(this);
 +        AddChromeStorageManagerRef(aRequestId, manager);
 +        manager->Register(aRequestId,
-+            aResponse.get_SyncRegisterResponse().mRegistration().mOrigin());
++            aResponse.get_SyncRegisterResponse().mRegistration());
 +        return;
 +      } else {
 +        // If this is not the first registration for this origin, we can
@@ -887,7 +889,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.h b/dom/backgroundsync/Bac
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncService.h
-@@ -0,0 +1,132 @@
+@@ -0,0 +1,131 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -897,11 +899,9 @@ new file mode 100644
 +#ifndef mozilla_dom_BackgroundSyncService_h
 +#define mozilla_dom_BackgroundSyncService_h
 +
-+#include "ChromeStorageManager.h"
 +#include "OnlineStateObserver.h"
-+#include "StorageManagerId.h"
-+
 +#include "ServiceWorkerManagerParent.h"
++#include "StorageManagerId.h"
 +
 +namespace mozilla {
 +namespace dom {
@@ -913,8 +913,9 @@ new file mode 100644
 +namespace backgroundsync {
 +
 +class BackgroundSyncParent;
-+class StorageManager;
++class ChromeStorageManager;
 +class Registration;
++class StorageManager;
 +class SyncOp;
 +
 +class BackgroundSyncService final : public OnlineStateObserver::Listener
@@ -1183,7 +1184,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
        ref->Init(oldManager);
  
        MOZ_ASSERT(!sFactory->mManagerList.Contains(ref));
-@@ -492,21 +493,22 @@ private:
+@@ -494,21 +495,22 @@ private:
    SyncChangeStateArgs mArgs;
    Registration mRegistration;
  };
@@ -1208,7 +1209,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
  {
    mozilla::ipc::AssertIsOnBackgroundThread();
  
-@@ -523,34 +525,39 @@ StorageManager::ShutdownAll()
+@@ -525,34 +527,39 @@ StorageManager::ShutdownAll()
  void
  StorageManager::Abort(const nsACString& aOrigin)
  {
@@ -1250,7 +1251,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
    MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(
          NewRunnableMethod(ioThread, &nsIThread::Shutdown)));*/
  }
-@@ -752,20 +759,19 @@ StorageManager::OnRequestComplete(const 
+@@ -754,20 +761,19 @@ StorageManager::OnRequestComplete(const 
    NS_ASSERT_OWNINGTHREAD(StorageManager);
    MOZ_ASSERT(mPendingRequests.Contains(aRequestId));
  
