@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  15b49ef6fd8013c0c516669773cd676da9e2f7ed
+# Parent  cd0c61b83e36c4ea05026fff79ed4839f3e92a77
 Bug 1217544 - Implement one-off BackgroundSync API. Part 5: Storage. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
@@ -24,7 +24,193 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
  #include "mozilla/Preferences.h"
  #include "nsISupportsPrimitives.h"
  #include "nsIGlobalObject.h"
-@@ -336,17 +335,18 @@ BackgroundSync::ActorCreated(PBackground
+@@ -48,44 +47,183 @@ public:
+ 
+   void SetActor(BackgroundSyncChild* aActor)
+   {
+     MOZ_ASSERT(!mActor);
+     MOZ_ASSERT(aActor);
+     mActor = aActor;
+   }
+ 
+-  NS_IMETHODIMP Run() override
++  NS_IMETHODIMP
++  Run() override
+   {
+     MOZ_ASSERT(mActor);
+     if (mActor->IsActorDestroyed()) {
+       return NS_OK;
+     }
+ 
+     return mActor->ExecuteOp(mPromise, mOp);
+   }
+ 
+-  NS_IMETHODIMP Cancel() override
++  NS_IMETHODIMP
++  Cancel() override
+   {
+     mActor = nullptr;
+     mPromise = nullptr;
+     mOp = nullptr;
+     return NS_OK;
+   }
+ 
++  void
++  MaybeReject(nsresult aRv)
++  {
++    MOZ_ASSERT(mPromise);
++
++    mPromise->MaybeReject(aRv);
++  }
++
+ private:
+   ~SyncOpRunnable() {}
+ 
+   RefPtr<Promise> mPromise;
+   nsAutoPtr<SyncOp> mOp;
+   RefPtr<BackgroundSyncChild> mActor;
+ };
+ 
+ NS_IMPL_ISUPPORTS(SyncOpRunnable, nsICancelableRunnable, nsIRunnable)
+ 
++class RegisterResultRunnable final : public WorkerRunnable
++{
++public:
++  RegisterResultRunnable(WorkerPrivate* aWorkerPrivate,
++                         PromiseWorkerProxy* aProxy,
++                         nsresult aStatus)
++    : WorkerRunnable(aWorkerPrivate, WorkerThreadModifyBusyCount)
++    , mProxy(aProxy)
++    , mStatus(aStatus)
++  {}
++
++  bool
++  WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate) override
++  {
++    RefPtr<Promise> promise = mProxy->WorkerPromise();
++    if (NS_SUCCEEDED(mStatus)) {
++      promise->MaybeResolve(JS::NullHandleValue);
++    } else {
++      promise->MaybeReject(mStatus);
++    }
++    return true;
++  }
++
++private:
++  ~RegisterResultRunnable() {}
++
++  RefPtr<PromiseWorkerProxy> mProxy;
++  nsresult mStatus;
++};
++
++class RegisterRunnable final : public nsIRunnable,
++                               public nsICancelableRunnable
++{
++public:
++  NS_DECL_THREADSAFE_ISUPPORTS
++
++  RegisterRunnable(BackgroundSync* aTarget,
++                   PromiseWorkerProxy* aPromiseProxy,
++                   const PrincipalInfo& aPrincipalInfo,
++                   const nsAString& aScope,
++                   const nsAString& aTag)
++    : mTarget(aTarget)
++    , mPromiseProxy(aPromiseProxy)
++    , mPrincipalInfo(aPrincipalInfo)
++    , mScope(aScope)
++    , mTag(aTag)
++    , mInitiatingThread(do_GetCurrentThread())
++  {}
++
++  NS_IMETHODIMP
++  Run() override
++  {
++    if (mInitiatingThread == nsCOMPtr<nsIThread>(do_GetCurrentThread())) {
++      RefPtr<Promise> promise = mPromiseProxy->WorkerPromise();
++      MOZ_ASSERT(promise);
++
++      const SyncRegisterArgs args(NS_ConvertUTF8toUTF16(mOrigin),
++                                  NS_ConvertUTF8toUTF16(mOriginSuffix),
++                                  mScope, mTag);
++      nsAutoPtr<SyncOp> op(new SyncOp(mPrincipalInfo, SyncOpArgs(args)));
++      RefPtr<SyncOpRunnable> runnable = new SyncOpRunnable(promise, op);
++      return mTarget->ExecuteOp(runnable);
++    }
++
++    MOZ_ASSERT(NS_IsMainThread());
++
++    nsresult rv;
++    nsCOMPtr<nsIPrincipal> principal =
++      PrincipalInfoToPrincipal(mPrincipalInfo, &rv);
++    if (NS_WARN_IF(NS_FAILED(rv))) {
++      MaybeReject(rv);
++      return rv;
++    }
++
++    rv = principal->GetOrigin(mOrigin);
++    if (NS_WARN_IF(NS_FAILED(rv))) {
++      MaybeReject(rv);
++      return rv;
++    }
++
++    rv = principal->GetOriginSuffix(mOriginSuffix);
++    if (NS_WARN_IF(NS_FAILED(rv))) {
++      MaybeReject(rv);
++      return rv;
++    }
++
++    rv = mInitiatingThread->Dispatch(this, nsIThread::DISPATCH_NORMAL);
++    if (NS_WARN_IF(NS_FAILED(rv))) {
++      MaybeReject(rv);
++    }
++
++    return rv;
++  }
++
++  NS_IMETHODIMP
++  Cancel() override
++  {
++    return NS_OK;
++  }
++
++private:
++  ~RegisterRunnable() {}
++
++  void
++  MaybeReject(nsresult aRv)
++  {
++    MutexAutoLock lock(mPromiseProxy->Lock());
++    if (mPromiseProxy->CleanedUp()) {
++      // Worker has already shut down, can't access worker private;
++      return;
++    }
++    RefPtr<RegisterResultRunnable> runnable =
++      new RegisterResultRunnable(mPromiseProxy->GetWorkerPrivate(),
++                                 mPromiseProxy, aRv);
++    MOZ_ALWAYS_TRUE(runnable->Dispatch());
++  }
++
++  RefPtr<BackgroundSync> mTarget;
++  RefPtr<PromiseWorkerProxy> mPromiseProxy;
++  PrincipalInfo mPrincipalInfo;
++  nsString mScope;
++  nsString mTag;
++  nsAutoCString mOrigin;
++  nsAutoCString mOriginSuffix;
++  nsCOMPtr<nsIThread> mInitiatingThread;
++};
++
++NS_IMPL_ISUPPORTS(RegisterRunnable, nsICancelableRunnable, nsIRunnable)
++
+ class TeardownRunnable final : public nsIRunnable,
+                                public nsICancelableRunnable
+ {
+ public:
+   NS_DECL_ISUPPORTS
+ 
+   explicit TeardownRunnable(BackgroundSyncChild* aActor)
+     : mActor(aActor)
+@@ -336,17 +474,18 @@ BackgroundSync::ActorCreated(PBackground
    MOZ_ASSERT(IsBackgroundSyncThread());
    MOZ_ASSERT(aActor);
    MOZ_ASSERT(!mActor);
@@ -44,7 +230,8 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
      RefPtr<SyncOpRunnable> runnable = mPendingOperations[i];
      MOZ_ASSERT(runnable);
      runnable->SetActor(mActor);
-@@ -385,16 +385,30 @@ BackgroundSync::Observe(nsISupports* aSu
+@@ -384,65 +523,152 @@ BackgroundSync::Observe(nsISupports* aSu
+     }
    }
  
    Shutdown();
@@ -52,22 +239,57 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
    return NS_OK;
  }
  
- already_AddRefed<Promise>
-+BackgroundSync::PromiseReject(const nsresult aRv)
++nsresult
++BackgroundSync::ExecuteOp(SyncOpRunnable* aRunnable)
 +{
-+  ErrorResult rv;
-+  RefPtr<Promise> p = Promise::Create(mGlobal, rv);
-+  if (NS_WARN_IF(rv.Failed())) {
-+    return nullptr;
++  MOZ_ASSERT(IsBackgroundSyncThread());
++
++  if (mShuttingDown) {
++    aRunnable->MaybeReject(NS_ERROR_NOT_AVAILABLE);
++    return NS_ERROR_NOT_AVAILABLE;
 +  }
 +
-+  p->MaybeReject(aRv);
++  if (!mActor) {
++    mPendingOperations.AppendElement(aRunnable);
++    return NS_OK;
++  }
 +
-+  return p.forget();
++  aRunnable->SetActor(mActor);
++  nsresult rv = NS_DispatchToCurrentThread(aRunnable);
++  if (NS_WARN_IF(NS_FAILED(rv))) {
++    aRunnable->MaybeReject(rv);
++  }
++
++  return rv;
 +}
 +
-+already_AddRefed<Promise>
- BackgroundSync::ExecuteOp(const SyncOpArgs& aArgs, ErrorResult& aRv)
++void
++BackgroundSync::ExecuteOp(const SyncOpArgs& aArgs,
++                          Promise* aPromise,
++                          ErrorResult& aRv)
++{
++  MOZ_ASSERT(IsBackgroundSyncThread());
++
++  nsAutoPtr<SyncOp> op(new SyncOp(*mPrincipalInfo, aArgs));
++  RefPtr<SyncOpRunnable> runnable = new SyncOpRunnable(aPromise, op);
++
++  if (!mActor) {
++    mPendingOperations.AppendElement(runnable);
++    return;
++  }
++
++  runnable->SetActor(mActor);
++  nsresult rv = NS_DispatchToCurrentThread(runnable);
++  if (NS_WARN_IF(NS_FAILED(rv))) {
++    aPromise->MaybeReject(rv);
++  }
++}
++
++// WebIDL interface methods.
++
+ already_AddRefed<Promise>
+-BackgroundSync::ExecuteOp(const SyncOpArgs& aArgs, ErrorResult& aRv)
++BackgroundSync::Register(const nsAString& aTag, ErrorResult& aRv)
  {
    MOZ_ASSERT(IsBackgroundSyncThread());
  
@@ -75,49 +297,112 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
      return nullptr;
    }
  
-@@ -422,17 +436,41 @@ BackgroundSync::ExecuteOp(const SyncOpAr
+   RefPtr<Promise> p = Promise::Create(mGlobal, aRv);
+   if (NS_WARN_IF(aRv.Failed())) {
+     return nullptr;
+   }
  
- // WebIDL interface methods.
+-  nsAutoPtr<SyncOp> op(new SyncOp(*mPrincipalInfo, aArgs));
+-  RefPtr<SyncOpRunnable> runnable = new SyncOpRunnable(p, op);
++  if (!NS_IsMainThread()) {
++    WorkerPrivate* workerPrivate = GetCurrentThreadWorkerPrivate();
++    MOZ_ASSERT(workerPrivate);
++    workerPrivate->AssertIsOnWorkerThread();
  
- already_AddRefed<Promise>
- BackgroundSync::Register(const nsAString& aTag, ErrorResult& aRv)
- {
-   MOZ_ASSERT(IsBackgroundSyncThread());
+-  if (!mActor) {
+-    mPendingOperations.AppendElement(runnable);
++    RefPtr<PromiseWorkerProxy> promiseProxy =
++      PromiseWorkerProxy::Create(workerPrivate, p);
++    if (!promiseProxy) {
++      p->MaybeReject(NS_ERROR_DOM_ABORT_ERR);
++      return p.forget();
++    }
++
++    RefPtr<RegisterRunnable> runnable = new RegisterRunnable(this, promiseProxy,
++                                                             *mPrincipalInfo,
++                                                             mScope, aTag);
++    nsresult rv = NS_DispatchToMainThread(runnable);
++    if (NS_WARN_IF(NS_FAILED(rv))) {
++      p->MaybeReject(rv);
++    }
++
+     return p.forget();
+   }
  
--  const SyncRegisterArgs args(mScope, (nsString(aTag)));
+-  runnable->SetActor(mActor);
+-  nsresult rv = NS_DispatchToCurrentThread(runnable);
 +  nsresult rv;
 +  nsCOMPtr<nsIPrincipal> principal =
 +    PrincipalInfoToPrincipal(*mPrincipalInfo, &rv);
-+  if (NS_WARN_IF(NS_FAILED(rv))) {
+   if (NS_WARN_IF(NS_FAILED(rv))) {
+-    p->MaybeReject(rv);
 +    aRv = rv;
-+    return PromiseReject(rv);
-+  }
-+
++    p->MaybeReject(aRv);
++    return p.forget();
+   }
+ 
 +  nsAutoCString origin;
 +  rv = principal->GetOrigin(origin);
 +  if (NS_WARN_IF(NS_FAILED(rv))) {
 +    aRv = rv;
-+    return PromiseReject(rv);
++    p->MaybeReject(aRv);
++    return p.forget();
 +  }
 +
 +  nsAutoCString originSuffix;
 +  rv = principal->GetOriginSuffix(originSuffix);
 +  if (NS_WARN_IF(NS_FAILED(rv))) {
 +    aRv = rv;
-+    return PromiseReject(rv);
++    p->MaybeReject(aRv);
++    return p.forget();
 +  }
 +
 +  const SyncRegisterArgs args(NS_ConvertUTF8toUTF16(origin),
 +                              NS_ConvertUTF8toUTF16(originSuffix),
 +                              mScope, (nsString(aTag)));
-   return ExecuteOp(SyncOpArgs(args), aRv);
++  ExecuteOp(SyncOpArgs(args), p, aRv);
++
+   return p.forget();
  }
  
+-// WebIDL interface methods.
+-
+-already_AddRefed<Promise>
+-BackgroundSync::Register(const nsAString& aTag, ErrorResult& aRv)
+-{
+-  MOZ_ASSERT(IsBackgroundSyncThread());
+-
+-  const SyncRegisterArgs args(mScope, (nsString(aTag)));
+-  return ExecuteOp(SyncOpArgs(args), aRv);
+-}
+-
  already_AddRefed<Promise>
  BackgroundSync::GetTags(ErrorResult& aRv)
  {
    MOZ_ASSERT(IsBackgroundSyncThread());
  
++  if (mShuttingDown) {
++    return nullptr;
++  }
++
++  RefPtr<Promise> p = Promise::Create(mGlobal, aRv);
++  if (NS_WARN_IF(aRv.Failed())) {
++    return nullptr;
++  }
++
+   const SyncGetTagsArgs args;
+-  return ExecuteOp(SyncOpArgs(args), aRv);
++  ExecuteOp(SyncOpArgs(args), p, aRv);
++
++  return p.forget();
+ }
+ 
+ NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(BackgroundSync, mGlobal)
+ NS_IMPL_CYCLE_COLLECTING_ADDREF(BackgroundSync)
+ NS_IMPL_CYCLE_COLLECTING_RELEASE(BackgroundSync)
+ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(BackgroundSync)
+   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
+   NS_INTERFACE_MAP_ENTRY(nsIIPCBackgroundChildCreateCallback)
 diff --git a/dom/backgroundsync/BackgroundSync.h b/dom/backgroundsync/BackgroundSync.h
 --- a/dom/backgroundsync/BackgroundSync.h
 +++ b/dom/backgroundsync/BackgroundSync.h
@@ -140,7 +425,27 @@ diff --git a/dom/backgroundsync/BackgroundSync.h b/dom/backgroundsync/Background
  
  class nsIGlobalObject;
  class nsIPrincipal;
-@@ -90,16 +90,19 @@ private:
+@@ -39,16 +39,18 @@ namespace backgroundsync {
+ 
+ class BackgroundSyncChild;
+ class SyncOpRunnable;
+ 
+ class BackgroundSync final : public nsIIPCBackgroundChildCreateCallback
+                            , public nsIObserver
+                            , public nsWrapperCache
+ {
++  friend class RegisterRunnable;
++
+   NS_DECL_NSIIPCBACKGROUNDCHILDCREATECALLBACK
+   NS_DECL_NSIOBSERVER
+ 
+ public:
+   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_AMBIGUOUS(
+       BackgroundSync, nsIIPCBackgroundChildCreateCallback)
+ 
+@@ -89,18 +91,22 @@ private:
+   BackgroundSync(nsIGlobalObject* aGlobal,
                   const mozilla::ipc::PrincipalInfo& aPrincipalInfo,
                   const nsAString& aScope);
  
@@ -148,11 +453,14 @@ diff --git a/dom/backgroundsync/BackgroundSync.h b/dom/backgroundsync/Background
  
    bool IsBackgroundSyncThread();
  
-   already_AddRefed<Promise>
-+  PromiseReject(const nsresult aRv);
+-  already_AddRefed<Promise>
+-  ExecuteOp(const SyncOpArgs& aArgs, ErrorResult& aRv);
++  nsresult
++  ExecuteOp(SyncOpRunnable* aRunnable);
 +
-+  already_AddRefed<Promise>
-   ExecuteOp(const SyncOpArgs& aArgs, ErrorResult& aRv);
++  void
++  ExecuteOp(const SyncOpArgs& aArgs, Promise* aPromise,
++            ErrorResult& aRv);
  
    uint64_t mInnerID;
  
@@ -160,6 +468,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.h b/dom/backgroundsync/Background
  
    nsAutoPtr<workers::WorkerFeature> mWorkerFeature;
  
+   RefPtr<BackgroundSyncChild> mActor;
 diff --git a/dom/backgroundsync/BackgroundSyncChild.h b/dom/backgroundsync/BackgroundSyncChild.h
 --- a/dom/backgroundsync/BackgroundSyncChild.h
 +++ b/dom/backgroundsync/BackgroundSyncChild.h
