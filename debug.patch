@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  43f25af2e849061ca8179377797f23b72fc38e35
+# Parent  6a6317ed44d8ccce225b70c2e4610fdc7f84141e
 
 diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/BackgroundSyncService.cpp
 --- a/dom/backgroundsync/BackgroundSyncService.cpp
@@ -284,7 +284,7 @@ diff --git a/dom/backgroundsync/ChromeStorageManager.cpp b/dom/backgroundsync/Ch
 diff --git a/dom/backgroundsync/DBSchema.cpp b/dom/backgroundsync/DBSchema.cpp
 --- a/dom/backgroundsync/DBSchema.cpp
 +++ b/dom/backgroundsync/DBSchema.cpp
-@@ -236,16 +236,17 @@ GetAll(mozIStorageConnection* aConn,
+@@ -235,16 +235,17 @@ GetAll(mozIStorageConnection* aConn,
  
      int32_t lastChance;
      rv = state->GetInt32(6, &lastChance);
@@ -928,9 +928,9 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
          SyncGetTagsResponse(mTags));
      }
    }
-@@ -544,16 +554,17 @@ StorageManager::StorageManager(Backgroun
+@@ -543,28 +553,30 @@ StorageManager::StorageManager(Backgroun
+   , mState(Open)
  {
-   MOZ_ASSERT(mService);
    MOZ_ASSERT(mManagerId);
    MOZ_ASSERT(mIOThread);
  }
@@ -942,14 +942,9 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
    MOZ_ASSERT(mState == Closing);
    MOZ_ASSERT(!mContext);
  
-   mService = nullptr;
+   mIOThread->Shutdown();
  
- /*  nsCOMPtr<nsIThread> ioThread;
-   mIOThread.swap(ioThread);
-@@ -562,16 +573,17 @@ StorageManager::~StorageManager()
-   // shutdown. Defer this to the main thread, instead.
-   MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(
-         NewRunnableMethod(ioThread, &nsIThread::Shutdown)));*/
+   mService = nullptr;
  }
  
  void
@@ -964,7 +959,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
    }
  
    // Create the context immediately. Since there can at most be one
-@@ -581,32 +593,34 @@ StorageManager::Init(StorageManager* aOl
+@@ -574,32 +586,34 @@ StorageManager::Init(StorageManager* aOl
    RefPtr<StorageContext> ref = StorageContext::Create(this, mIOThread,
                                                        setupAction, oldContext);
    mContext = ref;
@@ -999,7 +994,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
    if (mShuttingDown) {
      return;
    }
-@@ -624,25 +638,28 @@ StorageManager::Shutdown()
+@@ -617,25 +631,28 @@ StorageManager::Shutdown()
      RefPtr<StorageContext> context = mContext;
      context->CancelAll();
    }
@@ -1028,7 +1023,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
    // going idle or the underlying storage being invalidated, we should know we
    // are closing before the StorageContext is destroyed.
    MOZ_ASSERT(mState == Closing);
-@@ -653,16 +670,17 @@ StorageManager::RemoveStorageContext(Sto
+@@ -646,16 +663,17 @@ StorageManager::RemoveStorageContext(Sto
    // Factory list. We don't need to block shutdown by stayin in the list
    // any more.
    Factory::Remove(this);
@@ -1046,7 +1041,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
    if (context && mPendingRequests.IsEmpty()) {
      // Mark the StorageManager as invalid so that it won't get used again.
      NoteClosing();
-@@ -670,16 +688,17 @@ StorageManager::MaybeAllowContextToClose
+@@ -663,16 +681,17 @@ StorageManager::MaybeAllowContextToClose
      context->AllowToClose();
    }
  }
@@ -1064,7 +1059,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
  
    if (NS_WARN_IF(mState == Closing)) {
      OnRequestComplete(aRequestId,
-@@ -765,15 +784,16 @@ StorageManager::OnRequestComplete(const 
+@@ -758,15 +777,16 @@ StorageManager::OnRequestComplete(const 
  
    MaybeAllowContextToClose();
  }
