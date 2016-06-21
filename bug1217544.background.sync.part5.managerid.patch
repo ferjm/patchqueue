@@ -3241,15 +3241,15 @@ new file mode 100644
 +      }
 +
 +      // Ignore transient sqlite files and marker files
-+      if (leafName.EqualsLiteral("registrations.sqlite-journal") ||
-+          leafName.EqualsLiteral("registrations.sqlite-shm") ||
-+          leafName.Find(NS_LITERAL_CSTRING("registrations.sqlite-mj"), false, 0, 0) == 0 ||
++      if (leafName.EqualsLiteral("backgroundsync.sqlite-journal") ||
++          leafName.EqualsLiteral("backgroundsync.sqlite-shm") ||
++          leafName.Find(NS_LITERAL_CSTRING("backgroundsync.sqlite-mj"), false, 0, 0) == 0 ||
 +          leafName.EqualsLiteral("context_open.marker")) {
 +        continue;
 +      }
 +
-+      if (leafName.EqualsLiteral("registrations.sqlite") ||
-+          leafName.EqualsLiteral("registrations.sqlite-wal")) {
++      if (leafName.EqualsLiteral("backgroundsync.sqlite") ||
++          leafName.EqualsLiteral("backgroundsync.sqlite-wal")) {
 +        int64_t fileSize;
 +        rv = file->GetFileSize(&fileSize);
 +        if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
