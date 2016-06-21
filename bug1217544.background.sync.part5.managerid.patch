@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  cd0c61b83e36c4ea05026fff79ed4839f3e92a77
+# Parent  0179d4b8e74662d8aeb0a16ce58f592d7c445da2
 Bug 1217544 - Implement one-off BackgroundSync API. Part 5: Storage. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
@@ -2247,7 +2247,7 @@ diff --git a/dom/backgroundsync/DBSchema.cpp b/dom/backgroundsync/DBSchema.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/DBSchema.cpp
-@@ -0,0 +1,372 @@
+@@ -0,0 +1,371 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -2410,7 +2410,6 @@ new file mode 100644
 +
 +  bool hasMoreData = false;
 +  NS_SUCCEEDED(state->ExecuteStep(&hasMoreData));
-+  NS_WARN_IF(hasMoreData);
 +
 +  int32_t count;
 +  rv = state->GetInt32(0, &count);

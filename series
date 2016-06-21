@@ -5,8 +5,8 @@ bug1217544.background.sync.part4.syncevent.patch
 bug1217544.background.sync.part5.managerid.patch
 bug1217544.background.sync.part6.onlineobserver.patch
 bug1217544.background.sync.part7.service.patch
-debug.patch
 bug1217544.background.sync.tests.patch
+debug.patch
 attachment.cgi?id=8743366
 bug1252573.mobileid.patch
 try-all
