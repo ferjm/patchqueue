@@ -233,7 +233,35 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
 diff --git a/dom/backgroundsync/ChromeStorageManager.cpp b/dom/backgroundsync/ChromeStorageManager.cpp
 --- a/dom/backgroundsync/ChromeStorageManager.cpp
 +++ b/dom/backgroundsync/ChromeStorageManager.cpp
-@@ -201,18 +201,20 @@ public:
+@@ -154,23 +154,26 @@ NS_IMPL_ISUPPORTS(InitRunnable, nsICance
+ class ShutdownRunnable : public nsIRunnable,
+                          public nsICancelableRunnable
+ {
+ public:
+   NS_DECL_THREADSAFE_ISUPPORTS
+ 
+   ShutdownRunnable(mozIStorageConnection* aConn)
+     : mDBConn(aConn)
+-  {}
++  {
++    printf_stderr("ChromeStorageManager::ShutdownRunnable\n");
++  }
+ 
+   NS_IMETHODIMP
+   Run() override
+   {
+     MOZ_ASSERT(mDBConn);
+ 
++    printf_stderr("Closing ChromeStorageManager DB\n");
+     return mDBConn->Close();
+   }
+ 
+   NS_IMETHODIMP
+   Cancel() override
+   {
+     return NS_OK;
+   }
+@@ -201,18 +204,20 @@ public:
      MOZ_ASSERT(mInitiatingThread);
      MOZ_ASSERT(aConn);
      MOZ_ASSERT(aAction);
@@ -254,7 +282,7 @@ diff --git a/dom/backgroundsync/ChromeStorageManager.cpp b/dom/backgroundsync/Ch
        case ChromeStorageAction::Type::Register:
          {
            Registration registration = mAction->GetRegistration();
-@@ -271,24 +273,26 @@ private:
+@@ -271,24 +276,26 @@ private:
  NS_IMPL_ISUPPORTS(StorageActionRunnable, nsICancelableRunnable, nsIRunnable)
  
  //-----------------------------------------------------------------------------
@@ -281,6 +309,27 @@ diff --git a/dom/backgroundsync/ChromeStorageManager.cpp b/dom/backgroundsync/Ch
      mDBConn = nullptr;
    }
  
+diff --git a/dom/backgroundsync/DBConnection.cpp b/dom/backgroundsync/DBConnection.cpp
+--- a/dom/backgroundsync/DBConnection.cpp
++++ b/dom/backgroundsync/DBConnection.cpp
+@@ -29,16 +29,17 @@ DBConnection::~DBConnection()
+ {
+   NS_ASSERT_OWNINGTHREAD(DBConnection);
+   MOZ_ALWAYS_SUCCEEDS(Close());
+ }
+ 
+ NS_IMETHODIMP
+ DBConnection::Close()
+ {
++  printf_stderr("DBConnection::Close()\n");
+   NS_ASSERT_OWNINGTHREAD(DBConnection);
+ 
+   if (mClosed) {
+     return NS_OK;
+   }
+   mClosed = true;
+ 
+   // If we are closing here, then we must not have a transaction
 diff --git a/dom/backgroundsync/DBSchema.cpp b/dom/backgroundsync/DBSchema.cpp
 --- a/dom/backgroundsync/DBSchema.cpp
 +++ b/dom/backgroundsync/DBSchema.cpp
