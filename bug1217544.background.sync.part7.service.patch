@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  b89fce0df79ad524d2750c71a13afd217b209f66
+# Parent  9a65c1d565c51d414a0773ce4fe035e96a5f3317
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: BackgroundSyncService. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSyncChild.cpp b/dom/backgroundsync/BackgroundSyncChild.cpp
@@ -1022,7 +1022,7 @@ new file mode 100644
 diff --git a/dom/backgroundsync/ChromeStorageManager.cpp b/dom/backgroundsync/ChromeStorageManager.cpp
 --- a/dom/backgroundsync/ChromeStorageManager.cpp
 +++ b/dom/backgroundsync/ChromeStorageManager.cpp
-@@ -268,51 +268,54 @@ private:
+@@ -268,19 +268,21 @@ private:
    SyncOpResponse mResponse;
  };
  
@@ -1045,7 +1045,7 @@ diff --git a/dom/backgroundsync/ChromeStorageManager.cpp b/dom/backgroundsync/Ch
  {
    AssertIsOnBackgroundThread();
  
-   if (mDBConn) {
+@@ -288,27 +290,29 @@ ChromeStorageManager::~ChromeStorageMana
      RefPtr<ShutdownRunnable> runnable = new ShutdownRunnable(mDBConn);
      mIOThread->Dispatch(runnable, nsIThread::DISPATCH_NORMAL);
      mDBConn = nullptr;
@@ -1053,12 +1053,9 @@ diff --git a/dom/backgroundsync/ChromeStorageManager.cpp b/dom/backgroundsync/Ch
  
    mPendingActions.Clear();
  
+   mIOThread->Shutdown();
++
 +  mService = nullptr;
-   /*
-   nsCOMPtr<nsIThread> ioThread;
-   mIOThread.swap(ioThread);
-   MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(
-         NewRunnableMethod(ioThread, &nsIThread::Shutdown)));*/
  }
  
  // static
@@ -1080,7 +1077,7 @@ diff --git a/dom/backgroundsync/ChromeStorageManager.cpp b/dom/backgroundsync/Ch
  ChromeStorageManager::Init()
  {
    AssertIsOnBackgroundThread();
-@@ -388,15 +391,16 @@ ChromeStorageManager::GetAll(const nsID&
+@@ -384,15 +388,16 @@ ChromeStorageManager::GetAll(const nsID&
    ExecuteStorageAction(action);
  }
  
@@ -1207,7 +1204,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
  {
    mozilla::ipc::AssertIsOnBackgroundThread();
  
-@@ -525,34 +527,39 @@ StorageManager::ShutdownAll()
+@@ -525,35 +527,39 @@ StorageManager::ShutdownAll()
  void
  StorageManager::Abort(const nsACString& aOrigin)
  {
@@ -1228,7 +1225,6 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
    , mShuttingDown(false)
    , mState(Open)
  {
-+  MOZ_ASSERT(mService);
    MOZ_ASSERT(mManagerId);
    MOZ_ASSERT(mIOThread);
  }
@@ -1239,17 +1235,18 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
    MOZ_ASSERT(mState == Closing);
    MOZ_ASSERT(!mContext);
  
-+  mService = nullptr;
+   mIOThread->Shutdown();
 +
- /*  nsCOMPtr<nsIThread> ioThread;
-   mIOThread.swap(ioThread);
- 
-   // Don't spin the event loop in the destructor waiting for the thread to
-   // shutdown. Defer this to the main thread, instead.
-   MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(
-         NewRunnableMethod(ioThread, &nsIThread::Shutdown)));*/
++  mService = nullptr;
  }
-@@ -754,20 +761,19 @@ StorageManager::OnRequestComplete(const 
+ 
+ void
+ StorageManager::Init(StorageManager* aOldManager)
+ {
+   NS_ASSERT_OWNINGTHREAD(StorageManager);
+ 
+   RefPtr<StorageContext> oldContext;
+@@ -748,20 +754,19 @@ StorageManager::OnRequestComplete(const 
    NS_ASSERT_OWNINGTHREAD(StorageManager);
    MOZ_ASSERT(mPendingRequests.Contains(aRequestId));
  
