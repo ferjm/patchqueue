@@ -127,7 +127,7 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
    GetPushManager(JSContext* aCx, ErrorResult& aRv) override;
  
 +  backgroundsync::BackgroundSync*
-+  GetSync(ErrorResult& aRv);
++  GetSync(ErrorResult& aRv) override;
 +
    // DOMEventTargethelper
    void DisconnectFromOwner() override
@@ -233,7 +233,7 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
    GetPushManager(JSContext* aCx, ErrorResult& aRv) override;
  
 +  backgroundsync::BackgroundSync*
-+  GetSync(ErrorResult& aRv);
++  GetSync(ErrorResult& aRv) override;
 +
  private:
    enum Reason
@@ -349,8 +349,8 @@ diff --git a/dom/workers/ServiceWorkerRegistration.h b/dom/workers/ServiceWorker
    virtual already_AddRefed<PushManager>
    GetPushManager(JSContext* aCx, ErrorResult& aRv) = 0;
  
-+  backgroundsync::BackgroundSync*
-+  GetSync(ErrorResult& aRv);
++  virtual backgroundsync::BackgroundSync*
++  GetSync(ErrorResult& aRv) = 0;
 +
    virtual already_AddRefed<Promise>
    ShowNotification(JSContext* aCx,
