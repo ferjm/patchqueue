@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  4ffaaccecc2ebe2ba34614b0f87bf8672e52af88
+# Parent  4b7cac6613e1331df33d80fd3af40d568e64d63d
 Bug 1217544 - Implement one-off BackgroundSync API. Part 1: BackgroundSync interface. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
@@ -266,7 +266,7 @@ new file mode 100644
 diff --git a/dom/bindings/Bindings.conf b/dom/bindings/Bindings.conf
 --- a/dom/bindings/Bindings.conf
 +++ b/dom/bindings/Bindings.conf
-@@ -126,16 +126,21 @@ DOMInterfaces = {
+@@ -89,16 +89,21 @@ DOMInterfaces = {
  'AudioNode' : {
      'concrete': False,
      'binaryNames': {
@@ -291,28 +291,28 @@ diff --git a/dom/bindings/Bindings.conf b/dom/bindings/Bindings.conf
 diff --git a/dom/moz.build b/dom/moz.build
 --- a/dom/moz.build
 +++ b/dom/moz.build
-@@ -38,16 +38,17 @@ if not CONFIG['MOZ_SIMPLEPUSH']:
-     interfaces += ['push']
- 
+@@ -37,16 +37,17 @@ interfaces = [
  DIRS += ['interfaces/' + i for i in interfaces]
  
  DIRS += [
      'animation',
      'apps',
      'base',
-+    'backgroundsync',
      'bluetooth',
-     'activities',
      'archivereader',
++    'backgroundsync',
      'bindings',
      'battery',
      'browser-element',
      'cache',
      'canvas',
+     'cellbroadcast',
+     'contacts',
+     'crypto',
 diff --git a/dom/tests/mochitest/general/test_interfaces.html b/dom/tests/mochitest/general/test_interfaces.html
 --- a/dom/tests/mochitest/general/test_interfaces.html
 +++ b/dom/tests/mochitest/general/test_interfaces.html
-@@ -158,16 +158,18 @@ var interfaceNamesInGlobalScope =
+@@ -159,16 +159,18 @@ var interfaceNamesInGlobalScope =
      "AudioParam",
  // IMPORTANT: Do not change this list without review from a DOM peer!
      "AudioProcessingEvent",
@@ -356,7 +356,7 @@ new file mode 100644
 diff --git a/dom/webidl/moz.build b/dom/webidl/moz.build
 --- a/dom/webidl/moz.build
 +++ b/dom/webidl/moz.build
-@@ -45,16 +45,17 @@ WEBIDL_FILES = [
+@@ -44,16 +44,17 @@ WEBIDL_FILES = [
      'AudioNode.webidl',
      'AudioParam.webidl',
      'AudioProcessingEvent.webidl',
@@ -377,7 +377,7 @@ diff --git a/dom/webidl/moz.build b/dom/webidl/moz.build
 diff --git a/dom/workers/WorkerPrefs.h b/dom/workers/WorkerPrefs.h
 --- a/dom/workers/WorkerPrefs.h
 +++ b/dom/workers/WorkerPrefs.h
-@@ -28,16 +28,17 @@ WORKER_SIMPLE_PREF("dom.caches.enabled",
+@@ -29,16 +29,17 @@ WORKER_SIMPLE_PREF("dom.caches.enabled",
  WORKER_SIMPLE_PREF("dom.caches.testing.enabled", DOMCachesTestingEnabled, DOM_CACHES_TESTING)
  WORKER_SIMPLE_PREF("dom.performance.enable_user_timing_logging", PerformanceLoggingEnabled, PERFORMANCE_LOGGING_ENABLED)
  WORKER_SIMPLE_PREF("dom.webnotifications.enabled", DOMWorkerNotificationEnabled, DOM_WORKERNOTIFICATION)
@@ -389,9 +389,9 @@ diff --git a/dom/workers/WorkerPrefs.h b/dom/workers/WorkerPrefs.h
 +WORKER_SIMPLE_PREF("dom.background.sync.enabled", BackgroundSyncEnabled, BACKGROUND_SYNC_ENABLED)
  WORKER_SIMPLE_PREF("dom.requestcontext.enabled", RequestContextEnabled, REQUESTCONTEXT_ENABLED)
  WORKER_SIMPLE_PREF("gfx.offscreencanvas.enabled", OffscreenCanvasEnabled, OFFSCREENCANVAS_ENABLED)
+ WORKER_SIMPLE_PREF("dom.webkitBlink.dirPicker.enabled", WebkitBlinkDirectoryPickerEnabled, DOM_WEBKITBLINK_DIRPICKER_WEBKITBLINK)
  WORKER_PREF("dom.workers.latestJSVersion", JSVersionChanged)
  WORKER_PREF("intl.accept_languages", PrefLanguagesChanged)
  WORKER_PREF("general.appname.override", AppNameOverrideChanged)
  WORKER_PREF("general.appversion.override", AppVersionOverrideChanged)
  WORKER_PREF("general.platform.override", PlatformOverrideChanged)
- #ifdef JS_GC_ZEAL

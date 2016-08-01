@@ -7,9 +7,9 @@ bug1217544.background.sync.part6.onlineobserver.patch
 bug1217544.background.sync.part7.service.patch
 bug1217544.background.sync.tests.patch
 debug.patch
+try-all
 attachment.cgi?id=8743366
 bug1252573.mobileid.patch
-try-all
 bug1252570.remove.mozpay.patch
 try
 350ecdaedef8
