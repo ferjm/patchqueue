@@ -6,7 +6,7 @@ Bug 1217544 - Implement one-off BackgroundSync API. Part 3: IPC. r=baku
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
 --- a/dom/backgroundsync/BackgroundSync.cpp
 +++ b/dom/backgroundsync/BackgroundSync.cpp
-@@ -1,88 +1,297 @@
+@@ -1,88 +1,299 @@
  /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
  /* vim: set ts=8 sts=2 et sw=2 tw=80: */
  /* This Source Code Form is subject to the terms of the Mozilla Public
@@ -62,7 +62,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
 +    mActor = aActor;
 +  }
 +
-+  NS_IMETHODIMP Run() override
++  NS_IMETHOD Run() override
 +  {
 +    MOZ_ASSERT(mActor);
 +    if (mActor->IsActorDestroyed()) {
@@ -72,7 +72,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
 +    return mActor->ExecuteOp(mPromise, mOp);
 +  }
 +
-+  NS_IMETHODIMP Cancel() override
++  NS_IMETHOD Cancel() override
 +  {
 +    mActor = nullptr;
 +    mPromise = nullptr;
@@ -102,7 +102,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
 +    MOZ_ASSERT(mActor);
 +  }
 +
-+  NS_IMETHODIMP Run() override
++  NS_IMETHOD Run() override
 +  {
 +    MOZ_ASSERT(mActor);
 +    if (!mActor->IsActorDestroyed()) {
@@ -111,7 +111,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
 +    return NS_OK;
 +  }
 +
-+  NS_IMETHODIMP Cancel() override
++  NS_IMETHOD Cancel() override
 +  {
 +    mActor = nullptr;
 +    return NS_OK;
@@ -258,10 +258,12 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
 +  MOZ_ASSERT(!mActor);
 +}
 +
++#ifdef DEBUG
 +bool
 +BackgroundSync::IsBackgroundSyncThread() {
 +  return mThread == nsCOMPtr<nsIThread>(do_GetCurrentThread());
 +};
++#endif
 +
 +void
 +BackgroundSync::Shutdown()
@@ -311,7 +313,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
  BackgroundSync::PrefEnabled(JSContext* aCx, JSObject* aObj)
  {
    using mozilla::dom::workers::WorkerPrivate;
-@@ -97,43 +306,138 @@ BackgroundSync::PrefEnabled(JSContext* a
+@@ -97,43 +308,138 @@ BackgroundSync::PrefEnabled(JSContext* a
    WorkerPrivate* workerPrivate = GetWorkerPrivateFromContext(aCx);
    if (!workerPrivate) {
      return false;
@@ -521,7 +523,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.h b/dom/backgroundsync/Background
  
    static already_AddRefed<BackgroundSync>
    CreateOnWorker(nsIGlobalObject* aGlobal,
-@@ -60,29 +72,47 @@ public:
+@@ -60,29 +72,49 @@ public:
    JSObject*
    WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
  
@@ -543,8 +545,6 @@ diff --git a/dom/backgroundsync/BackgroundSync.h b/dom/backgroundsync/Background
  
    ~BackgroundSync();
  
-+  bool IsBackgroundSyncThread();
-+
 +  already_AddRefed<Promise>
 +  ExecuteOp(const SyncOpArgs& aArgs, ErrorResult& aRv);
 +
@@ -564,6 +564,10 @@ diff --git a/dom/backgroundsync/BackgroundSync.h b/dom/backgroundsync/Background
 +  nsCOMPtr<nsIThread> mThread;
 +
 +  nsTArray<RefPtr<SyncOpRunnable>> mPendingOperations;
++
++#ifdef DEBUG
++  bool IsBackgroundSyncThread();
++#endif
  };
  
  } // namespace backgroundsync
@@ -575,7 +579,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncChild.cpp b/dom/backgroundsync/Bac
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncChild.cpp
-@@ -0,0 +1,133 @@
+@@ -0,0 +1,129 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -586,6 +590,7 @@ new file mode 100644
 +
 +#include "mozilla/unused.h"
 +#include "mozilla/ipc/PBackgroundChild.h"
++#include "nsContentUtils.h"
 +
 +namespace mozilla {
 +
@@ -632,13 +637,8 @@ new file mode 100644
 +nsresult
 +BackgroundSyncChild::StorePendingRequest(Promise* aPromise, nsID& aID)
 +{
-+  nsresult rv;
-+  nsCOMPtr<nsIUUIDGenerator> uuidGenerator =
-+    do_GetService("@mozilla.org/uuid-generator;1", &rv);
-+  NS_ENSURE_SUCCESS(rv, rv);
-+
 +  nsID id;
-+  rv = uuidGenerator->GenerateUUIDInPlace(&id);
++  nsresult rv = nsContentUtils::GenerateUUIDInPlace(id);
 +  NS_ENSURE_SUCCESS(rv, rv);
 +
 +  PendingRequest* request = new PendingRequest(aPromise);
@@ -930,7 +930,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/Back
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncParent.h
-@@ -0,0 +1,50 @@
+@@ -0,0 +1,48 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -948,7 +948,7 @@ new file mode 100644
 +namespace mozilla {
 +
 +namespace ipc {
-+class BackgroundParentImpl;
++  class BackgroundParentImpl;
 +} // namespace ipc
 +
 +namespace dom {
@@ -979,8 +979,6 @@ new file mode 100644
 +} // namespace mozilla
 +
 +#endif // mozilla_dom_BackgroundSyncParent_h
-+
-+
 diff --git a/dom/backgroundsync/PBackgroundSync.ipdl b/dom/backgroundsync/PBackgroundSync.ipdl
 new file mode 100644
 --- /dev/null
