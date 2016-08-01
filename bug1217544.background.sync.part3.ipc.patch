@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  7a3d8f732f9ac0b9ca345073ef8ca0c2ef2a7aa8
+# Parent  3b3e0c1fb59ac01e76906db1621882268a90ae0b
 Bug 1217544 - Implement one-off BackgroundSync API. Part 3: IPC. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
@@ -1049,7 +1049,7 @@ diff --git a/dom/backgroundsync/moz.build b/dom/backgroundsync/moz.build
 diff --git a/ipc/glue/BackgroundChildImpl.cpp b/ipc/glue/BackgroundChildImpl.cpp
 --- a/ipc/glue/BackgroundChildImpl.cpp
 +++ b/ipc/glue/BackgroundChildImpl.cpp
-@@ -2,16 +2,17 @@
+@@ -4,16 +4,17 @@
   * License, v. 2.0. If a copy of the MPL was not distributed with this file,
   * You can obtain one at http://mozilla.org/MPL/2.0/. */
  
@@ -1067,7 +1067,7 @@ diff --git a/ipc/glue/BackgroundChildImpl.cpp b/ipc/glue/BackgroundChildImpl.cpp
  #include "mozilla/Assertions.h"
  #include "mozilla/dom/PBlobChild.h"
  #include "mozilla/dom/PFileSystemRequestChild.h"
-@@ -64,16 +65,17 @@ namespace ipc {
+@@ -71,16 +72,17 @@ namespace ipc {
  using mozilla::dom::UDPSocketChild;
  using mozilla::net::PUDPSocketChild;
  
@@ -1085,12 +1085,12 @@ diff --git a/ipc/glue/BackgroundChildImpl.cpp b/ipc/glue/BackgroundChildImpl.cpp
  BackgroundChildImpl::
  ThreadLocal::ThreadLocal()
    : mCurrentFileHandle(nullptr)
-@@ -463,16 +465,36 @@ BackgroundChildImpl::DeallocPFileSystemR
+@@ -519,16 +521,36 @@ BackgroundChildImpl::DeallocPGamepadTest
  {
-   // The reference is increased in FileSystemTaskBase::Start of
-   // FileSystemTaskBase.cpp. We should decrease it after IPC.
-   RefPtr<dom::FileSystemTaskChildBase> child =
-     dont_AddRef(static_cast<dom::FileSystemTaskChildBase*>(aActor));
+ #ifdef MOZ_GAMEPAD
+   MOZ_ASSERT(aActor);
+   delete static_cast<dom::GamepadTestChannelChild*>(aActor);
+ #endif
    return true;
  }
  
@@ -1125,15 +1125,16 @@ diff --git a/ipc/glue/BackgroundChildImpl.cpp b/ipc/glue/BackgroundChildImpl.cpp
 diff --git a/ipc/glue/BackgroundChildImpl.h b/ipc/glue/BackgroundChildImpl.h
 --- a/ipc/glue/BackgroundChildImpl.h
 +++ b/ipc/glue/BackgroundChildImpl.h
-@@ -160,16 +160,21 @@ protected:
-   DeallocPQuotaChild(PQuotaChild* aActor) override;
+@@ -179,16 +179,22 @@ protected:
+   virtual bool
+   DeallocPGamepadEventChannelChild(PGamepadEventChannelChild* aActor) override;
  
-   virtual PFileSystemRequestChild*
-   AllocPFileSystemRequestChild(const FileSystemParams&) override;
+   virtual PGamepadTestChannelChild*
+   AllocPGamepadTestChannelChild() override;
  
    virtual bool
-   DeallocPFileSystemRequestChild(PFileSystemRequestChild*) override;
- 
+   DeallocPGamepadTestChannelChild(PGamepadTestChannelChild* aActor) override;
++
 +  virtual PBackgroundSyncChild*
 +  AllocPBackgroundSyncChild() override;
 +
@@ -1150,7 +1151,7 @@ diff --git a/ipc/glue/BackgroundChildImpl.h b/ipc/glue/BackgroundChildImpl.h
 diff --git a/ipc/glue/BackgroundParentImpl.cpp b/ipc/glue/BackgroundParentImpl.cpp
 --- a/ipc/glue/BackgroundParentImpl.cpp
 +++ b/ipc/glue/BackgroundParentImpl.cpp
-@@ -36,16 +36,17 @@
+@@ -46,16 +46,17 @@
  #include "nsNetUtil.h"
  #include "nsIScriptSecurityManager.h"
  #include "nsProxyRelease.h"
@@ -1168,7 +1169,7 @@ diff --git a/ipc/glue/BackgroundParentImpl.cpp b/ipc/glue/BackgroundParentImpl.c
  #endif
  
  using mozilla::ipc::AssertIsOnBackgroundThread;
-@@ -54,16 +55,17 @@ using mozilla::dom::cache::PCacheParent;
+@@ -64,16 +65,17 @@ using mozilla::dom::cache::PCacheParent;
  using mozilla::dom::cache::PCacheStorageParent;
  using mozilla::dom::cache::PCacheStreamControlParent;
  using mozilla::dom::FileSystemBase;
@@ -1186,7 +1187,7 @@ diff --git a/ipc/glue/BackgroundParentImpl.cpp b/ipc/glue/BackgroundParentImpl.c
  AssertIsOnMainThread()
  {
    MOZ_ASSERT(NS_IsMainThread());
-@@ -92,16 +94,17 @@ public:
+@@ -102,16 +104,17 @@ public:
  } // namespace
  
  namespace mozilla {
@@ -1204,12 +1205,12 @@ diff --git a/ipc/glue/BackgroundParentImpl.cpp b/ipc/glue/BackgroundParentImpl.c
    AssertIsOnMainThread();
  
    MOZ_COUNT_CTOR(mozilla::ipc::BackgroundParentImpl);
-@@ -885,16 +888,36 @@ BackgroundParentImpl::DeallocPFileSystem
-   AssertIsInMainProcess();
-   AssertIsOnBackgroundThread();
- 
-   RefPtr<FileSystemRequestParent> parent =
-     dont_AddRef(static_cast<FileSystemRequestParent*>(aDoomed));
+@@ -966,16 +969,36 @@ BackgroundParentImpl::DeallocPGamepadTes
+ #ifdef MOZ_GAMEPAD
+   MOZ_ASSERT(aActor);
+   RefPtr<dom::GamepadTestChannelParent> parent =
+     dont_AddRef(static_cast<dom::GamepadTestChannelParent*>(aActor));
+ #endif
    return true;
  }
  
@@ -1244,15 +1245,16 @@ diff --git a/ipc/glue/BackgroundParentImpl.cpp b/ipc/glue/BackgroundParentImpl.c
 diff --git a/ipc/glue/BackgroundParentImpl.h b/ipc/glue/BackgroundParentImpl.h
 --- a/ipc/glue/BackgroundParentImpl.h
 +++ b/ipc/glue/BackgroundParentImpl.h
-@@ -192,14 +192,19 @@ protected:
+@@ -210,14 +210,20 @@ protected:
+   virtual bool
+   DeallocPGamepadEventChannelParent(PGamepadEventChannelParent *aActor) override;
+ 
+   virtual PGamepadTestChannelParent*
+   AllocPGamepadTestChannelParent() override;
  
    virtual bool
-   RecvPFileSystemRequestConstructor(PFileSystemRequestParent* aActor,
-                                     const FileSystemParams& aParams) override;
- 
-   virtual bool
-   DeallocPFileSystemRequestParent(PFileSystemRequestParent*) override;
- 
+   DeallocPGamepadTestChannelParent(PGamepadTestChannelParent* aActor) override;
++
 +  virtual PBackgroundSyncParent*
 +  AllocPBackgroundSyncParent() override;
 +
@@ -1267,14 +1269,14 @@ diff --git a/ipc/glue/BackgroundParentImpl.h b/ipc/glue/BackgroundParentImpl.h
 diff --git a/ipc/glue/PBackground.ipdl b/ipc/glue/PBackground.ipdl
 --- a/ipc/glue/PBackground.ipdl
 +++ b/ipc/glue/PBackground.ipdl
-@@ -13,16 +13,17 @@ include protocol PCacheStorage;
- include protocol PCacheStreamControl;
- include protocol PFileDescriptorSet;
- include protocol PFileSystemRequest;
+@@ -16,16 +16,17 @@ include protocol PFileSystemRequest;
+ include protocol PGamepadEventChannel;
+ include protocol PGamepadTestChannel;
  include protocol PMessagePort;
  include protocol PCameras;
  include protocol PNuwa;
  include protocol PQuota;
+ include protocol PSendStream;
  include protocol PServiceWorkerManager;
 +include protocol PBackgroundSync;
  include protocol PUDPSocket;
@@ -1284,8 +1286,8 @@ diff --git a/ipc/glue/PBackground.ipdl b/ipc/glue/PBackground.ipdl
  include PBackgroundSharedTypes;
  include PBackgroundIDBSharedTypes;
  include PFileSystemParams;
- 
-@@ -40,16 +41,17 @@ using mozilla::dom::asmjscache::WritePar
+ include ProtocolTypes;
+@@ -44,16 +45,17 @@ using mozilla::dom::asmjscache::WritePar
  namespace mozilla {
  namespace ipc {
  
@@ -1303,14 +1305,14 @@ diff --git a/ipc/glue/PBackground.ipdl b/ipc/glue/PBackground.ipdl
    manages PCacheStreamControl;
    manages PFileDescriptorSet;
    manages PFileSystemRequest;
-@@ -95,16 +97,18 @@ parent:
-   async PAsmJSCacheEntry(OpenMode openMode,
-                          WriteParams write,
-                          PrincipalInfo principalInfo);
- 
+@@ -107,16 +109,18 @@ parent:
    async PQuota();
  
    async PFileSystemRequest(FileSystemParams params);
+ 
+   async PGamepadEventChannel();
+ 
+   async PGamepadTestChannel();
  
 +  async PBackgroundSync();
 +
@@ -1325,7 +1327,7 @@ diff --git a/ipc/glue/PBackground.ipdl b/ipc/glue/PBackground.ipdl
 diff --git a/ipc/glue/moz.build b/ipc/glue/moz.build
 --- a/ipc/glue/moz.build
 +++ b/ipc/glue/moz.build
-@@ -140,16 +140,17 @@ SOURCES += [
+@@ -151,16 +151,17 @@ SOURCES += [
  if CONFIG['_MSC_VER']:
      # This is intended as a temporary hack to support building with VS2015.
      # 'reinterpret_cast': conversion from 'DWORD' to 'HANDLE' of greater size
