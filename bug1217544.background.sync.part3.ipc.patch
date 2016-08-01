@@ -6,7 +6,7 @@ Bug 1217544 - Implement one-off BackgroundSync API. Part 3: IPC. r=baku
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
 --- a/dom/backgroundsync/BackgroundSync.cpp
 +++ b/dom/backgroundsync/BackgroundSync.cpp
-@@ -1,88 +1,300 @@
+@@ -1,88 +1,297 @@
  /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
  /* vim: set ts=8 sts=2 et sw=2 tw=80: */
  /* This Source Code Form is subject to the terms of the Mozilla Public
@@ -125,17 +125,17 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
 +
 +NS_IMPL_ISUPPORTS(TeardownRunnable, nsICancelableRunnable, nsIRunnable)
 +
-+class BackgroundSyncFeature final : public workers::WorkerFeature
++class BackgroundSyncHolder final : public workers::WorkerHolder
 +{
-+  // The manager keeps alive this feature.
++  // The manager keeps the WorkerHolder alive.
 +  BackgroundSync* MOZ_NON_OWNING_REF mManager;
 +
 +public:
-+  explicit BackgroundSyncFeature(BackgroundSync* aManager)
++  explicit BackgroundSyncHolder(BackgroundSync* aManager)
 +    : mManager(aManager)
 +  {
 +    MOZ_ASSERT(aManager);
-+    MOZ_COUNT_CTOR(BackgroundSyncFeature);
++    MOZ_COUNT_CTOR(BackgroundSyncHolder);
 +  }
 +
 +  virtual bool Notify(workers::Status aStatus) override
@@ -147,9 +147,9 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
 +  }
 +
 +private:
-+  ~BackgroundSyncFeature()
++  ~BackgroundSyncHolder()
 +  {
-+    MOZ_COUNT_CTOR(BackgroundSyncFeature);
++    MOZ_COUNT_CTOR(BackgroundSyncHolder);
 +  }
 +};
 +
@@ -216,9 +216,9 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
    RefPtr<BackgroundSync> ref = new BackgroundSync(aGlobal,
                                                    principalInfo);
 +
-+  ref->mWorkerFeature = new BackgroundSyncFeature(ref);
-+  if (NS_WARN_IF(!aWorkerPrivate->AddFeature(ref->mWorkerFeature))) {
-+    ref->mWorkerFeature = nullptr;
++  ref->mWorkerHolder = new BackgroundSyncHolder(ref);
++  if (NS_WARN_IF(!ref->mWorkerHolder->HoldWorker(aWorkerPrivate))) {
++    ref->mWorkerHolder = nullptr;
 +    return nullptr;
 +  }
 +
@@ -254,7 +254,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
 -{}
 +{
 +  Shutdown();
-+  MOZ_ASSERT(!mWorkerFeature);
++  MOZ_ASSERT(!mWorkerHolder);
 +  MOZ_ASSERT(!mActor);
 +}
 +
@@ -282,12 +282,9 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
 +    }
 +  }
 +
-+  if (mWorkerFeature) {
-+    WorkerPrivate* workerPrivate = GetCurrentThreadWorkerPrivate();
-+    MOZ_ASSERT(workerPrivate);
-+    workerPrivate->AssertIsOnWorkerThread();
-+    workerPrivate->RemoveFeature(mWorkerFeature);
-+    mWorkerFeature = nullptr;
++  if (mWorkerHolder) {
++    // The DTOR of this WorkerHolder will release the worker for us.
++    mWorkerHolder = nullptr;
 +  }
 +
 +  if (mActor) {
@@ -314,7 +311,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
  BackgroundSync::PrefEnabled(JSContext* aCx, JSObject* aObj)
  {
    using mozilla::dom::workers::WorkerPrivate;
-@@ -97,43 +309,138 @@ BackgroundSync::PrefEnabled(JSContext* a
+@@ -97,43 +306,138 @@ BackgroundSync::PrefEnabled(JSContext* a
    WorkerPrivate* workerPrivate = GetWorkerPrivateFromContext(aCx);
    if (!workerPrivate) {
      return false;
@@ -492,7 +489,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.h b/dom/backgroundsync/Background
  namespace dom {
  
  namespace workers {
-+  class WorkerFeature;
++  class WorkerHolder;
    class WorkerPrivate;
  } // namespace workers
  
@@ -556,7 +553,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.h b/dom/backgroundsync/Background
    nsCOMPtr<nsIGlobalObject> mGlobal;
  
 -  nsAutoPtr<mozilla::ipc::PrincipalInfo> mPrincipalInfo;
-+  nsAutoPtr<workers::WorkerFeature> mWorkerFeature;
++  nsAutoPtr<workers::WorkerHolder> mWorkerHolder;
 +
 +  RefPtr<BackgroundSyncChild> mActor;
 +
