@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  0179d4b8e74662d8aeb0a16ce58f592d7c445da2
+# Parent  eb71f81bcc5b98f4d0d6ef95af6966c56c85433e
 Bug 1217544 - Implement one-off BackgroundSync API. Part 5: Storage. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
@@ -33,8 +33,8 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
      mActor = aActor;
    }
  
--  NS_IMETHODIMP Run() override
-+  NS_IMETHODIMP
+-  NS_IMETHOD Run() override
++  NS_IMETHOD
 +  Run() override
    {
      MOZ_ASSERT(mActor);
@@ -45,8 +45,8 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
      return mActor->ExecuteOp(mPromise, mOp);
    }
  
--  NS_IMETHODIMP Cancel() override
-+  NS_IMETHODIMP
+-  NS_IMETHOD Cancel() override
++  NS_IMETHOD
 +  Cancel() override
    {
      mActor = nullptr;
@@ -210,7 +210,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
  
    explicit TeardownRunnable(BackgroundSyncChild* aActor)
      : mActor(aActor)
-@@ -336,17 +474,18 @@ BackgroundSync::ActorCreated(PBackground
+@@ -335,17 +473,18 @@ BackgroundSync::ActorCreated(PBackground
    MOZ_ASSERT(IsBackgroundSyncThread());
    MOZ_ASSERT(aActor);
    MOZ_ASSERT(!mActor);
@@ -230,7 +230,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
      RefPtr<SyncOpRunnable> runnable = mPendingOperations[i];
      MOZ_ASSERT(runnable);
      runnable->SetActor(mActor);
-@@ -384,65 +523,152 @@ BackgroundSync::Observe(nsISupports* aSu
+@@ -383,65 +522,152 @@ BackgroundSync::Observe(nsISupports* aSu
      }
    }
  
@@ -444,14 +444,14 @@ diff --git a/dom/backgroundsync/BackgroundSync.h b/dom/backgroundsync/Background
    NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_AMBIGUOUS(
        BackgroundSync, nsIIPCBackgroundChildCreateCallback)
  
-@@ -89,18 +91,22 @@ private:
+@@ -87,18 +89,22 @@ public:
+   void Shutdown();
+ private:
    BackgroundSync(nsIGlobalObject* aGlobal,
                   const mozilla::ipc::PrincipalInfo& aPrincipalInfo,
                   const nsAString& aScope);
  
    ~BackgroundSync();
- 
-   bool IsBackgroundSyncThread();
  
 -  already_AddRefed<Promise>
 -  ExecuteOp(const SyncOpArgs& aArgs, ErrorResult& aRv);
@@ -466,7 +466,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.h b/dom/backgroundsync/Background
  
    nsCOMPtr<nsIGlobalObject> mGlobal;
  
-   nsAutoPtr<workers::WorkerFeature> mWorkerFeature;
+   nsAutoPtr<workers::WorkerHolder> mWorkerHolder;
  
    RefPtr<BackgroundSyncChild> mActor;
 diff --git a/dom/backgroundsync/BackgroundSyncChild.h b/dom/backgroundsync/BackgroundSyncChild.h
@@ -796,7 +796,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
 diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/BackgroundSyncParent.h
 --- a/dom/backgroundsync/BackgroundSyncParent.h
 +++ b/dom/backgroundsync/BackgroundSyncParent.h
-@@ -2,49 +2,68 @@
+@@ -2,47 +2,68 @@
  /* vim: set ts=8 sts=2 et sw=2 tw=80: */
  /* This Source Code Form is subject to the terms of the Mozilla Public
   * License, v. 2.0. If a copy of the MPL was not distributed with this file,
@@ -817,8 +817,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/Back
  namespace mozilla {
  
  namespace ipc {
--class BackgroundParentImpl;
-+  class BackgroundParentImpl;
+   class BackgroundParentImpl;
 +  class PrincipalInfo;
  } // namespace ipc
  
@@ -869,13 +868,11 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/Back
  } // namespace mozilla
  
  #endif // mozilla_dom_BackgroundSyncParent_h
--
--
 diff --git a/dom/backgroundsync/BackgroundSyncTypes.h b/dom/backgroundsync/BackgroundSyncTypes.h
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncTypes.h
-@@ -0,0 +1,40 @@
+@@ -0,0 +1,41 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -898,6 +895,7 @@ new file mode 100644
 +{
 +  QuotaInfo() : mIsApp(false) { }
 +  nsCOMPtr<nsIFile> mDir;
++  nsCString mSuffix;
 +  nsCString mGroup;
 +  nsCString mOrigin;
 +  bool mIsApp;
@@ -3513,7 +3511,7 @@ diff --git a/dom/backgroundsync/StorageContext.cpp b/dom/backgroundsync/StorageC
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/StorageContext.cpp
-@@ -0,0 +1,1116 @@
+@@ -0,0 +1,1118 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -3895,6 +3893,7 @@ new file mode 100644
 +      RefPtr<StorageManagerId> managerId = mManager->GetManagerId();
 +      nsCOMPtr<nsIPrincipal> principal = managerId->Principal();
 +      nsresult rv = QuotaManager::GetInfoFromPrincipal(principal,
++                                                       &mQuotaInfo.mSuffix,
 +                                                       &mQuotaInfo.mGroup,
 +                                                       &mQuotaInfo.mOrigin,
 +                                                       &mQuotaInfo.mIsApp);
@@ -3953,6 +3952,7 @@ new file mode 100644
 +      QuotaManager* qm = QuotaManager::Get();
 +      MOZ_ASSERT(qm);
 +      nsresult rv = qm->EnsureOriginIsInitialized(PERSISTENCE_TYPE_DEFAULT,
++                                                  mQuotaInfo.mSuffix,
 +                                                  mQuotaInfo.mGroup,
 +                                                  mQuotaInfo.mOrigin,
 +                                                  mQuotaInfo.mIsApp,
@@ -5751,7 +5751,7 @@ diff --git a/dom/backgroundsync/StorageManagerId.cpp b/dom/backgroundsync/Storag
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/StorageManagerId.cpp
-@@ -0,0 +1,175 @@
+@@ -0,0 +1,176 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -5882,6 +5882,7 @@ new file mode 100644
 +  // order to interpret calls from QM correctly.
 +  nsCString quotaOrigin;
 +  nsresult rv = quota::QuotaManager::GetInfoFromPrincipal(aPrincipal,
++                                                          nullptr,   // suffix
 +                                                          nullptr,   //group
 +                                                          &quotaOrigin,
 +                                                          nullptr);  // is app
@@ -6069,7 +6070,7 @@ diff --git a/dom/backgroundsync/moz.build b/dom/backgroundsync/moz.build
 diff --git a/dom/quota/ActorsParent.cpp b/dom/quota/ActorsParent.cpp
 --- a/dom/quota/ActorsParent.cpp
 +++ b/dom/quota/ActorsParent.cpp
-@@ -23,16 +23,17 @@
+@@ -25,16 +25,17 @@
  
  #include <algorithm>
  #include "GeckoProfiler.h"
@@ -6087,7 +6088,7 @@ diff --git a/dom/quota/ActorsParent.cpp b/dom/quota/ActorsParent.cpp
  #include "mozilla/ipc/BackgroundParent.h"
  #include "mozilla/ipc/BackgroundUtils.h"
  #include "mozilla/IntegerRange.h"
-@@ -3035,25 +3036,27 @@ QuotaManager::Init(const nsAString& aBas
+@@ -3142,25 +3143,27 @@ QuotaManager::Init(const nsAString& aBas
    // Make a timer here to avoid potential failures later. We don't actually
    // initialize the timer until shutdown.
    mShutdownTimer = do_CreateInstance(NS_TIMER_CONTRACTID);
@@ -6132,12 +6133,12 @@ diff --git a/dom/quota/Client.h b/dom/quota/Client.h
  
  BEGIN_QUOTA_NAMESPACE
  
+ class QuotaManager;
  class UsageInfo;
  
  // An abstract interface for quota manager clients.
  // Each storage API must provide an implementation of this interface in order
- // to participate in centralized quota and storage handling.
-@@ -36,16 +37,17 @@ public:
+@@ -37,16 +38,17 @@ public:
    Release() = 0;
  
    enum Type {
@@ -6155,7 +6156,7 @@ diff --git a/dom/quota/Client.h b/dom/quota/Client.h
  
    static nsresult
    TypeToText(Type aType, nsAString& aText)
-@@ -58,16 +60,20 @@ public:
+@@ -59,16 +61,20 @@ public:
        case ASMJS:
          aText.AssignLiteral(ASMJSCACHE_DIRECTORY_NAME);
          break;
@@ -6176,7 +6177,7 @@ diff --git a/dom/quota/Client.h b/dom/quota/Client.h
  
      return NS_OK;
    }
-@@ -79,16 +85,19 @@ public:
+@@ -80,16 +86,19 @@ public:
        aType = IDB;
      }
      else if (aText.EqualsLiteral(ASMJSCACHE_DIRECTORY_NAME)) {
@@ -6199,8 +6200,8 @@ diff --git a/dom/quota/Client.h b/dom/quota/Client.h
 diff --git a/ipc/glue/BackgroundChildImpl.cpp b/ipc/glue/BackgroundChildImpl.cpp
 --- a/ipc/glue/BackgroundChildImpl.cpp
 +++ b/ipc/glue/BackgroundChildImpl.cpp
-@@ -469,18 +469,19 @@ BackgroundChildImpl::DeallocPFileSystemR
-     dont_AddRef(static_cast<dom::FileSystemTaskChildBase*>(aActor));
+@@ -525,18 +525,19 @@ BackgroundChildImpl::DeallocPGamepadTest
+ #endif
    return true;
  }
  
@@ -6224,13 +6225,13 @@ diff --git a/ipc/glue/BackgroundChildImpl.cpp b/ipc/glue/BackgroundChildImpl.cpp
 diff --git a/ipc/glue/BackgroundChildImpl.h b/ipc/glue/BackgroundChildImpl.h
 --- a/ipc/glue/BackgroundChildImpl.h
 +++ b/ipc/glue/BackgroundChildImpl.h
-@@ -161,17 +161,17 @@ protected:
+@@ -181,17 +181,17 @@ protected:
  
-   virtual PFileSystemRequestChild*
-   AllocPFileSystemRequestChild(const FileSystemParams&) override;
+   virtual PGamepadTestChannelChild*
+   AllocPGamepadTestChannelChild() override;
  
    virtual bool
-   DeallocPFileSystemRequestChild(PFileSystemRequestChild*) override;
+   DeallocPGamepadTestChannelChild(PGamepadTestChannelChild* aActor) override;
  
    virtual PBackgroundSyncChild*
 -  AllocPBackgroundSyncChild() override;
@@ -6246,12 +6247,12 @@ diff --git a/ipc/glue/BackgroundChildImpl.h b/ipc/glue/BackgroundChildImpl.h
 diff --git a/ipc/glue/BackgroundParentImpl.cpp b/ipc/glue/BackgroundParentImpl.cpp
 --- a/ipc/glue/BackgroundParentImpl.cpp
 +++ b/ipc/glue/BackgroundParentImpl.cpp
-@@ -888,33 +888,39 @@ BackgroundParentImpl::DeallocPFileSystem
-   AssertIsInMainProcess();
-   AssertIsOnBackgroundThread();
- 
-   RefPtr<FileSystemRequestParent> parent =
-     dont_AddRef(static_cast<FileSystemRequestParent*>(aDoomed));
+@@ -969,33 +969,39 @@ BackgroundParentImpl::DeallocPGamepadTes
+ #ifdef MOZ_GAMEPAD
+   MOZ_ASSERT(aActor);
+   RefPtr<dom::GamepadTestChannelParent> parent =
+     dont_AddRef(static_cast<dom::GamepadTestChannelParent*>(aActor));
+ #endif
    return true;
  }
  
@@ -6293,13 +6294,13 @@ diff --git a/ipc/glue/BackgroundParentImpl.cpp b/ipc/glue/BackgroundParentImpl.c
 diff --git a/ipc/glue/BackgroundParentImpl.h b/ipc/glue/BackgroundParentImpl.h
 --- a/ipc/glue/BackgroundParentImpl.h
 +++ b/ipc/glue/BackgroundParentImpl.h
-@@ -193,17 +193,17 @@ protected:
-   virtual bool
-   RecvPFileSystemRequestConstructor(PFileSystemRequestParent* aActor,
-                                     const FileSystemParams& aParams) override;
+@@ -212,17 +212,17 @@ protected:
+ 
+   virtual PGamepadTestChannelParent*
+   AllocPGamepadTestChannelParent() override;
  
    virtual bool
-   DeallocPFileSystemRequestParent(PFileSystemRequestParent*) override;
+   DeallocPGamepadTestChannelParent(PGamepadTestChannelParent* aActor) override;
  
    virtual PBackgroundSyncParent*
 -  AllocPBackgroundSyncParent() override;
@@ -6333,7 +6334,7 @@ diff --git a/ipc/glue/IPCMessageUtils.h b/ipc/glue/IPCMessageUtils.h
  #include "mozilla/TimeStamp_windows.h"
  #endif
  #include "mozilla/TypeTraits.h"
-@@ -806,11 +807,20 @@ struct ParamTraits<mozilla::Maybe<T>>
+@@ -781,11 +782,20 @@ struct ParamTraits<mozilla::Maybe<T>>
        *result = mozilla::Some(mozilla::Move(tmp));
      } else {
        *result = mozilla::Nothing();
@@ -6357,14 +6358,14 @@ diff --git a/ipc/glue/IPCMessageUtils.h b/ipc/glue/IPCMessageUtils.h
 diff --git a/ipc/glue/PBackground.ipdl b/ipc/glue/PBackground.ipdl
 --- a/ipc/glue/PBackground.ipdl
 +++ b/ipc/glue/PBackground.ipdl
-@@ -97,17 +97,17 @@ parent:
-   async PAsmJSCacheEntry(OpenMode openMode,
-                          WriteParams write,
-                          PrincipalInfo principalInfo);
- 
+@@ -109,17 +109,17 @@ parent:
    async PQuota();
  
    async PFileSystemRequest(FileSystemParams params);
+ 
+   async PGamepadEventChannel();
+ 
+   async PGamepadTestChannel();
  
 -  async PBackgroundSync();
 +  async PBackgroundSync(PrincipalInfo aPrincipalInfo);
