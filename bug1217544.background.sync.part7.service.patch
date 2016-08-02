@@ -1,12 +1,12 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  9a65c1d565c51d414a0773ce4fe035e96a5f3317
+# Parent  4abdf3775e0a37fc3722221f05f23931c4ef825c
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: BackgroundSyncService. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSyncChild.cpp b/dom/backgroundsync/BackgroundSyncChild.cpp
 --- a/dom/backgroundsync/BackgroundSyncChild.cpp
 +++ b/dom/backgroundsync/BackgroundSyncChild.cpp
-@@ -108,16 +108,17 @@ BackgroundSyncChild::RecvResponse(const 
+@@ -104,16 +104,17 @@ BackgroundSyncChild::RecvResponse(const 
    Promise* p = GetPendingRequest(aRequestId);
    if (NS_WARN_IF(!p)) {
      // This should never happen.
@@ -887,7 +887,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.h b/dom/backgroundsync/Bac
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncService.h
-@@ -0,0 +1,131 @@
+@@ -0,0 +1,132 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -897,6 +897,7 @@ new file mode 100644
 +#ifndef mozilla_dom_BackgroundSyncService_h
 +#define mozilla_dom_BackgroundSyncService_h
 +
++#include "nsClassHashtable.h"
 +#include "OnlineStateObserver.h"
 +#include "ServiceWorkerManagerParent.h"
 +#include "StorageManagerId.h"
@@ -1409,7 +1410,7 @@ diff --git a/dom/backgroundsync/StorageManagerId.cpp b/dom/backgroundsync/Storag
 diff --git a/dom/backgroundsync/StorageManagerId.h b/dom/backgroundsync/StorageManagerId.h
 --- a/dom/backgroundsync/StorageManagerId.h
 +++ b/dom/backgroundsync/StorageManagerId.h
-@@ -2,16 +2,18 @@
+@@ -2,16 +2,19 @@
  /* vim: set ts=8 sts=2 et sw=2 tw=80: */
  /* This Source Code Form is subject to the terms of the Mozilla Public
   * License, v. 2.0. If a copy of the MPL was not distributed with this file,
@@ -1419,6 +1420,7 @@ diff --git a/dom/backgroundsync/StorageManagerId.h b/dom/backgroundsync/StorageM
  #define mozilla_dom_StorageManagerId_h
  
 +#include "mozilla/dom/backgroundsync/BackgroundSyncIPCTypes.h"
++#include "nsTObserverArray.h"
 +
  namespace mozilla {
  namespace dom {
@@ -1428,7 +1430,7 @@ diff --git a/dom/backgroundsync/StorageManagerId.h b/dom/backgroundsync/StorageM
  
  class StorageManagerId final
  {
-@@ -53,40 +55,48 @@ public:
+@@ -53,40 +56,48 @@ public:
    // An interface to be implemented by code wishing to use the
    // StorageManagerIdFactory.
    // Note, the Listener implementation is responsible for calling
@@ -1533,7 +1535,7 @@ diff --git a/dom/workers/PServiceWorkerManager.ipdl b/dom/workers/PServiceWorker
 diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
 --- a/dom/workers/ServiceWorkerManager.cpp
 +++ b/dom/workers/ServiceWorkerManager.cpp
-@@ -991,17 +991,17 @@ ServiceWorkerManager::SendNotificationCl
+@@ -1031,17 +1031,17 @@ ServiceWorkerManager::SendNotificationCl
  
  NS_IMETHODIMP
  ServiceWorkerManager::SendBackgroundSyncEvent(const nsACString& aOriginAttributes,
@@ -1825,7 +1827,7 @@ diff --git a/dom/workers/ServiceWorkerManagerParent.h b/dom/workers/ServiceWorke
 diff --git a/dom/workers/moz.build b/dom/workers/moz.build
 --- a/dom/workers/moz.build
 +++ b/dom/workers/moz.build
-@@ -97,16 +97,17 @@ UNIFIED_SOURCES += [
+@@ -90,16 +90,17 @@ UNIFIED_SOURCES += [
  IPDL_SOURCES += [
      'PServiceWorkerManager.ipdl',
      'ServiceWorkerRegistrarTypes.ipdlh',
