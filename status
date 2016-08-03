@@ -4,3 +4,4 @@ efd985b7895a7e088537ca84aa4df9214b7222d3:bug1217544.background.sync.part1.webidl
 eb71f81bcc5b98f4d0d6ef95af6966c56c85433e:bug1217544.background.sync.part4.syncevent.patch
 d68d962d03b556116c4cfbcd9f3b8ae10b45eb4c:bug1217544.background.sync.part5.managerid.patch
 ce3c76a72143400b3f779b9cff7bbff03a353f70:bug1217544.background.sync.part6.onlineobserver.patch
+73ae8642844463e8e5306c0016bfba66262386fc:bug1217544.background.sync.part7.service.patch

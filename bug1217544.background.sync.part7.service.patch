@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  4abdf3775e0a37fc3722221f05f23931c4ef825c
+# Parent  ce3c76a72143400b3f779b9cff7bbff03a353f70
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: BackgroundSyncService. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSyncChild.cpp b/dom/backgroundsync/BackgroundSyncChild.cpp
@@ -470,7 +470,7 @@ new file mode 100644
 +// ----------------------------------------------------------------------------
 +
 +BackgroundSyncService::BackgroundSyncService()
-+  : mOnlineState(OnlineStateObserver::UNKNOWN)
++  : mOnlineState(OnlineStateObserver::eUnknown)
 +{
 +  AssertIsOnBackgroundThread();
 +
@@ -665,7 +665,7 @@ new file mode 100644
 +      {
 +        // If we went offline while getting the origins, we don't care about
 +        // getting the sync registrations anymore, so we bail out here.
-+        if (mOnlineState !=  OnlineStateObserver::ONLINE) {
++        if (mOnlineState !=  OnlineStateObserver::eOnline) {
 +          return;
 +        }
 +
@@ -684,7 +684,7 @@ new file mode 100644
 +        // If we went offline while getting the sync registrations, it is
 +        // useless to continue, as no sync event will be triggered for these
 +        // registrations. So we just bail out here.
-+        if (mOnlineState !=  OnlineStateObserver::ONLINE) {
++        if (mOnlineState !=  OnlineStateObserver::eOnline) {
 +          return;
 +        }
 +
@@ -711,7 +711,7 @@ new file mode 100644
 +        // In that case, we need to check if we still are online and so we can
 +        // continue with the process of firing the sync event. Otherwise, we
 +        // need to get back to the PENDING state and bail out here.
-+        if (mOnlineState != OnlineStateObserver::ONLINE) {
++        if (mOnlineState != OnlineStateObserver::eOnline) {
 +          RefPtr<GetStorageManagerRunnable> runnable =
 +            new GetStorageManagerRunnable(this, registration.mOrigin(),
 +                SyncInternalOp(SyncChangeStateArgs(registration.mId(),
@@ -735,7 +735,7 @@ new file mode 100644
 +{
 +  AssertIsOnBackgroundThread();
 +
-+  if (mOnlineState !=  OnlineStateObserver::ONLINE) {
++  if (mOnlineState !=  OnlineStateObserver::eOnline) {
 +    return;
 +  }
 +
@@ -762,7 +762,7 @@ new file mode 100644
 +{
 +  AssertIsOnBackgroundThread();
 +
-+  if (mOnlineState != OnlineStateObserver::ONLINE) {
++  if (mOnlineState != OnlineStateObserver::eOnline) {
 +    if (aRegistration.mState() == RegistrationState::FIRING) {
 +      RefPtr<GetStorageManagerRunnable> runnable =
 +        new GetStorageManagerRunnable(this, aRegistration.mOrigin(), SyncInternalOp(
@@ -806,7 +806,7 @@ new file mode 100644
 +
 +  mOnlineState = aState;
 +
-+  if (mOnlineState != OnlineStateObserver::ONLINE) {
++  if (mOnlineState != OnlineStateObserver::eOnline) {
 +    return;
 +  }
 +
