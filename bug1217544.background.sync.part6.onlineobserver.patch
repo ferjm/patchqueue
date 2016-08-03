@@ -7,7 +7,7 @@ diff --git a/dom/backgroundsync/OnlineStateObserver.cpp b/dom/backgroundsync/Onl
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/OnlineStateObserver.cpp
-@@ -0,0 +1,185 @@
+@@ -0,0 +1,186 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -145,9 +145,11 @@ new file mode 100644
 +    return NS_OK;
 +  }
 +
-+  OnlineState state = OFFLINE;
++  // Here aTopic is NS_IOSERVICE_OFFLINE_STATUS_TOPIC
++
++  OnlineState state = eOffline;
 +  if (nsDependentString(aData).EqualsLiteral(NS_IOSERVICE_ONLINE)) {
-+    state = ONLINE;
++    state = eOnline;
 +  }
 +
 +  mInitiatingThread->Dispatch(
@@ -162,7 +164,9 @@ new file mode 100644
 +  AssertIsOnMainThread();
 +
 +  nsCOMPtr<nsIObserverService> os = services::GetObserverService();
-+  NS_ENSURE_STATE(os);
++  if (NS_WARN_IF(!os)) {
++    return NS_ERROR_FAILURE;
++  }
 +
 +  nsresult rv = os->AddObserver(this, NS_IOSERVICE_OFFLINE_STATUS_TOPIC,
 +                                /* holdsWeak */ false);
@@ -171,16 +175,13 @@ new file mode 100644
 +  rv = os->AddObserver(this, "xpcom-shutdown", /* holdsWeak */ false);
 +  NS_ENSURE_SUCCESS(rv, rv);
 +
-+  bool offline = true;
 +  nsCOMPtr<nsIIOService> ioService = services::GetIOService();
 +  NS_ENSURE_STATE(ioService);
-+  NS_WARN_IF(NS_FAILED(ioService->GetOffline(&offline)));
 +
-+  OnlineState state = UNKNOWN;
-+  if (offline) {
-+    state = OFFLINE;
-+  } else {
-+    state = ONLINE;
++  bool offline = true;
++  OnlineState state = eUnknown;
++  if (NS_SUCCEEDED(ioService->GetOffline(&offline))) {
++    state = offline ? eOffline : eOnline;
 +  }
 +
 +  mInitiatingThread->Dispatch(
@@ -223,9 +224,9 @@ new file mode 100644
 +  NS_DECL_NSIOBSERVER
 +
 +  typedef enum {
-+    ONLINE,
-+    OFFLINE,
-+    UNKNOWN
++    eOnline,
++    eOffline,
++    eUnknown
 +  } OnlineState;
 +
 +  // An interface to be implemented by code wishing to use the
