@@ -48,7 +48,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
  namespace backgroundsync {
  
 +namespace {
-+  uint64_t sBackgroundSyncManagerParentId = 1;
++uint64_t sBackgroundSyncManagerParentId = 0;
 +}
 +
  class BackgroundSyncParent::PendingRequest final
@@ -59,7 +59,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
    explicit PendingRequest(const nsID& aRequestId,
                            const SyncOp& aOp)
      : mRequestId(aRequestId)
-@@ -39,76 +44,103 @@ public:
+@@ -39,95 +44,127 @@ public:
  private:
    ~PendingRequest() {}
  
@@ -89,29 +89,34 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
  BackgroundSyncParent::ActorDestroy(ActorDestroyReason aWhy)
  {
    AssertIsOnBackgroundThread();
++  MOZ_ASSERT(!mActorDestroyed);
++  MOZ_ASSERT(mService);
 +
-+  mActorDestroyed = true;
-+
-+  if (mService) {
-+    mService->UnregisterActor(this);
-+  }
++  Shutdown();
  }
  
--void
+ void
++BackgroundSyncParent::Shutdown()
++{
++  AssertIsOnBackgroundThread();
++  MOZ_ASSERT(mService);
++  MOZ_ASSERT(!mActorDestroyed);
++
++  mService->UnregisterActor(this);
++  mService = nullptr;
++  mPendingRequests.Clear();
++  mActorDestroyed = true;
++}
++
 +bool
  BackgroundSyncParent::ExecuteRequest(const nsID& aRequestId,
                                       const SyncOp& aOp)
  {
    AssertIsOnBackgroundThread();
-+  
-+  if (NS_WARN_IF(!mService)) {
-+    return false;
-+  }
++  MOZ_ASSERT(mService);
  
 -  // XXX
-+  mService->Request(mId, mStorageManagerId, aRequestId, aOp);
-+
-+  return true;
++  return mService->Request(mId, mStorageManagerId, aRequestId, aOp);
  }
  
  bool
@@ -137,27 +142,24 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
  BackgroundSyncParent::RecvShutdown()
  {
    AssertIsOnBackgroundThread();
- 
--  Unused << Send__delete__(this);
-+  if (NS_WARN_IF(!mService)) {
-+    return false;
-+  }
++  MOZ_ASSERT(mService);
 +
 +  mService->UnregisterActor(this);
 +  mService = nullptr;
-+
-+  if (!mActorDestroyed) {
-+    Unused << Send__delete__(this);
-+  }
  
+   Unused << Send__delete__(this);
+ 
++  Shutdown();
++
    return true;
  }
  
  void
- BackgroundSyncParent::OnStorageManagerIdCreated(
+-BackgroundSyncParent::OnStorageManagerIdCreated(
 -    StorageManagerId* aManagerId)
-+    StorageManagerId* aManagerId, StorageManagerIdFactory* aFactory,
-+    const SyncInternalOp& aUnused)
++BackgroundSyncParent::OnStorageManagerIdCreated(StorageManagerId* aManagerId,
++                                                StorageManagerIdFactory* aFactory,
++                                                const SyncInternalOp& aUnused)
  {
    MOZ_ASSERT(mStorageManagerIdFactory);
 +  MOZ_ASSERT(mStorageManagerIdFactory == aFactory);
@@ -169,10 +171,32 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
  
    // Flush pending requests.
    for (uint32_t i = 0, len = mPendingRequests.Length(); i < len; i++) {
+     MOZ_ASSERT(mPendingRequests[i]);
+     ExecuteRequest(mPendingRequests[i]->RequestId(),
+                    mPendingRequests[i]->Op());
+   }
+   mPendingRequests.Clear();
+ }
+ 
+-void
++bool
+ BackgroundSyncParent::NotifyResponse(const nsID& aRequestId,
+                                      const SyncOpResponse& aResponse)
+ {
+   AssertIsOnBackgroundThread();
+ 
+   Unused << SendResponse(aRequestId, aResponse);
++
++  return true;
+ }
+ 
+ } // namespace backgroundsync
+ } // namespace dom
+ } // namespace mozilla
 diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/BackgroundSyncParent.h
 --- a/dom/backgroundsync/BackgroundSyncParent.h
 +++ b/dom/backgroundsync/BackgroundSyncParent.h
-@@ -19,16 +19,18 @@ namespace mozilla {
+@@ -19,44 +19,69 @@ namespace mozilla {
  namespace ipc {
    class BackgroundParentImpl;
    class PrincipalInfo;
@@ -191,13 +215,14 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/Back
  
  public:
    NS_INLINE_DECL_REFCOUNTING(BackgroundSyncParent)
-@@ -36,27 +38,48 @@ public:
+ 
    virtual bool RecvRequest(const nsID& aRequestId,
                             const SyncOp& aOp) override;
  
    virtual bool RecvShutdown() override;
  
-   void NotifyResponse(const nsID& aRequestId,
+-  void NotifyResponse(const nsID& aRequestId,
++  bool NotifyResponse(const nsID& aRequestId,
                        const SyncOpResponse& aResponse);
  
 +  uint64_t Id() const
@@ -217,6 +242,8 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/Back
    virtual void ActorDestroy(ActorDestroyReason aWhy) override;
  
 -  void ExecuteRequest(const nsID& aRequestId, const SyncOp& aOp);
++  void Shutdown();
++
 +  bool ExecuteRequest(const nsID& aRequestId, const SyncOp& aOp);
  
    // StorageManagerId method
@@ -246,7 +273,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncService.cpp
-@@ -0,0 +1,636 @@
+@@ -0,0 +1,639 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -277,7 +304,7 @@ new file mode 100644
 +namespace backgroundsync {
 +
 +namespace {
-+  BackgroundSyncService* sInstance = nullptr;
++BackgroundSyncService* sInstance = nullptr;
 +} // namespace
 +
 +// ----------------------------------------------------------------------------
@@ -289,14 +316,14 @@ new file mode 100644
 +  NS_DECL_THREADSAFE_ISUPPORTS
 +
 +  GetStorageManagerRunnable(BackgroundSyncService* aService,
-+                            const nsString& aOrigins,
++                            const nsString& aOrigin,
 +                            const SyncInternalOp& aOp)
 +    : mService(aService)
 +    , mOrigins(nsTArray<nsString>())
 +    , mInitiatingThread(do_GetCurrentThread())
 +    , mOp(aOp)
 +  {
-+    mOrigins.AppendElement(aOrigins);
++    mOrigins.AppendElement(aOrigin);
 +  }
 +
 +  GetStorageManagerRunnable(BackgroundSyncService* aService,
@@ -309,10 +336,13 @@ new file mode 100644
 +  {
 +  }
 +
-+  NS_IMETHODIMP
++  NS_IMETHOD
 +  Run() override
 +  {
 +    if (mInitiatingThread == nsCOMPtr<nsIThread>(do_GetCurrentThread())) {
++      // The successful construction of the StorageManagerId instance ends up
++      // calling mService->OnStorageManagerIdCreated with mOp, so the operation
++      // can continue with the appropriate StorageManager.
 +      RefPtr<StorageManagerIdFactory> factory =
 +        StorageManagerIdFactory::Create(mService, mPrincipalInfo, mOp);
 +      mService->AddStorageManagerIdFactory(factory);
@@ -323,12 +353,13 @@ new file mode 100644
 +
 +    nsIScriptSecurityManager *securityManager =
 +      nsContentUtils::GetSecurityManager();
++    if (NS_WARN_IF(!securityManager)) {
++      return NS_ERROR_NOT_AVAILABLE;
++    }
 +
-+    MOZ_ASSERT(securityManager);
-+
++    // We only have more than one origin in mOrigins when we are getting the
++    // StorageManagers for a GetAll operation.
 +    for (uint32_t i = 0; i < mOrigins.Length(); i++) {
-+      // To do that, we first need to get the StorageManager responsible for
-+      // each origin.
 +      nsCOMPtr<nsIPrincipal> principal;
 +      securityManager->CreateCodebasePrincipalFromOrigin(
 +        NS_ConvertUTF16toUTF8(mOrigins[i]), getter_AddRefs(principal));
@@ -337,21 +368,21 @@ new file mode 100644
 +
 +      nsresult rv = PrincipalToPrincipalInfo(principal, &mPrincipalInfo);
 +      if (NS_WARN_IF(NS_FAILED(rv))) {
-+        return rv;
++        continue;
 +      }
 +
 +      MOZ_ASSERT(mInitiatingThread);
 +
 +      rv = mInitiatingThread->Dispatch(this, nsIThread::DISPATCH_NORMAL);
 +      if (NS_WARN_IF(NS_FAILED(rv))) {
-+        return rv;
++        continue;
 +      }
 +    }
 +
 +    return NS_OK;
 +  }
 +
-+  NS_IMETHODIMP
++  NS_IMETHOD
 +  Cancel() override
 +  {
 +    return NS_OK;
@@ -371,10 +402,10 @@ new file mode 100644
 +
 +// ----------------------------------------------------------------------------
 +
-+struct BackgroundSyncService::StorageManagerRef final
++class BackgroundSyncService::StorageManagerRef final
 +{
-+  explicit StorageManagerRef(const uint64_t aActorId,
-+                             StorageManager* aStorageManager)
++public:
++  StorageManagerRef(const uint64_t aActorId, StorageManager* aStorageManager)
 +    : mActorId(aActorId)
 +    , mStorageManager(aStorageManager)
 +  {}
@@ -399,16 +430,14 @@ new file mode 100644
 +{
 +  AssertIsOnBackgroundThread();
 +
++  nsAutoPtr<StorageManagerRef> ref;
++  mStorageManagers.RemoveAndForget(aRequestId, ref);
++
 +  // It is possible that we call OnRequestComplete before AddStorageManagerRef
-+  if (!mStorageManagers.Contains(aRequestId)) {
++  if (!ref) {
 +    return 0;
 +  }
-+  nsAutoPtr<StorageManagerRef> doomed;
-+  StorageManagerRef* ref;
-+  mStorageManagers.Get(aRequestId, &ref);
-+  uint64_t actorId = ref->mActorId;
-+  mStorageManagers.RemoveAndForget(aRequestId, doomed);
-+  return actorId;
++  return ref->mActorId;
 +}
 +
 +void
@@ -417,15 +446,12 @@ new file mode 100644
 +  AssertIsOnBackgroundThread();
 +
 +  for (auto iter = mStorageManagers.Iter(); !iter.Done(); iter.Next()) {
-+    StorageManagerRef* ref;
-+    mStorageManagers.Get(iter.Key(), &ref);
-+    if (NS_WARN_IF(!ref)) {
-+      continue;
-+    }
++    StorageManagerRef* ref = iter.UserData();
 +    if (ref->mActorId == aActorId) {
 +      ref->mStorageManager = nullptr;
 +      nsAutoPtr<StorageManagerRef> doomed;
 +      mStorageManagers.RemoveAndForget(iter.Key(), doomed);
++      break;
 +    }
 +  }
 +}
@@ -433,24 +459,13 @@ new file mode 100644
 +// ----------------------------------------------------------------------------
 +// ChromeStorageManager
 +
-+struct BackgroundSyncService::ChromeStorageManagerRef final
-+{
-+  explicit ChromeStorageManagerRef(ChromeStorageManager* aChromeStorageManager)
-+    : mChromeStorageManager(aChromeStorageManager)
-+  {}
-+
-+  RefPtr<ChromeStorageManager> mChromeStorageManager;
-+};
-+
 +void
 +BackgroundSyncService::AddChromeStorageManagerRef(
 +    const nsID& aRequestId, ChromeStorageManager* aChromeStorageManager)
 +{
 +  AssertIsOnBackgroundThread();
 +
-+  ChromeStorageManagerRef* ref =
-+    new ChromeStorageManagerRef(aChromeStorageManager);
-+  mChromeStorageManagers.Put(aRequestId, ref);
++  mChromeStorageManagers.Put(aRequestId, aChromeStorageManager);
 +}
 +
 +void
@@ -458,13 +473,7 @@ new file mode 100644
 +{
 +  AssertIsOnBackgroundThread();
 +
-+  if (!mChromeStorageManagers.Contains(aRequestId)) {
-+    return;
-+  }
-+  ChromeStorageManagerRef* ref;
-+  mChromeStorageManagers.Get(aRequestId, &ref);
-+  nsAutoPtr<ChromeStorageManagerRef> doomed;
-+  mChromeStorageManagers.RemoveAndForget(aRequestId, doomed);
++  mChromeStorageManagers.Remove(aRequestId);
 +}
 +
 +// ----------------------------------------------------------------------------
@@ -474,7 +483,8 @@ new file mode 100644
 +{
 +  AssertIsOnBackgroundThread();
 +
-+  // sInstance is a raw BackgroundSyncService*.
++  // sInstance is a raw BackgroundSyncService*. It is kept alive by
++  // ServiceWorkerManagerParent and BackgroundSyncParent instances.
 +  MOZ_ASSERT(!sInstance);
 +  sInstance = this;
 +}
@@ -483,7 +493,7 @@ new file mode 100644
 +{
 +  AssertIsOnBackgroundThread();
 +  MOZ_ASSERT(sInstance == this);
-+  MOZ_ASSERT(mBackgroundSyncActors.Count() == 0);
++  MOZ_ASSERT(mBackgroundSyncActors.Length() == 0);
 +  MOZ_ASSERT(mStorageManagers.Count() == 0);
 +  MOZ_ASSERT(mChromeStorageManagers.Count() == 0);
 +
@@ -512,6 +522,19 @@ new file mode 100644
 +  mOnlineStateObserver = OnlineStateObserver::Init(this);
 +}
 +
++void
++BackgroundSyncService::MaybeShutdown()
++{
++  AssertIsOnBackgroundThread();
++
++  if (mBackgroundSyncActors.Length() == 0 &&
++      mStorageManagers.Count() == 0 &&
++      mChromeStorageManagers.Count() == 0) {
++    mOnlineStateObserver->Shutdown(this);
++    mOnlineStateObserver = nullptr;
++  }
++}
++
 +// --------------------------------------------------------------------------
 +
 +void
@@ -521,7 +544,7 @@ new file mode 100644
 +  MOZ_ASSERT(aParent);
 +  MOZ_ASSERT(!mBackgroundSyncActors.Contains(aParent));
 +
-+  mBackgroundSyncActors.PutEntry(aParent);
++  mBackgroundSyncActors.AppendElement(aParent);
 +}
 +
 +void
@@ -532,7 +555,9 @@ new file mode 100644
 +  MOZ_ASSERT(mBackgroundSyncActors.Contains(aParent));
 +
 +  ReleaseStorageManagerRef(aParent->Id());
-+  mBackgroundSyncActors.RemoveEntry(aParent);
++  mBackgroundSyncActors.RemoveElement(aParent);
++
++  MaybeShutdown();
 +}
 +
 +void
@@ -543,7 +568,7 @@ new file mode 100644
 +  MOZ_ASSERT(aParent);
 +  MOZ_ASSERT(!mServiceWorkerManagerActors.Contains(aParent));
 +
-+  mServiceWorkerManagerActors.PutEntry(aParent);
++  mServiceWorkerManagerActors.AppendElement(aParent);
 +}
 +
 +void
@@ -554,12 +579,14 @@ new file mode 100644
 +  MOZ_ASSERT(aParent);
 +  MOZ_ASSERT(mServiceWorkerManagerActors.Contains(aParent));
 +
-+  mServiceWorkerManagerActors.RemoveEntry(aParent);
++  mServiceWorkerManagerActors.RemoveElement(aParent);
++
++  MaybeShutdown();
 +}
 +
 +// --------------------------------------------------------------------------
 +
-+void
++bool
 +BackgroundSyncService::Request(const uint64_t aActorId,
 +                               StorageManagerId* aManagerId,
 +                               const nsID& aRequestId,
@@ -578,24 +605,30 @@ new file mode 100644
 +
 +  AddStorageManagerRef(aRequestId, aActorId, manager);
 +
-+  manager->ExecuteRequest(aRequestId, aOp);
++  return manager->ExecuteRequest(aRequestId, aOp);
 +}
 +
-+void
++bool
 +BackgroundSyncService::Response(const uint64_t aActorId,
 +                                const nsID& aRequestId,
 +                                const SyncOpResponse& aResponse)
 +{
 +  AssertIsOnBackgroundThread();
 +
-+  for (auto iter = mBackgroundSyncActors.Iter(); !iter.Done(); iter.Next()) {
-+    RefPtr<BackgroundSyncParent> parent = iter.Get()->GetKey();
++  for (uint32_t i = 0, len = mBackgroundSyncActors.Length(); i < len; ++i) {
++    RefPtr<BackgroundSyncParent> parent = mBackgroundSyncActors[i];
 +    MOZ_ASSERT(parent);
-+    if (parent->Id() != aActorId || parent->ActorDestroyed()) {
++
++    if (parent->Id() != aActorId) {
 +      continue;
 +    }
-+    parent->NotifyResponse(aRequestId, aResponse);
++
++    if (!parent->ActorDestroyed()) {
++      return parent->NotifyResponse(aRequestId, aResponse);
++    }
 +  }
++
++  return false;
 +}
 +
 +void
@@ -625,7 +658,7 @@ new file mode 100644
 +      break;
 +    case SyncOpResponse::TSyncRemoveResponse:
 +      {
-+        nsString origin = aResponse.get_SyncRemoveResponse().mOrigin();
++        const nsString& origin = aResponse.get_SyncRemoveResponse().mOrigin();
 +        // We only get the origin value when there are no more registrations for
 +        // this origin. If that's the case, we need to remove that origin from
 +        // the 'origins' DB before we can progress the response to the DOM side.
@@ -651,8 +684,9 @@ new file mode 100644
 +  uint64_t actorId = ReleaseStorageManagerRef(aRequestId);
 +  // If we have an actor ID, this is a DOM request which response needs to be
 +  // reported back to the content process through the IPC actor.
-+  if (actorId != 0) {
-+    return Response(actorId, aRequestId, aResponse);
++  if (actorId) {
++    Response(actorId, aRequestId, aResponse);
++    return;
 +  }
 +
 +  // Otherwise, this is a response to an internal request that can be handled
@@ -670,7 +704,11 @@ new file mode 100644
 +        }
 +
 +        // If we are still online, we need to get the list of sync registrations
-+        // per origin.
++        // per origin. To do that we first need to get the corresponding
++        // StorageManager for each origin by jumping to the main thread.
++        // Once we have each appropriate StorageManager, the GetAll operation
++        // will be executed at OnStorageManagerIdCreated. That's why we pass here
++        // the SyncInteralOp with SyncGetAllArgs.
 +        nsTArray<nsString> origins(
 +          aResponse.get_SyncGetAllOriginsResponse().mOrigins());
 +        RefPtr<GetStorageManagerRunnable> runnable =
@@ -773,9 +811,8 @@ new file mode 100644
 +    return;
 +  }
 +
-+  for (auto iter = mServiceWorkerManagerActors.Iter(); !iter.Done();
-+       iter.Next()) {
-+    RefPtr<ServiceWorkerManagerParent> parent = iter.Get()->GetKey();
++  for (uint32_t i = 0, len = mServiceWorkerManagerActors.Length(); i < len; ++i) {
++    RefPtr<ServiceWorkerManagerParent> parent = mServiceWorkerManagerActors[i];
 +    MOZ_ASSERT(parent);
 +    Unused << parent->SendNotifyBackgroundSyncEvent(aRegistration.mOriginSuffix(),
 +                                                    aRegistration.mScope(),
@@ -800,7 +837,7 @@ new file mode 100644
 +
 +void
 +BackgroundSyncService::OnOnlineStateChanged(
-+    OnlineStateObserver::OnlineState aState)
++  OnlineStateObserver::OnlineState aState)
 +{
 +  AssertIsOnBackgroundThread();
 +
@@ -813,15 +850,8 @@ new file mode 100644
 +  // If we are online, we need to get the list of sync registrations and
 +  // trigger the corresponding sync events.
 +
-+  nsresult rv;
-+  nsCOMPtr<nsIUUIDGenerator> uuidGenerator =
-+    do_GetService("@mozilla.org/uuid-generator;1", &rv);
-+  if (NS_WARN_IF(NS_FAILED(rv))) {
-+    return;
-+  }
-+
 +  nsID id;
-+  rv = uuidGenerator->GenerateUUIDInPlace(&id);
++  nsresult rv = nsContentUtils::GenerateUUIDInPlace(id);
 +  if (NS_WARN_IF(NS_FAILED(rv))) {
 +    return;
 +  }
@@ -898,6 +928,7 @@ new file mode 100644
 +#define mozilla_dom_BackgroundSyncService_h
 +
 +#include "nsClassHashtable.h"
++#include "nsRefPtrHashtable.h"
 +#include "OnlineStateObserver.h"
 +#include "ServiceWorkerManagerParent.h"
 +#include "StorageManagerId.h"
@@ -935,7 +966,7 @@ new file mode 100644
 +  void RegisterActor(workers::ServiceWorkerManagerParent* aParent);
 +  void UnregisterActor(workers::ServiceWorkerManagerParent* aParent);
 +
-+  void Request(const uint64_t aActorId,
++  bool Request(const uint64_t aActorId,
 +               StorageManagerId* aManagerId,
 +               const nsID& aRequestId,
 +               const SyncOp& aOp);
@@ -945,10 +976,11 @@ new file mode 100644
 +  ~BackgroundSyncService();
 +
 +  void Init();
++  void MaybeShutdown();
 +
 +  // --------------------------------------------------------------------------
 +
-+  void Response(const uint64_t aActorId,
++  bool Response(const uint64_t aActorId,
 +                const nsID& aRequestId,
 +                const SyncOpResponse& aResponse);
 +
@@ -962,8 +994,8 @@ new file mode 100644
 +
 +  // --------------------------------------------------------------------------
 +
-+  nsTHashtable<nsRefPtrHashKey<BackgroundSyncParent>> mBackgroundSyncActors;
-+  nsTHashtable<nsRefPtrHashKey<workers::ServiceWorkerManagerParent>>
++  nsTArray<RefPtr<BackgroundSyncParent>> mBackgroundSyncActors;
++  nsTArray<RefPtr<workers::ServiceWorkerManagerParent>>
 +    mServiceWorkerManagerActors;
 +
 +  // --------------------------------------------------------------------------
@@ -978,7 +1010,7 @@ new file mode 100644
 +  // References to StorageManagers managing content principals.
 +  // For each content origin, we will have a separated registrations DB
 +  // where we will store the specific information of each registration.
-+  struct StorageManagerRef;
++  class StorageManagerRef;
 +  nsClassHashtable<nsIDHashKey, StorageManagerRef> mStorageManagers;
 +
 +  // --------------------------------------------------------------------------
@@ -990,9 +1022,7 @@ new file mode 100644
 +
 +  // References to the ChromeStorageManager managing the system principal
 +  // storage.
-+  struct ChromeStorageManagerRef;
-+  nsClassHashtable<nsIDHashKey, ChromeStorageManagerRef>
-+    mChromeStorageManagers;
++  nsRefPtrHashtable<nsIDHashKey, ChromeStorageManager> mChromeStorageManagers;
 +
 +  // --------------------------------------------------------------------------
 +  // OnlineStateObserver::Listener method
@@ -1046,7 +1076,7 @@ diff --git a/dom/backgroundsync/ChromeStorageManager.cpp b/dom/backgroundsync/Ch
  {
    AssertIsOnBackgroundThread();
  
-@@ -288,27 +290,29 @@ ChromeStorageManager::~ChromeStorageMana
+@@ -288,27 +290,30 @@ ChromeStorageManager::~ChromeStorageMana
      RefPtr<ShutdownRunnable> runnable = new ShutdownRunnable(mDBConn);
      mIOThread->Dispatch(runnable, nsIThread::DISPATCH_NORMAL);
      mDBConn = nullptr;
@@ -1065,6 +1095,7 @@ diff --git a/dom/backgroundsync/ChromeStorageManager.cpp b/dom/backgroundsync/Ch
 +ChromeStorageManager::GetOrCreate(BackgroundSyncService* aService)
  {
    AssertIsOnBackgroundThread();
++  MOZ_ASSERT(aService);
  
    RefPtr<ChromeStorageManager> instance = csmInstance;
    if (!instance) {
@@ -1078,7 +1109,7 @@ diff --git a/dom/backgroundsync/ChromeStorageManager.cpp b/dom/backgroundsync/Ch
  ChromeStorageManager::Init()
  {
    AssertIsOnBackgroundThread();
-@@ -384,15 +388,16 @@ ChromeStorageManager::GetAll(const nsID&
+@@ -384,15 +389,16 @@ ChromeStorageManager::GetAll(const nsID&
    ExecuteStorageAction(action);
  }
  
@@ -1247,7 +1278,71 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
    NS_ASSERT_OWNINGTHREAD(StorageManager);
  
    RefPtr<StorageContext> oldContext;
-@@ -748,20 +754,19 @@ StorageManager::OnRequestComplete(const 
+@@ -654,39 +660,41 @@ StorageManager::MaybeAllowContextToClose
+     // Mark the StorageManager as invalid so that it won't get used again.
+     NoteClosing();
+ 
+     context->AllowToClose();
+   }
+ }
+ 
+ // Common to DOM and internal requests.
+-void
++bool
+ StorageManager::ExecuteRequest(const nsID& aRequestId, StorageAction* aAction)
+ {
+   NS_ASSERT_OWNINGTHREAD(StorageManager);
+   MOZ_ASSERT(mContext);
+   MOZ_ASSERT(aAction);
+ 
+   mPendingRequests.AppendElement(aRequestId);
+ 
+   if (NS_WARN_IF(mState == Closing)) {
+     OnRequestComplete(aRequestId,
+                       SyncOpError(static_cast<uint32_t>(NS_ERROR_ABORT)));
+-    return;
++    return false;
+   }
+ 
+   RefPtr<StorageContext> context = mContext;
+   MOZ_ASSERT(!context->IsCanceled());
+ 
+   context->Dispatch(aAction);
++
++  return true;
+ }
+ 
+ // DOM request.
+-void
++bool
+ StorageManager::ExecuteRequest(const nsID& aRequestId, const SyncOp& aOp)
+ {
+   RefPtr<StorageAction> action;
+ 
+   switch(aOp.mArgs().type()) {
+     case SyncOpArgs::TSyncRegisterArgs:
+     {
+       action = new RegisterAction(aRequestId, this,
+@@ -700,17 +708,17 @@ StorageManager::ExecuteRequest(const nsI
+       break;
+     }
+     default:
+     {
+       MOZ_CRASH("Unknown BackgroundSync request");
+     }
+   }
+ 
+-  ExecuteRequest(aRequestId, action);
++  return ExecuteRequest(aRequestId, action);
+ }
+ 
+ // Internal request.
+ void
+ StorageManager::ExecuteRequest(const nsID& aRequestId, const SyncInternalOp& aOp)
+ {
+   RefPtr<StorageAction> action;
+ 
+@@ -748,20 +756,19 @@ StorageManager::OnRequestComplete(const 
    NS_ASSERT_OWNINGTHREAD(StorageManager);
    MOZ_ASSERT(mPendingRequests.Contains(aRequestId));
  
@@ -1299,7 +1394,19 @@ diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageMan
      Closing
    };
  
-@@ -74,33 +77,36 @@ private:
+@@ -63,44 +66,47 @@ public:
+   // Must be called by StorageContext objects before they are destroyed.
+   void RemoveStorageContext(StorageContext* aContext);
+ 
+   // Marks the StorageManager "invalid". Once the StorageContext completes
+   // no new operations will be permitted with this StorageManager.
+   // New actors will get a new StorageManager.
+   void NoteClosing();
+ 
+-  void ExecuteRequest(const nsID& aRequestId, const SyncOp& aOp);
++  bool ExecuteRequest(const nsID& aRequestId, const SyncOp& aOp);
+ 
+ private:
    class BaseAction;
    class ChangeStateAction;
    class Factory;
@@ -1326,7 +1433,8 @@ diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageMan
 +  void OnRequestComplete(const nsID& aRequestId,
 +                         const SyncOpResponse& aResponse);
  
-   void ExecuteRequest(const nsID& aRequestId, StorageAction* aAction);
+-  void ExecuteRequest(const nsID& aRequestId, StorageAction* aAction);
++  bool ExecuteRequest(const nsID& aRequestId, StorageAction* aAction);
    void ExecuteRequest(const nsID& aRequestId, const SyncInternalOp& aOp);
  
 +  RefPtr<BackgroundSyncService> mService;
