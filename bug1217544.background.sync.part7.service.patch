@@ -59,7 +59,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
    explicit PendingRequest(const nsID& aRequestId,
                            const SyncOp& aOp)
      : mRequestId(aRequestId)
-@@ -39,95 +44,127 @@ public:
+@@ -39,95 +44,120 @@ public:
  private:
    ~PendingRequest() {}
  
@@ -90,7 +90,6 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
  {
    AssertIsOnBackgroundThread();
 +  MOZ_ASSERT(!mActorDestroyed);
-+  MOZ_ASSERT(mService);
 +
 +  Shutdown();
  }
@@ -142,15 +141,9 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
  BackgroundSyncParent::RecvShutdown()
  {
    AssertIsOnBackgroundThread();
-+  MOZ_ASSERT(mService);
-+
-+  mService->UnregisterActor(this);
-+  mService = nullptr;
  
    Unused << Send__delete__(this);
  
-+  Shutdown();
-+
    return true;
  }
  
