@@ -24,7 +24,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
  #include "mozilla/Preferences.h"
  #include "nsISupportsPrimitives.h"
  #include "nsIGlobalObject.h"
-@@ -48,44 +47,183 @@ public:
+@@ -48,44 +47,235 @@ public:
  
    void SetActor(BackgroundSyncChild* aActor)
    {
@@ -79,7 +79,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
 +  RegisterResultRunnable(WorkerPrivate* aWorkerPrivate,
 +                         PromiseWorkerProxy* aProxy,
 +                         nsresult aStatus)
-+    : WorkerRunnable(aWorkerPrivate, WorkerThreadModifyBusyCount)
++    : WorkerRunnable(aWorkerPrivate, WorkerThreadUnchangedBusyCount)
 +    , mProxy(aProxy)
 +    , mStatus(aStatus)
 +  {}
@@ -103,82 +103,133 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
 +  nsresult mStatus;
 +};
 +
-+class RegisterRunnable final : public nsIRunnable,
-+                               public nsICancelableRunnable
++class RegisterHelper final : public nsIRunnable,
++                             public nsICancelableRunnable
 +{
 +public:
 +  NS_DECL_THREADSAFE_ISUPPORTS
 +
-+  RegisterRunnable(BackgroundSync* aTarget,
-+                   PromiseWorkerProxy* aPromiseProxy,
-+                   const PrincipalInfo& aPrincipalInfo,
-+                   const nsAString& aScope,
-+                   const nsAString& aTag)
++  // Worker thread constructor.
++  RegisterHelper(BackgroundSync* aTarget,
++                 PromiseWorkerProxy* aPromiseProxy,
++                 const PrincipalInfo& aPrincipalInfo,
++                 const nsAString& aScope,
++                 const nsAString& aTag,
++                 ErrorResult& aRv)
 +    : mTarget(aTarget)
 +    , mPromiseProxy(aPromiseProxy)
++    , mPromise(nullptr)
 +    , mPrincipalInfo(aPrincipalInfo)
 +    , mScope(aScope)
 +    , mTag(aTag)
-+    , mInitiatingThread(do_GetCurrentThread())
-+  {}
-+
-+  NS_IMETHODIMP
-+  Run() override
++    , mRv(aRv)
 +  {
-+    if (mInitiatingThread == nsCOMPtr<nsIThread>(do_GetCurrentThread())) {
-+      RefPtr<Promise> promise = mPromiseProxy->WorkerPromise();
-+      MOZ_ASSERT(promise);
++    MOZ_ASSERT(!NS_IsMainThread());
++    MOZ_ASSERT(mTarget);
++    MOZ_ASSERT(mPromiseProxy);
++  }
++
++  // Main thread constructor.
++  RegisterHelper(BackgroundSync* aTarget,
++                 Promise* aPromise,
++                 const PrincipalInfo& aPrincipalInfo,
++                 const nsAString& aScope,
++                 const nsAString& aTag,
++                 ErrorResult& aRv)
++    : mTarget(aTarget)
++    , mPromiseProxy(nullptr)
++    , mPromise(aPromise)
++    , mPrincipalInfo(aPrincipalInfo)
++    , mScope(aScope)
++    , mTag(aTag)
++    , mRv(aRv)
++  {
++    MOZ_ASSERT(NS_IsMainThread());
++    MOZ_ASSERT(mTarget);
++    MOZ_ASSERT(mPromise);
++  }
++
++  void
++  Execute()
++  {
++    if (NS_IsMainThread()) {
++      MOZ_ASSERT(mPromise);
++      MOZ_ASSERT(!mPromiseProxy);
++
++      nsresult rv;
++      nsCOMPtr<nsIPrincipal> principal =
++        PrincipalInfoToPrincipal(mPrincipalInfo, &rv);
++      if (NS_WARN_IF(NS_FAILED(rv))) {
++        MaybeReject(rv);
++        return;
++      }
++
++      rv = principal->GetOrigin(mOrigin);
++      if (NS_WARN_IF(NS_FAILED(rv))) {
++        MaybeReject(rv);
++        return;
++      }
++
++      rv = principal->GetOriginSuffix(mOriginSuffix);
++      if (NS_WARN_IF(NS_FAILED(rv))) {
++        MaybeReject(rv);
++        return;
++      }
++
++      RefPtr<Promise> p;
++      if (mPromise) {
++        p = mPromise;
++      } else {
++        p = mPromiseProxy->WorkerPromise();
++      }
++      MOZ_ASSERT(p);
 +
 +      const SyncRegisterArgs args(NS_ConvertUTF8toUTF16(mOrigin),
 +                                  NS_ConvertUTF8toUTF16(mOriginSuffix),
-+                                  mScope, mTag);
-+      nsAutoPtr<SyncOp> op(new SyncOp(mPrincipalInfo, SyncOpArgs(args)));
-+      RefPtr<SyncOpRunnable> runnable = new SyncOpRunnable(promise, op);
-+      return mTarget->ExecuteOp(runnable);
++                                  mScope, (nsString(mTag)));
++      mTarget->ExecuteOp(SyncOpArgs(args), p, mRv);
++    } else {
++      MOZ_ASSERT(!mPromise);
++      MOZ_ASSERT(mPromiseProxy);
++
++      nsresult rv = NS_DispatchToMainThread(this);
++      if (NS_WARN_IF(NS_FAILED(rv))) {
++        MaybeReject(rv);
++      }
 +    }
-+
-+    MOZ_ASSERT(NS_IsMainThread());
-+
-+    nsresult rv;
-+    nsCOMPtr<nsIPrincipal> principal =
-+      PrincipalInfoToPrincipal(mPrincipalInfo, &rv);
-+    if (NS_WARN_IF(NS_FAILED(rv))) {
-+      MaybeReject(rv);
-+      return rv;
-+    }
-+
-+    rv = principal->GetOrigin(mOrigin);
-+    if (NS_WARN_IF(NS_FAILED(rv))) {
-+      MaybeReject(rv);
-+      return rv;
-+    }
-+
-+    rv = principal->GetOriginSuffix(mOriginSuffix);
-+    if (NS_WARN_IF(NS_FAILED(rv))) {
-+      MaybeReject(rv);
-+      return rv;
-+    }
-+
-+    rv = mInitiatingThread->Dispatch(this, nsIThread::DISPATCH_NORMAL);
-+    if (NS_WARN_IF(NS_FAILED(rv))) {
-+      MaybeReject(rv);
-+    }
-+
-+    return rv;
 +  }
 +
-+  NS_IMETHODIMP
++  NS_IMETHOD
++  Run() override
++  {
++    MOZ_ASSERT(NS_IsMainThread());
++
++    Execute();
++
++    return NS_OK;
++  }
++
++  NS_IMETHOD
 +  Cancel() override
 +  {
 +    return NS_OK;
 +  }
 +
 +private:
-+  ~RegisterRunnable() {}
++  ~RegisterHelper() {}
 +
 +  void
 +  MaybeReject(nsresult aRv)
 +  {
++    MOZ_ASSERT(NS_IsMainThread());
++
++    if (mPromise) {
++      mRv.Throw(aRv);
++      return mPromise->MaybeReject(aRv);
++    }
++
++    MOZ_ASSERT(mPromiseProxy);
++
 +    MutexAutoLock lock(mPromiseProxy->Lock());
 +    if (mPromiseProxy->CleanedUp()) {
 +      // Worker has already shut down, can't access worker private;
@@ -192,15 +243,16 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
 +
 +  RefPtr<BackgroundSync> mTarget;
 +  RefPtr<PromiseWorkerProxy> mPromiseProxy;
++  RefPtr<Promise> mPromise;
 +  PrincipalInfo mPrincipalInfo;
 +  nsString mScope;
 +  nsString mTag;
 +  nsAutoCString mOrigin;
 +  nsAutoCString mOriginSuffix;
-+  nsCOMPtr<nsIThread> mInitiatingThread;
++  ErrorResult& mRv;
 +};
 +
-+NS_IMPL_ISUPPORTS(RegisterRunnable, nsICancelableRunnable, nsIRunnable)
++NS_IMPL_ISUPPORTS(RegisterHelper, nsICancelableRunnable, nsIRunnable)
 +
  class TeardownRunnable final : public nsIRunnable,
                                 public nsICancelableRunnable
@@ -210,7 +262,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
  
    explicit TeardownRunnable(BackgroundSyncChild* aActor)
      : mActor(aActor)
-@@ -335,17 +473,18 @@ BackgroundSync::ActorCreated(PBackground
+@@ -335,17 +525,18 @@ BackgroundSync::ActorCreated(PBackground
    MOZ_ASSERT(IsBackgroundSyncThread());
    MOZ_ASSERT(aActor);
    MOZ_ASSERT(!mActor);
@@ -230,7 +282,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
      RefPtr<SyncOpRunnable> runnable = mPendingOperations[i];
      MOZ_ASSERT(runnable);
      runnable->SetActor(mActor);
-@@ -383,65 +522,152 @@ BackgroundSync::Observe(nsISupports* aSu
+@@ -383,65 +574,112 @@ BackgroundSync::Observe(nsISupports* aSu
      }
    }
  
@@ -239,28 +291,29 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
    return NS_OK;
  }
  
-+nsresult
-+BackgroundSync::ExecuteOp(SyncOpRunnable* aRunnable)
++void
++BackgroundSync::ExecuteOp(SyncOpRunnable* aRunnable,
++                          ErrorResult& aRv)
 +{
 +  MOZ_ASSERT(IsBackgroundSyncThread());
 +
 +  if (mShuttingDown) {
 +    aRunnable->MaybeReject(NS_ERROR_NOT_AVAILABLE);
-+    return NS_ERROR_NOT_AVAILABLE;
++    aRv.Throw(NS_ERROR_NOT_AVAILABLE);
 +  }
 +
 +  if (!mActor) {
 +    mPendingOperations.AppendElement(aRunnable);
-+    return NS_OK;
++    return;
 +  }
++
++  MOZ_ASSERT(mPendingOperations.IsEmpty());
 +
 +  aRunnable->SetActor(mActor);
 +  nsresult rv = NS_DispatchToCurrentThread(aRunnable);
 +  if (NS_WARN_IF(NS_FAILED(rv))) {
 +    aRunnable->MaybeReject(rv);
 +  }
-+
-+  return rv;
 +}
 +
 +void
@@ -273,16 +326,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
 +  nsAutoPtr<SyncOp> op(new SyncOp(*mPrincipalInfo, aArgs));
 +  RefPtr<SyncOpRunnable> runnable = new SyncOpRunnable(aPromise, op);
 +
-+  if (!mActor) {
-+    mPendingOperations.AppendElement(runnable);
-+    return;
-+  }
-+
-+  runnable->SetActor(mActor);
-+  nsresult rv = NS_DispatchToCurrentThread(runnable);
-+  if (NS_WARN_IF(NS_FAILED(rv))) {
-+    aPromise->MaybeReject(rv);
-+  }
++  ExecuteOp(runnable, aRv);
 +}
 +
 +// WebIDL interface methods.
@@ -304,13 +348,18 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
  
 -  nsAutoPtr<SyncOp> op(new SyncOp(*mPrincipalInfo, aArgs));
 -  RefPtr<SyncOpRunnable> runnable = new SyncOpRunnable(p, op);
-+  if (!NS_IsMainThread()) {
-+    WorkerPrivate* workerPrivate = GetCurrentThreadWorkerPrivate();
-+    MOZ_ASSERT(workerPrivate);
-+    workerPrivate->AssertIsOnWorkerThread();
++  RefPtr<RegisterHelper> helper;
  
 -  if (!mActor) {
 -    mPendingOperations.AppendElement(runnable);
+-    return p.forget();
++  if (NS_IsMainThread()) {
++    helper = new RegisterHelper(this, p, *mPrincipalInfo, mScope, aTag, aRv);
++  } else {
++    WorkerPrivate* workerPrivate = GetCurrentThreadWorkerPrivate();
++    MOZ_ASSERT(workerPrivate);
++    workerPrivate->AssertIsOnWorkerThread();
++
 +    RefPtr<PromiseWorkerProxy> promiseProxy =
 +      PromiseWorkerProxy::Create(workerPrivate, p);
 +    if (!promiseProxy) {
@@ -318,50 +367,17 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
 +      return p.forget();
 +    }
 +
-+    RefPtr<RegisterRunnable> runnable = new RegisterRunnable(this, promiseProxy,
-+                                                             *mPrincipalInfo,
-+                                                             mScope, aTag);
-+    nsresult rv = NS_DispatchToMainThread(runnable);
-+    if (NS_WARN_IF(NS_FAILED(rv))) {
-+      p->MaybeReject(rv);
-+    }
-+
-     return p.forget();
++    helper = new RegisterHelper(this, promiseProxy, *mPrincipalInfo, mScope,
++                                aTag, aRv);
    }
  
 -  runnable->SetActor(mActor);
 -  nsresult rv = NS_DispatchToCurrentThread(runnable);
-+  nsresult rv;
-+  nsCOMPtr<nsIPrincipal> principal =
-+    PrincipalInfoToPrincipal(*mPrincipalInfo, &rv);
-   if (NS_WARN_IF(NS_FAILED(rv))) {
+-  if (NS_WARN_IF(NS_FAILED(rv))) {
 -    p->MaybeReject(rv);
-+    aRv = rv;
-+    p->MaybeReject(aRv);
-+    return p.forget();
-   }
- 
-+  nsAutoCString origin;
-+  rv = principal->GetOrigin(origin);
-+  if (NS_WARN_IF(NS_FAILED(rv))) {
-+    aRv = rv;
-+    p->MaybeReject(aRv);
-+    return p.forget();
-+  }
-+
-+  nsAutoCString originSuffix;
-+  rv = principal->GetOriginSuffix(originSuffix);
-+  if (NS_WARN_IF(NS_FAILED(rv))) {
-+    aRv = rv;
-+    p->MaybeReject(aRv);
-+    return p.forget();
-+  }
-+
-+  const SyncRegisterArgs args(NS_ConvertUTF8toUTF16(origin),
-+                              NS_ConvertUTF8toUTF16(originSuffix),
-+                              mScope, (nsString(aTag)));
-+  ExecuteOp(SyncOpArgs(args), p, aRv);
-+
+-  }
+-
++  helper->Execute();
    return p.forget();
  }
  
@@ -434,7 +450,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.h b/dom/backgroundsync/Background
                             , public nsIObserver
                             , public nsWrapperCache
  {
-+  friend class RegisterRunnable;
++  friend class RegisterHelper;
 +
    NS_DECL_NSIIPCBACKGROUNDCHILDCREATECALLBACK
    NS_DECL_NSIOBSERVER
@@ -444,7 +460,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.h b/dom/backgroundsync/Background
    NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_AMBIGUOUS(
        BackgroundSync, nsIIPCBackgroundChildCreateCallback)
  
-@@ -87,18 +89,22 @@ public:
+@@ -87,18 +89,21 @@ public:
    void Shutdown();
  private:
    BackgroundSync(nsIGlobalObject* aGlobal,
@@ -455,9 +471,8 @@ diff --git a/dom/backgroundsync/BackgroundSync.h b/dom/backgroundsync/Background
  
 -  already_AddRefed<Promise>
 -  ExecuteOp(const SyncOpArgs& aArgs, ErrorResult& aRv);
-+  nsresult
-+  ExecuteOp(SyncOpRunnable* aRunnable);
-+
++  void
++  ExecuteOp(SyncOpRunnable* aRunnable,ErrorResult& aRv);
 +  void
 +  ExecuteOp(const SyncOpArgs& aArgs, Promise* aPromise,
 +            ErrorResult& aRv);
