@@ -24,7 +24,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
  #include "mozilla/Preferences.h"
  #include "nsISupportsPrimitives.h"
  #include "nsIGlobalObject.h"
-@@ -48,44 +47,239 @@ public:
+@@ -48,44 +47,236 @@ public:
  
    void SetActor(BackgroundSyncChild* aActor)
    {
@@ -157,9 +157,6 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
 +  Execute()
 +  {
 +    if (NS_IsMainThread()) {
-+      MOZ_ASSERT(mPromise);
-+      MOZ_ASSERT(!mPromiseProxy);
-+
 +      nsresult rv;
 +      nsCOMPtr<nsIPrincipal> principal =
 +        PrincipalInfoToPrincipal(mPrincipalInfo, &rv);
@@ -266,7 +263,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
  
    explicit TeardownRunnable(BackgroundSyncChild* aActor)
      : mActor(aActor)
-@@ -335,17 +529,18 @@ BackgroundSync::ActorCreated(PBackground
+@@ -335,17 +526,18 @@ BackgroundSync::ActorCreated(PBackground
    MOZ_ASSERT(IsBackgroundSyncThread());
    MOZ_ASSERT(aActor);
    MOZ_ASSERT(!mActor);
@@ -286,7 +283,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
      RefPtr<SyncOpRunnable> runnable = mPendingOperations[i];
      MOZ_ASSERT(runnable);
      runnable->SetActor(mActor);
-@@ -383,65 +578,112 @@ BackgroundSync::Observe(nsISupports* aSu
+@@ -383,65 +575,112 @@ BackgroundSync::Observe(nsISupports* aSu
      }
    }
  
