@@ -266,7 +266,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncService.cpp
-@@ -0,0 +1,639 @@
+@@ -0,0 +1,685 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -624,6 +624,59 @@ new file mode 100644
 +  return false;
 +}
 +
++/**
++ * This method handles the completion of a storage request.
++ *
++ * A storage request can be external or internal.
++ *
++ * External requests are the requests triggered as part of DOM requests. So far
++ * we have these two DOM API methods:
++ * 1. Promise<void> SyncManager.register(DOMString tag)
++ * 2. Promise<sequence<DOMString>> SyncManager.getTags()
++ *
++ * A call to (1) starts a registration operation that is handled by the
++ * StorageManager in charge of the requesting origin and which completion
++ * generates a response of type SyncOpResponse::TSyncRegisterResponse. If this
++ * is the first time a sync registration is requested from that origin, we also
++ * need to start a origin registration operation that should end up with a
++ * response of type SyncOpResponse::TSyncRegisterOriginResponse.
++ *
++ * A call to (2) starts a storage operation to get all the sync registrations
++ * that we have for the requesting origin. If everything goes well, we should
++ * get a response of type SyncOpResponse::TSyncGetAllResponse.
++ *
++ * In both cases, the associated StorageManager is released if it has no more
++ * pending operations and the response is progressed to the content process
++ * through the IPC actor.
++ *
++ * Internal requests are the rest of requests and are started as part of the
++ * sync event firing process that can be started in two situations:
++ *
++ * 1. When we go from an offline to an online state.
++ * 2. Or right after registering a sync request, if we are online.
++ *
++ * In the case of (1), the first thing that we need to do is to get the list of
++ * all origins that have pending sync registrations. That should end up
++ * generating a response with type SyncOpResponse::TSyncGetAllOriginsResponse.
++ * From this point on, the process for (1) and (2) is pretty much the same.
++ * In the case of (1) we do it for each origin, in the case of (2) we just do
++ * it for a single origin (the one that registered the sync request).
++ * We need to get the list of sync requests registered for each (or for the)
++ * origin. That should give us a SyncOpResponse::TSyncGetAllResponse per origin.
++ * Per each sync registration we change its state to firing, which should give
++ * a SyncOpResponse::TSyncChangeStateResponse response and continue with the
++ * firing process. If it goes well, we end up removing the sync registration
++ * from the sync storage, which should end up with a
++ * SyncOpResponse::TSyncRemoveResponse.
++ * If in between of any of these steps of the sync event firing process we
++ * go offline, we need to cancel the process and move the sync registration
++ * back to the pending state. Which also gives us a
++ * SyncOpResponse::TSyncChangeStateResponse.
++ *
++ * After handling any of these internal responses, we end up releasing the
++ * ChromeStorageManager in charge of the request if there are no more pending
++ * storage operations.
++ */
 +void
 +BackgroundSyncService::OnRequestComplete(const nsID& aRequestId,
 +                                         const SyncOpResponse& aResponse)
@@ -633,8 +686,8 @@ new file mode 100644
 +  switch (aResponse.type()) {
 +    case SyncOpResponse::TSyncRegisterResponse:
 +      // If this is the first registration for this origin, we need to store
-+      // it in the 'origins' db before we can progress the response to the
-+      // DOM side.
++      // it in the 'origins' db before we can release the StorageManager and
++      // progress the response to the DOM side.
 +      if (aResponse.get_SyncRegisterResponse().mFirstRegistration()) {
 +        RefPtr<ChromeStorageManager> manager =
 +          ChromeStorageManager::GetOrCreate(this);
@@ -648,6 +701,12 @@ new file mode 100644
 +        MaybeTriggerSyncEvent(
 +            aResponse.get_SyncRegisterResponse().mRegistration());
 +      }
++      break;
++    case SyncOpResponse::TSyncRegisterOriginResponse:
++      // Once we have registered the origin for the sync request, we can try
++      // to send the sync event.
++      MaybeTriggerSyncEvent(
++          aResponse.get_SyncRegisterOriginResponse().mRegistration());
 +      break;
 +    case SyncOpResponse::TSyncRemoveResponse:
 +      {
@@ -664,30 +723,6 @@ new file mode 100644
 +        }
 +      }
 +      break;
-+    case SyncOpResponse::TSyncRegisterOriginResponse:
-+      // Once we have registered the origin for the sync request, we can try
-+      // to send the sync event.
-+      MaybeTriggerSyncEvent(
-+          aResponse.get_SyncRegisterOriginResponse().mRegistration());
-+      break;
-+    default:
-+      break;
-+  }
-+
-+  uint64_t actorId = ReleaseStorageManagerRef(aRequestId);
-+  // If we have an actor ID, this is a DOM request which response needs to be
-+  // reported back to the content process through the IPC actor.
-+  if (actorId) {
-+    Response(actorId, aRequestId, aResponse);
-+    return;
-+  }
-+
-+  // Otherwise, this is a response to an internal request that can be handled
-+  // here.
-+
-+  ReleaseChromeStorageManagerRef(aRequestId);
-+
-+  switch (aResponse.type()) {
 +    case SyncOpResponse::TSyncGetAllOriginsResponse:
 +      {
 +        // If we went offline while getting the origins, we don't care about
@@ -756,6 +791,17 @@ new file mode 100644
 +      break;
 +    default:
 +      break;
++  }
++
++  uint64_t actorId = ReleaseStorageManagerRef(aRequestId);
++  if (actorId) {
++    // If we have an actor ID, this is a DOM request which response needs to be
++    // reported back to the content process through the IPC actor.
++    Response(actorId, aRequestId, aResponse);
++  } else {
++    // Otherwise, this is a response to an internal request and we just need to
++    // release the associated ChromeStorageManager reference.
++    ReleaseChromeStorageManagerRef(aRequestId);
 +  }
 +}
 +
