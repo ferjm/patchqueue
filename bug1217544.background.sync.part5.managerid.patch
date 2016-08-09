@@ -24,7 +24,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
  #include "mozilla/Preferences.h"
  #include "nsISupportsPrimitives.h"
  #include "nsIGlobalObject.h"
-@@ -48,44 +47,235 @@ public:
+@@ -48,44 +47,239 @@ public:
  
    void SetActor(BackgroundSyncChild* aActor)
    {
@@ -78,10 +78,12 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
 +public:
 +  RegisterResultRunnable(WorkerPrivate* aWorkerPrivate,
 +                         PromiseWorkerProxy* aProxy,
-+                         nsresult aStatus)
++                         nsresult aStatus,
++                         ErrorResult& aRv)
 +    : WorkerRunnable(aWorkerPrivate, WorkerThreadUnchangedBusyCount)
 +    , mProxy(aProxy)
 +    , mStatus(aStatus)
++    , mRv(aRv)
 +  {}
 +
 +  bool
@@ -91,6 +93,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
 +    if (NS_SUCCEEDED(mStatus)) {
 +      promise->MaybeResolve(JS::NullHandleValue);
 +    } else {
++      mRv.Throw(mStatus);
 +      promise->MaybeReject(mStatus);
 +    }
 +    return true;
@@ -101,6 +104,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
 +
 +  RefPtr<PromiseWorkerProxy> mProxy;
 +  nsresult mStatus;
++  ErrorResult& mRv;
 +};
 +
 +class RegisterHelper final : public nsIRunnable,
@@ -237,7 +241,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
 +    }
 +    RefPtr<RegisterResultRunnable> runnable =
 +      new RegisterResultRunnable(mPromiseProxy->GetWorkerPrivate(),
-+                                 mPromiseProxy, aRv);
++                                 mPromiseProxy, aRv, mRv);
 +    MOZ_ALWAYS_TRUE(runnable->Dispatch());
 +  }
 +
@@ -262,7 +266,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
  
    explicit TeardownRunnable(BackgroundSyncChild* aActor)
      : mActor(aActor)
-@@ -335,17 +525,18 @@ BackgroundSync::ActorCreated(PBackground
+@@ -335,17 +529,18 @@ BackgroundSync::ActorCreated(PBackground
    MOZ_ASSERT(IsBackgroundSyncThread());
    MOZ_ASSERT(aActor);
    MOZ_ASSERT(!mActor);
@@ -282,7 +286,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
      RefPtr<SyncOpRunnable> runnable = mPendingOperations[i];
      MOZ_ASSERT(runnable);
      runnable->SetActor(mActor);
-@@ -383,65 +574,112 @@ BackgroundSync::Observe(nsISupports* aSu
+@@ -383,65 +578,112 @@ BackgroundSync::Observe(nsISupports* aSu
      }
    }
  
