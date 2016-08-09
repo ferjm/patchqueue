@@ -24,7 +24,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
  #include "mozilla/Preferences.h"
  #include "nsISupportsPrimitives.h"
  #include "nsIGlobalObject.h"
-@@ -48,44 +47,236 @@ public:
+@@ -48,44 +47,250 @@ public:
  
    void SetActor(BackgroundSyncChild* aActor)
    {
@@ -177,21 +177,20 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
 +        return;
 +      }
 +
-+      RefPtr<Promise> p;
 +      if (mPromise) {
-+        p = mPromise;
++        const SyncRegisterArgs args(NS_ConvertUTF8toUTF16(mOrigin),
++                                    NS_ConvertUTF8toUTF16(mOriginSuffix),
++                                    mScope, (nsString(mTag)));
++        mTarget->ExecuteOp(SyncOpArgs(args), mPromise, mRv);
 +      } else {
-+        p = mPromiseProxy->WorkerPromise();
++        MOZ_ASSERT(mPromiseProxy);
++        MOZ_ASSERT(mWorkerThread);
++        mWorkerThread->Dispatch(this, nsIThread::DISPATCH_NORMAL);
 +      }
-+      MOZ_ASSERT(p);
-+
-+      const SyncRegisterArgs args(NS_ConvertUTF8toUTF16(mOrigin),
-+                                  NS_ConvertUTF8toUTF16(mOriginSuffix),
-+                                  mScope, (nsString(mTag)));
-+      mTarget->ExecuteOp(SyncOpArgs(args), p, mRv);
 +    } else {
-+      MOZ_ASSERT(!mPromise);
 +      MOZ_ASSERT(mPromiseProxy);
++
++      mWorkerThread = do_GetCurrentThread();
 +
 +      nsresult rv = NS_DispatchToMainThread(this);
 +      if (NS_WARN_IF(NS_FAILED(rv))) {
@@ -200,12 +199,26 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
 +    }
 +  }
 +
++  /**
++   * This method is called only when the RegisterHelper is created on a worker
++   * thread. And in that case it is called twice. The first time in the main
++   * thread, to get the origin and origin suffix values from the principal info
++   * and the second time back on the worker thread to continue with the
++   * execution of the sync operation.
++   */
 +  NS_IMETHOD
 +  Run() override
 +  {
-+    MOZ_ASSERT(NS_IsMainThread());
-+
-+    Execute();
++    if (NS_IsMainThread()) {
++      Execute();
++    } else {
++      RefPtr<Promise> promise = mPromiseProxy->WorkerPromise();
++      MOZ_ASSERT(promise);
++      const SyncRegisterArgs args(NS_ConvertUTF8toUTF16(mOrigin),
++                                  NS_ConvertUTF8toUTF16(mOriginSuffix),
++                                  mScope, (nsString(mTag)));
++      mTarget->ExecuteOp(SyncOpArgs(args), promise, mRv);
++    }
 +
 +    return NS_OK;
 +  }
@@ -251,6 +264,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
 +  nsAutoCString mOrigin;
 +  nsAutoCString mOriginSuffix;
 +  ErrorResult& mRv;
++  nsCOMPtr<nsIThread> mWorkerThread;
 +};
 +
 +NS_IMPL_ISUPPORTS(RegisterHelper, nsICancelableRunnable, nsIRunnable)
@@ -263,7 +277,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
  
    explicit TeardownRunnable(BackgroundSyncChild* aActor)
      : mActor(aActor)
-@@ -335,17 +526,18 @@ BackgroundSync::ActorCreated(PBackground
+@@ -335,17 +540,18 @@ BackgroundSync::ActorCreated(PBackground
    MOZ_ASSERT(IsBackgroundSyncThread());
    MOZ_ASSERT(aActor);
    MOZ_ASSERT(!mActor);
@@ -283,7 +297,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
      RefPtr<SyncOpRunnable> runnable = mPendingOperations[i];
      MOZ_ASSERT(runnable);
      runnable->SetActor(mActor);
-@@ -383,65 +575,112 @@ BackgroundSync::Observe(nsISupports* aSu
+@@ -383,65 +589,112 @@ BackgroundSync::Observe(nsISupports* aSu
      }
    }
  
