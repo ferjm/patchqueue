@@ -156,6 +156,229 @@ new file mode 100644
 +} // namespace quota
 +
 +#endif // mozilla_dom_quota_QuotaClientAction_h
+diff --git a/dom/quota/ClientContext.h b/dom/quota/ClientContext.h
+new file mode 100644
+--- /dev/null
++++ b/dom/quota/ClientContext.h
+@@ -0,0 +1,218 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#ifndef mozilla_dom_quota_ClientContext_h
++#define mozilla_dom_quota_ClientContext_h
++
++namespace mozilla {
++namespace dom {
++namespace quota {
++
++class DirectoryLock;
++class ClientAction;
++
++// The ClientContext class is RAII-style class for managing IO operations done
++// by quota clients.
++//
++// When a ClientContext is created it performs the complicated steps necessary
++// to initialize the QuotaManager. ClientAction objects dispatched on the
++// ClientContext are delayed until this initialization is complete. Once all
++// references to the ClientContext are gone, then the steps necessary to release
++// the QuotaManager are performed. After initialization the ClientContext holds
++// a self reference, so it will stay alive until one of three conditions occur:
++//
++// 1) The quota client will call ClientContext::AllowToClose() when all of the
++//    actors have removed themselves as listener.
++// 2) The QuotaManager aborts all operations so it can delete the files. In this
++//    case the QuotaManager calls ClientContext::AbortOperations() which in turn
++//    cancels all existing ClientAction objects.
++// 3) Browser shutdown occurs and the quota client calls
++//    ClientContext::CancelAll().
++//    XXX Maybe (3) needs to be handled inside ClientContext
++//
++// In either case, though, the ClientAction objects must be destroyed first to
++// allow the ClientContext to be destroyed.
++//
++// While the ClientContext performs operations asynchronously on threads, all of
++// methods in its public interface must be called on the same thread originally
++// used to create the ClientContext.
++//
++// As an invariant, all ClientContext objects must be destroyed before
++// permitting the "profile-before-change" shutdown event to complete.
++class ClientContext final
++{
++public:
++  // Define a class allowing other threads to hold the ClientContext alive. This
++  // also allows these other threads to safely close or cancel the ClientContext.
++  class ThreadsafeHandle final
++  {
++    friend class ClientContext;
++
++  public:
++    void AllowToClose();
++    void InvalidateAndAllowToClose();
++
++  private:
++    explicit ThreadsafeHandle(ClientContext* aContext);
++    ~ThreadsafeHandle();
++
++    // Disallow copying.
++    ThreadsafeHandle(const ThreadsafeHandle&) = delete;
++    ThreadsafeHandle& operator=(const ThreadsafeHandle&) = delete;
++
++    void ContextDestroyed(ClientContext* aContext);
++
++    // Cleared to allow the ClientContext to close. Only safe to access on
++    // owning thread.
++    RefPtr<ClientContext> mStrongRef;
++
++    // Used to support cancelation even while the ClientContext is already
++    // allowed to close. Cleared by ~ClientContext() calling ContextDestroyed().
++    // Only safe to access on owning thread.
++    ClientContext* mWeakRef;
++
++    nsCOMPtr<nsIThread> mOwningThread;
++
++    NS_INLINE_DECL_THREADSAFE_REFCOUNTING(quota::ClientContext::ThreadsafeHandle)
++  };
++
++  // An interface to be implemented by code wishing to use the ClientContext.
++  // XXX lifetime.
++  class Listener
++  {
++  public:
++    virtual void NoteClosing() = 0;
++  };
++
++  // Different objects hold references to the ClientContext while some work is
++  // being performed asynchronously. These objects must implement the Activity
++  // interface and register themselves with the AddActivity() method. When they
++  // are destroyed they must call RemoveActivity(). This allows the ClientContext
++  // to cancel any outstanding Activity work when the ClientContext is cancelled.
++  class Activity
++  {
++  public:
++    virtual void Cancel() = 0;
++    // XXX
++    // virtual bool MatchesCacheId(CacheId aCacheId) const = 0;
++  };
++
++  // Create a ClientContext. The given ClientAction will run on the QuotaManager
++  // IO thread. Note, this Action must be execute asynchronously.
++  static already_AddRefed<ClientContext>
++  Create(Listener* aListener, nsIPrincipal* aPrincipal, nsIThread* aTarget,
++         ClientAction* aInitAction, ClientContext* aOldContext);
++
++  // Execute a given action on the target once the quota manager has been
++  // initialized.
++  //
++  // Only callable from the thread that created the ClientContext.
++  void Dispatch(ClientAction* aAction);
++
++  // Cancel any ClientActions running or waiting to run. This should allow the
++  // ClientContext to be released.
++  //
++  // Only callable from the thread that created the ClientContext.
++  void CancelAll();
++
++  // True if CancelAll() has been called.
++  bool IsCanceled() const;
++
++  // Like CancelAll(), but also calls Listener::NoteClosing().
++  void Invalidate();
++
++  // Remove any self references and allow the ClientContext to be released when
++  // there are no more ClientActions to process.
++  void AllowToClose();
++
++  //XXX Cancel any ClientActions running or waiting to run that operate on the
++  // given storage ID.
++  //
++
++  void AddActivity(Activity* aActivity);
++  void RemoveActivity(Activity* aActivity);
++
++  const QuotaInfo&
++  GetQuotaInfo() const
++  {
++    return mQuotaInfo;
++  }
++
++  // Tell the ClientContext that some state information has been orphaned in the
++  // data store and won't be cleaned up. The ClientContext will leave the marker
++  // in place to trigger cleanup the next times its opened.
++  void NoteOrphanedData();
++
++private:
++  class Data;
++  class QuotaInitRunnable;
++  class ActionRunnable;
++
++  enum State
++  {
++    STATE_CONTEXT_PREINIT,
++    STATE_CONTEXT_INIT,
++    STATE_CONTEXT_READY,
++    STATE_CONTEXT_CANCELED
++  };
++
++  struct PendingAction
++  {
++    nsCOMPtr<nsIEventTarget> mTarget;
++    RefPtr<ClientAction> mAction;
++  };
++
++  ClientContext(Listener* aListener, nsIPrincipal* principal,
++                nsIThread* aTarget, ClientAction* aInitAction);
++  ~ClientContext();
++  void Init(ClientContext* aOldContext);
++  void Start();
++  void DispatchAction(ClientAction* aAction, bool aDoomData = false);
++  void OnQuotaInit(nsresult aRv, const QuotaInfo& aQuotaInfo,
++                   already_AddRefed<DirectoryLock> aDirectoryLock);
++
++  already_AddRefed<ThreadsafeHandle>
++  CreateThreadsafeHandle();
++
++  void
++  SetNextContext(ClientContext* aNextContext);
++
++  void
++  DoomTargetData();
++
++  RefPtr<Listener> mListener;
++  nsCOMPtr<nsIPrincipal> mPrincipal;
++  nsCOMPtr<nsIThread> mTarget;
++  RefPtr<Data> mData;
++  State mState;
++  bool mOrphanedData;
++  QuotaInfo mQuotaInfo;
++  RefPtr<QuotaInitRunnable> mInitRunnable;
++  RefPtr<ClientAction> mInitAction;
++  nsTArray<PendingAction> mPendingActions;
++
++  // Weak refs since activites must remove themselves from this list before
++  // being destroyed by calling RemoveActivity().
++  typedef nsTObserverArray<Activity*> ActivityList;
++  ActivityList mActivityList;
++
++  // The ThreadsafeHandle may have a strong ref back to us. This creates
++  // a ref-cycle that keeps the ClientContext alive. The ref-cycle is broken
++  // when ThreadsafeHandle::AllowToClose() is called.
++  RefPtr<ThreadsafeHandle> mThreadsafeHandle;
++
++  RefPtr<DirectoryLock> mDirectoryLock;
++  RefPtr<Context> mNextContext;
++
++public:
++  NS_INLINE_DECL_REFCOUNTING(ClientContext)
++};
++
++} // namespace quota
++} // namespace dom
++} // namespace mozilla
++
++#endif // mozilla_dom_quota_ClientContext_h
 diff --git a/dom/quota/QuotaInfo.h b/dom/quota/QuotaInfo.h
 new file mode 100644
 --- /dev/null
@@ -192,7 +415,7 @@ new file mode 100644
 diff --git a/dom/quota/moz.build b/dom/quota/moz.build
 --- a/dom/quota/moz.build
 +++ b/dom/quota/moz.build
-@@ -10,30 +10,33 @@ XPIDL_SOURCES += [
+@@ -10,30 +10,34 @@ XPIDL_SOURCES += [
      'nsIQuotaRequests.idl',
  ]
  
@@ -202,6 +425,7 @@ diff --git a/dom/quota/moz.build b/dom/quota/moz.build
      'ActorsParent.h',
      'Client.h',
 +    'ClientAction.h',
++    'ClientContext.h',
      'FileStreams.h',
      'OriginScope.h',
      'PersistenceType.h',
