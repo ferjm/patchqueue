@@ -182,7 +182,7 @@ diff --git a/dom/quota/ClientContext.cpp b/dom/quota/ClientContext.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/quota/ClientContext.cpp
-@@ -0,0 +1,1231 @@
+@@ -0,0 +1,1242 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -190,6 +190,8 @@ new file mode 100644
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 +
 +#include "ClientContext.h"
++
++#include "mozilla/AutoRestore.h"
 +
 +namespace {
 +
@@ -273,6 +275,7 @@ new file mode 100644
 +  QuotaInitRunnable(ClientContext* aContext,
 +                    nsIPrincipal* aPrincipal,
 +                    Client::Type aClientType,
++                    const nsAString& aDirName,
 +                    Data* aData,
 +                    nsIThread* aTarget,
 +                    ClientAction* aInitAction)
@@ -280,6 +283,7 @@ new file mode 100644
 +    , mThreadsafeHandle(aContext->CreateThreadsafeHandle())
 +    , mPrincipal(aPrincipal)
 +    , mQuotaClientType(aClientType)
++    , mDirName(aDirName)
 +    , mData(aData)
 +    , mTarget(aTarget)
 +    , mInitAction(aInitAction)
@@ -290,6 +294,7 @@ new file mode 100644
 +  {
 +    MOZ_ASSERT(mContext);
 +    MOZ_ASSERT(mPrincipal);
++    MOZ_ASSERT(!mDirName.IsEmpty());
 +    MOZ_ASSERT(mData);
 +    MOZ_ASSERT(mTarget);
 +    MOZ_ASSERT(mInitiatingThread);
@@ -404,6 +409,7 @@ new file mode 100644
 +  RefPtr<ThreadsafeHandle> mThreadsafeHandle;
 +  RefPtr<nsIPrincipal> mPrincipal;
 +  Client::Type mQuotaClientType;
++  nsString mDirName;
 +  RefPtr<Data> mData;
 +  nsCOMPtr<nsIThread> mTarget;
 +  RefPtr<ClientAction> mInitAction;
@@ -640,7 +646,7 @@ new file mode 100644
 +      // the marker file. If it wasn't opened successfully, then no need to
 +      // create a marker file anyway.
 +      if (NS_SUCCEEDED(resolver->Result())) {
-+        MOZ_ALWAYS_SUCCEEDS(CreateMarkerFile(mQuotaInfo));
++        MOZ_ALWAYS_SUCCEEDS(FileUtils::CreateMarkerFile(mQuotaInfo, mDirName));
 +      }
 +
 +      break;
@@ -930,7 +936,7 @@ new file mode 100644
 +    mOwningThread->Dispatch(runnable, nsIThread::DISPATCH_NORMAL));
 +}
 +
-+ClientContext::ThreadsafeHandle::ThreadsafeHandle(Context* aContext)
++ClientContext::ThreadsafeHandle::ThreadsafeHandle(ClientContext* aContext)
 +  : mStrongRef(aContext)
 +  , mWeakRef(aContext)
 +  , mOwningThread(NS_GetCurrentThread())
@@ -1002,7 +1008,7 @@ new file mode 100644
 +}
 +
 +// static
-+already_AddRefed<Context>
++already_AddRefed<ClientContext>
 +ClientContext::Create(Listener* aListener, nsIPrincipal* aPrincipal,
 +                      Client::Type aClientType, const nsAString& aDirName,
 +                      nsIThread* aTarget, ClientAction* aInitAction,
@@ -1020,9 +1026,9 @@ new file mode 100644
 +                             nsIThread* aTarget, ClientAction* aInitAction)
 +  : mListener(aListener)
 +  , mPrincipal(aPrincipal)
++  , mTarget(aTarget)
 +  , mClientType(aClientType)
 +  , mDirName(aDirName)
-+  , mTarget(aTarget)
 +  , mData(new Data(aTarget))
 +  , mState(STATE_CONTEXT_PREINIT)
 +  , mOrphanedData(false)
@@ -1142,7 +1148,7 @@ new file mode 100644
 +  mListener->RemoveClientContext(this);
 +
 +  if (mQuotaInfo.mDir && !mOrphanedData) {
-+    MOZ_ALWAYS_SUCCEEDS(DeleteMarkerFile(mQuotaInfo));
++    MOZ_ALWAYS_SUCCEEDS(FileUtils::DeleteMarkerFile(mQuotaInfo, mDirName));
 +  }
 +
 +  if (mNextContext) {
@@ -1179,8 +1185,8 @@ new file mode 100644
 +  MOZ_ASSERT(mState == STATE_CONTEXT_PREINIT);
 +  MOZ_ASSERT(!mInitRunnable);
 +
-+  mInitRunnable = new QuotaInitRunnable(this, mPrincipal, mClientType, mData,
-+                                        mTarget, mInitAction);
++  mInitRunnable = new QuotaInitRunnable(this, mPrincipal, mClientType, mDirName,
++                                        mData, mTarget, mInitAction);
 +  mInitAction = nullptr;
 +
 +  mState = STATE_CONTEXT_INIT;
@@ -1324,6 +1330,8 @@ new file mode 100644
 +  MOZ_ASSERT(!mData);
 +}
 +
++// FileUtils
++
 +namespace {
 +
 +nsresult
@@ -1351,10 +1359,11 @@ new file mode 100644
 +} // anonymous namespace
 +
 +nsresult
-+ClientContext::CreateMarkerFile()
++FileUtils::CreateMarkerFile(const QuotaInfo& aQuotaInfo,
++                            const nsAString& aDirName)
 +{
 +  nsCOMPtr<nsIFile> marker;
-+  nsresult rv = GetMarkerFileHandle(mQuotaInfo, mDirName,
++  nsresult rv = GetMarkerFileHandle(aQuotaInfo, aDirName,
 +                                    getter_AddRefs(marker));
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
@@ -1372,11 +1381,13 @@ new file mode 100644
 +  return rv;
 +}
 +
++// static
 +nsresult
-+ClientContext::DeleteMarkerFile()
++FileUtils::DeleteMarkerFile(const QuotaInfo& aQuotaInfo,
++                            const nsAString& aDirName)
 +{
 +  nsCOMPtr<nsIFile> marker;
-+  nsresult rv = GetMarkerFileHandle(mQuotaInfo, mDirName,
++  nsresult rv = GetMarkerFileHandle(aQuotaInfo, aDirName,
 +                                    getter_AddRefs(marker));
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
@@ -1396,8 +1407,8 @@ new file mode 100644
 +
 +// static
 +bool
-+ClientContext::MarkerFileExists(const QuotaInfo& aQuotaInfo,
-+                                const nsAString& aDirName)
++FileUtils::MarkerFileExists(const QuotaInfo& aQuotaInfo,
++                            const nsAString& aDirName)
 +{
 +  nsCOMPtr<nsIFile> marker;
 +  nsresult rv = GetMarkerFileHandle(aQuotaInfo, aDirName,
@@ -1418,7 +1429,7 @@ diff --git a/dom/quota/ClientContext.h b/dom/quota/ClientContext.h
 new file mode 100644
 --- /dev/null
 +++ b/dom/quota/ClientContext.h
-@@ -0,0 +1,238 @@
+@@ -0,0 +1,250 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -1486,6 +1497,9 @@ new file mode 100644
 +    // Disallow copying.
 +    ThreadsafeHandle(const ThreadsafeHandle&) = delete;
 +    ThreadsafeHandle& operator=(const ThreadsafeHandle&) = delete;
++
++    void AllowToCloseOnOwningThread();
++    void InvalidateAndAllowToCloseOnOwningThread();
 +
 +    void ContextDestroyed(ClientContext* aContext);
 +
@@ -1573,15 +1587,10 @@ new file mode 100644
 +  // in place to trigger cleanup the next times its opened.
 +  void NoteOrphanedData();
 +
-+  // The ClientContext marker file can be used by users of ClientContext to
-+  // identify a previous session that was not cleanly shutdown.
-+  static bool
-+  MarkerFileExists(const QuotaInfo& aQuotaInfo, const nsAString& aDirName);
-+
 +private:
 +  class Data;
 +  class QuotaInitRunnable;
-+  class ActionRunnable;
++  class ClientActionRunnable;
 +
 +  enum State
 +  {
@@ -1616,12 +1625,6 @@ new file mode 100644
 +  void
 +  DoomTargetData();
 +
-+  nsresult
-+  CreateMarkerFile();
-+
-+  nsresult
-+  DeleteMarkerFile();
-+
 +  RefPtr<Listener> mListener;
 +  nsCOMPtr<nsIPrincipal> mPrincipal;
 +  nsCOMPtr<nsIThread> mTarget;
@@ -1650,6 +1653,26 @@ new file mode 100644
 +
 +public:
 +  NS_INLINE_DECL_REFCOUNTING(ClientContext)
++};
++
++class FileUtils
++{
++  friend class ClientContext;
++
++public:
++  // The ClientContext marker file can be used by users of ClientContext to
++  // identify a previous session that was not cleanly shutdown.
++  static bool
++  MarkerFileExists(const QuotaInfo& aQuotaInfo, const nsAString& aDirName);
++
++private:
++  FileUtils() {}
++
++  static nsresult
++  CreateMarkerFile(const QuotaInfo& aQuotaInfo, const nsAString& aDirName);
++
++  static nsresult
++  DeleteMarkerFile(const QuotaInfo& aQuotaInfo, const nsAString& aDirName);
 +};
 +
 +} // namespace quota
