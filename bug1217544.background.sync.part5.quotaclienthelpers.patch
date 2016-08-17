@@ -3,6 +3,28 @@
 # Parent  093c3e7979e639561ac179da9aab2f392d452c47
 Bug 1217544 - Implement one-off BackgroundSync API. Part 5: QuotaClient helpers. r=bkelly
 
+diff --git a/dom/cache/Context.cpp b/dom/cache/Context.cpp
+--- a/dom/cache/Context.cpp
++++ b/dom/cache/Context.cpp
+@@ -462,17 +462,17 @@ Context::QuotaInitRunnable::Run()
+       // Execute the provided initialization Action.  The Action must Resolve()
+       // before returning.
+       mInitAction->RunOnTarget(resolver, mQuotaInfo, mData);
+       MOZ_ASSERT(resolver->Resolved());
+ 
+       mData = nullptr;
+ 
+       // If the database was opened, then we should always succeed when creating
+-      // the marker file.  If it wasn't opened successfully, then no need to
++      // the marker file. If it wasn't opened successfully, then no need to
+       // create a marker file anyway.
+       if (NS_SUCCEEDED(resolver->Result())) {
+         MOZ_ALWAYS_SUCCEEDS(CreateMarkerFile(mQuotaInfo));
+       }
+ 
+       break;
+     }
+     // -------------------
 diff --git a/dom/quota/ClientAction.cpp b/dom/quota/ClientAction.cpp
 new file mode 100644
 --- /dev/null
@@ -21,26 +43,26 @@ new file mode 100644
 +namespace quota {
 +
 +void
-+QuotaClientAction::CancelOnInitiatingThread()
++ClientAction::CancelOnInitiatingThread()
 +{
-+  NS_ASSERT_OWNINGTHREAD(QuotaClientAction);
++  NS_ASSERT_OWNINGTHREAD(ClientAction);
 +  // It is possible for cancellation to be duplicated. For example, an
-+  // individual storage could have its QuotaClientActions canceled and then
++  // individual storage could have its ClientActions canceled and then
 +  // shutdown could trigger a second action.
 +  mCanceled = true;
 +}
 +
-+QuotaClientAction::QuotaClientAction()
++ClientAction::ClientAction()
 +  : mCanceled(false)
 +{
 +}
 +
-+QuotaClientAction::~QuotaClientAction()
++ClientAction::~ClientAction()
 +{
 +}
 +
 +bool
-+QuotaClientAction::IsCanceled() const
++ClientAction::IsCanceled() const
 +{
 +  return mCanceled;
 +}
@@ -59,8 +81,8 @@ new file mode 100644
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 +
-+#ifndef mozilla_dom_quota_QuotaClientAction_h
-+#define mozilla_dom_quota_QuotaClientAction_h
++#ifndef mozilla_dom_quota_ClientAction_h
++#define mozilla_dom_quota_ClientAction_h
 +
 +#include "QuotaInfo.h"
 +
@@ -68,15 +90,15 @@ new file mode 100644
 +namespace dom {
 +namespace quota {
 +
-+class QuotaClientAction
++class ClientAction
 +{
 +public:
 +  class Resolver
 +  {
 +  public:
-+    // Note: QuotaClientAction must drop Resolver ref after calling Resolve()!
++    // Note: ClientAction must drop Resolver ref after calling Resolve()!
 +    // Note: Must be called on the same thread used to execute
-+    //       QuotaClientAction::RunOnTarget().
++    //       ClientAction::RunOnTarget().
 +    virtual void Resolve(nsresult aRv) = 0;
 +
 +    NS_IMETHOD_(MozExternalRefCountType)
@@ -87,7 +109,7 @@ new file mode 100644
 +  };
 +
 +  // Class containing data that can be opportunistically shared between
-+  // multiple QuotaClientActions running on the same thread/QuotaClientContext.
++  // multiple ClientActions running on the same thread/ClientContext.
 +  // In theory this could be abstracted to a generic key/value map, but for now
 +  // just explicitly provide accessors for the data we need.
 +  class Data
@@ -102,22 +124,22 @@ new file mode 100644
 +
 +  // Execute operations on the target thread. Once complete call
 +  // Resolver::Resolve(). This can be done sync or async.
-+  // Note: QuotaClientAction should hold Resolver ref until its ready to call
++  // Note: ClientAction should hold Resolver ref until its ready to call
 +  //       Resolve().
-+  // Note: The "target" thread is determined when the QuotaClientAction is
-+  //       scheduled on QuotaClientContext. The QuotaClientAction should not
++  // Note: The "target" thread is determined when the ClientAction is
++  //       scheduled on ClientContext. The ClientAction should not
 +  //       assume any particular thread is used.
 +  virtual void RunOnTarget(Resolver* aResolver, const QuotaInfo& aQuotaInfo,
 +                           Data* aOptionalData) = 0;
 +
-+  // Called on initiating thread when the QuotaClientAction is canceled. The
-+  // QuotaClientAction is responsible for calling Resolver::Resolve() as normal;
++  // Called on initiating thread when the ClientAction is canceled. The
++  // ClientAction is responsible for calling Resolver::Resolve() as normal;
 +  // either with a normal error code or NS_ERROR_ABORT.
 +  // If CancelOnInitiatingThread() is called after Resolve() has already ocurred,
 +  // then the cancel can be ignored.
 +  //
 +  // Cancellation is a best effort to stop processing as soon as possible, but
-+  // does not guarantee the QuotaClientAction will not run.
++  // does not guarantee the ClientAction will not run.
 +  //
 +  // CancelOnInitiatingThread() may be called more than once. Subsequent calls
 +  // should have no effect.
@@ -130,19 +152,19 @@ new file mode 100644
 +  // Resolver::Resolve().
 +  virtual void CompleteOnInitiatingThread(nsresult aRv) { }
 +
-+  // Executed on the initiating thread. If this QuotaClientAction will operate
++  // Executed on the initiating thread. If this ClientAction will operate
 +  // on the give storage ID then override this to return true.
 +  // XXX virtual bool MatchesStorageId
 +
-+  NS_INLINE_DECL_REFCOUNTING(QuotaClientAction)
++  NS_INLINE_DECL_REFCOUNTING(ClientAction)
 +
 +protected:
-+  QuotaClientAction();
++  ClientAction();
 +
 +  // virtual because deleted through base class pointer.
-+  virtual ~QuotaClientAction();
++  virtual ~ClientAction();
 +
-+  // Check if this QuotaClientAction has been canceled. May be called from any
++  // Check if this ClientAction has been canceled. May be called from any
 +  // thread but typically used from the target thread.
 +  bool IsCanceled() const;
 +
@@ -155,12 +177,12 @@ new file mode 100644
 +} // namespace dom
 +} // namespace quota
 +
-+#endif // mozilla_dom_quota_QuotaClientAction_h
++#endif // mozilla_dom_quota_ClientAction_h
 diff --git a/dom/quota/ClientContext.cpp b/dom/quota/ClientContext.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/quota/ClientContext.cpp
-@@ -0,0 +1,1141 @@
+@@ -0,0 +1,1231 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -204,7 +226,7 @@ new file mode 100644
 +  explicit Data(nsIThread* aTarget)
 +    : mTarget(aTarget)
 +  {
-+    MOZ_ASSERT(mTarget)
++    MOZ_ASSERT(mTarget);
 +  }
 +
 +  virtual mozIStorageConnection*
@@ -301,7 +323,7 @@ new file mode 100644
 +
 +  // OpenDirectoryListener methods.
 +  virtual void
-+  DirectoryLockAquired(DirectoryLock* aLock) override;
++  DirectoryLockAcquired(DirectoryLock* aLock) override;
 +
 +  virtual void
 +  DirectoryLockFailed() override;
@@ -355,7 +377,7 @@ new file mode 100644
 +    STATE_RUNNING,
 +    STATE_COMPLETING,
 +    STATE_COMPLETE
-+  }
++  };
 +
 +  void Complete(nsresult aResult)
 +  {
@@ -419,7 +441,7 @@ new file mode 100644
 +}
 +
 +void
-+ClientContext::QuotaInitRunnable::DirectoryLockAquired(DirectoryLock* aLock)
++ClientContext::QuotaInitRunnable::DirectoryLockAcquired(DirectoryLock* aLock)
 +{
 +  NS_ASSERT_OWNINGTHREAD(QuotaInitRunnable);
 +  MOZ_ASSERT(mState == STATE_WAIT_FOR_DIRECTORY_LOCK);
@@ -982,22 +1004,24 @@ new file mode 100644
 +// static
 +already_AddRefed<Context>
 +ClientContext::Create(Listener* aListener, nsIPrincipal* aPrincipal,
-+                      Client::Type aClientType, nsIThread* aTarget,
-+                      ClientAction* aInitAction, ClientContext* aOldContext)
++                      Client::Type aClientType, const nsAString& aDirName,
++                      nsIThread* aTarget, ClientAction* aInitAction,
++                      ClientContext* aOldContext)
 +{
 +  RefPtr<ClientContext> context = new ClientContext(aListener, aPrincipal,
-+                                                    aClientType, aTarget,
-+                                                    aInitAction);
++                                                    aClientType, aDirName,
++                                                    aTarget, aInitAction);
 +  context->Init(aOldContext);
 +  return context.forget();
 +}
 +
 +ClientContext::ClientContext(Listener* aListener, nsIPrincipal* aPrincipal,
-+                             Client::Type aClientType, nsIThread* aTarget,
-+                             ClientAction* aInitAction)
++                             Client::Type aClientType, const nsAString& aDirName,
++                             nsIThread* aTarget, ClientAction* aInitAction)
 +  : mListener(aListener)
 +  , mPrincipal(aPrincipal)
 +  , mClientType(aClientType)
++  , mDirName(aDirName)
 +  , mTarget(aTarget)
 +  , mData(new Data(aTarget))
 +  , mState(STATE_CONTEXT_PREINIT)
@@ -1006,6 +1030,7 @@ new file mode 100644
 +{
 +  MOZ_ASSERT(mListener);
 +  MOZ_ASSERT(mTarget);
++  MOZ_ASSERT(!mDirName.IsEmpty());
 +}
 +
 +void
@@ -1299,6 +1324,93 @@ new file mode 100644
 +  MOZ_ASSERT(!mData);
 +}
 +
++namespace {
++
++nsresult
++GetMarkerFileHandle(const QuotaInfo& aQuotaInfo,
++                    const nsAString& aDirName,
++                    nsIFile** aFileOut)
++{
++  MOZ_ASSERT(aFileOut);
++
++  nsCOMPtr<nsIFile> marker;
++  nsresult rv = aQuotaInfo.mDir->Clone(getter_AddRefs(marker));
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  rv = marker->Append(aDirName);
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  rv = marker->Append(NS_LITERAL_STRING("context_open.marker"));
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  marker.forget(aFileOut);
++
++  return rv;
++}
++
++} // anonymous namespace
++
++nsresult
++ClientContext::CreateMarkerFile()
++{
++  nsCOMPtr<nsIFile> marker;
++  nsresult rv = GetMarkerFileHandle(mQuotaInfo, mDirName,
++                                    getter_AddRefs(marker));
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  rv = marker->Create(nsIFile::NORMAL_FILE_TYPE, 0644);
++  if (rv == NS_ERROR_FILE_ALREADY_EXISTS) {
++    rv = NS_OK;
++  }
++
++  // Note, we don't need to fsync here. We only care about actually
++  // writing the marker if later modifications to the data store are
++  // actually flushed to the disk. If the OS crashes before the marker
++  // is written then we are ensured no other changes to the data store
++  // were flushed either.
++
++  return rv;
++}
++
++nsresult
++ClientContext::DeleteMarkerFile()
++{
++  nsCOMPtr<nsIFile> marker;
++  nsresult rv = GetMarkerFileHandle(mQuotaInfo, mDirName,
++                                    getter_AddRefs(marker));
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  rv = marker->Remove(/* recursive = */ false);
++  if (rv == NS_ERROR_FILE_NOT_FOUND ||
++      rv == NS_ERROR_FILE_TARGET_DOES_NOT_EXIST) {
++    rv = NS_OK;
++  }
++
++  // Again, no fsync is necessary. If the OS crashes before the file
++  // removal is flushed, then the user should search for stale data on
++  // startup. This will cause the next data store access to be a bit slow,
++  // but it seems appropriate after an OS crash.
++
++  return NS_OK;
++}
++
++// static
++bool
++ClientContext::MarkerFileExists(const QuotaInfo& aQuotaInfo,
++                                const nsAString& aDirName)
++{
++  nsCOMPtr<nsIFile> marker;
++  nsresult rv = GetMarkerFileHandle(aQuotaInfo, aDirName,
++                                    getter_AddRefs(marker));
++  if (NS_WARN_IF(NS_FAILED(rv))) { return false; }
++
++  bool exists = false;
++  rv = marker->Exists(&exists);
++  if (NS_WARN_IF(NS_FAILED(rv))) { return false; }
++
++  return exists;
++}
++
 +} // namespace quota
 +} // namespace dom
 +} // namespace mozilla
@@ -1306,7 +1418,7 @@ diff --git a/dom/quota/ClientContext.h b/dom/quota/ClientContext.h
 new file mode 100644
 --- /dev/null
 +++ b/dom/quota/ClientContext.h
-@@ -0,0 +1,224 @@
+@@ -0,0 +1,238 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -1317,13 +1429,14 @@ new file mode 100644
 +#define mozilla_dom_quota_ClientContext_h
 +
 +#include "Client.h"
++#include "ClientAction.h"
++#include "nsTObserverArray.h"
 +
 +namespace mozilla {
 +namespace dom {
 +namespace quota {
 +
 +class DirectoryLock;
-+class ClientAction;
 +
 +// The ClientContext class is RAII-style class for managing IO operations done
 +// by quota clients.
@@ -1416,8 +1529,9 @@ new file mode 100644
 +  // IO thread. Note, this Action must be execute asynchronously.
 +  static already_AddRefed<ClientContext>
 +  Create(Listener* aListener, nsIPrincipal* aPrincipal,
-+         Client::Type aClientType, nsIThread* aTarget,
-+         ClientAction* aInitAction, ClientContext* aOldContext);
++         Client::Type aClientType, const nsAString& aDirName,
++         nsIThread* aTarget, ClientAction* aInitAction,
++         ClientContext* aOldContext);
 +
 +  // Execute a given action on the target once the quota manager has been
 +  // initialized.
@@ -1459,6 +1573,11 @@ new file mode 100644
 +  // in place to trigger cleanup the next times its opened.
 +  void NoteOrphanedData();
 +
++  // The ClientContext marker file can be used by users of ClientContext to
++  // identify a previous session that was not cleanly shutdown.
++  static bool
++  MarkerFileExists(const QuotaInfo& aQuotaInfo, const nsAString& aDirName);
++
 +private:
 +  class Data;
 +  class QuotaInitRunnable;
@@ -1479,8 +1598,8 @@ new file mode 100644
 +  };
 +
 +  ClientContext(Listener* aListener, nsIPrincipal* principal,
-+                Client::Type aClientType, nsIThread* aTarget,
-+                ClientAction* aInitAction);
++                Client::Type aClientType, const nsAString& aDirName,
++                nsIThread* aTarget, ClientAction* aInitAction);
 +  ~ClientContext();
 +  void Init(ClientContext* aOldContext);
 +  void Start();
@@ -1497,10 +1616,17 @@ new file mode 100644
 +  void
 +  DoomTargetData();
 +
++  nsresult
++  CreateMarkerFile();
++
++  nsresult
++  DeleteMarkerFile();
++
 +  RefPtr<Listener> mListener;
 +  nsCOMPtr<nsIPrincipal> mPrincipal;
 +  nsCOMPtr<nsIThread> mTarget;
 +  Client::Type mClientType;
++  nsString mDirName;
 +  RefPtr<Data> mData;
 +  State mState;
 +  bool mOrphanedData;
@@ -1520,7 +1646,7 @@ new file mode 100644
 +  RefPtr<ThreadsafeHandle> mThreadsafeHandle;
 +
 +  RefPtr<DirectoryLock> mDirectoryLock;
-+  RefPtr<Context> mNextContext;
++  RefPtr<ClientContext> mNextContext;
 +
 +public:
 +  NS_INLINE_DECL_REFCOUNTING(ClientContext)
