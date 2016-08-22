@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  f40ea87b9099504e59a8cc6a736fafae354d969f
+# Parent  855e9f9109a59c347ae7063d8589aa41fa11cdcf
 
 diff --git a/dom/backgroundsync/BackgroundSyncTypes.h b/dom/backgroundsync/BackgroundSyncTypes.h
 --- a/dom/backgroundsync/BackgroundSyncTypes.h
@@ -1694,7 +1694,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
      , mRequestId(aRequestId)
      , mManager(aManager)
    {}
-@@ -551,43 +550,47 @@ StorageManager::~StorageManager()
+@@ -551,43 +550,46 @@ StorageManager::~StorageManager()
    mIOThread->Shutdown();
  }
  
@@ -1720,10 +1720,9 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
 +  RefPtr<ClientAction> setupAction = new SetupAction();
 +  nsCOMPtr<nsIPrincipal> principal = mManagerId->Principal();
 +  RefPtr<ClientContext> ref =
-+    ClientContext::Create(this, mIOThread, principal,
-+                          quota::Client::BACKGROUNDSYNC,
++    ClientContext::Create(this, principal, quota::Client::BACKGROUNDSYNC,
 +                          NS_LITERAL_STRING("backgroundsync"),
-+                          setupAction, oldContext);
++                          mIOThread, setupAction, oldContext);
    mContext = ref;
  }
  
@@ -1750,7 +1749,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
  {
    NS_ASSERT_OWNINGTHREAD(StorageManager);
  
-@@ -596,47 +599,49 @@ StorageManager::Shutdown()
+@@ -596,47 +598,49 @@ StorageManager::Shutdown()
    // calls Shutdown().
    if (mShuttingDown) {
      return;
@@ -1786,7 +1785,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
  
  void
 -StorageManager::RemoveStorageContext(StorageContext* aContext)
-+StorageManager::RemoveContext(ClientContext* aContext)
++StorageManager::RemoveClientContext(ClientContext* aContext)
  {
    NS_ASSERT_OWNINGTHREAD(StorageManager);
    MOZ_ASSERT(mContext);
@@ -1805,7 +1804,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
    // Factory list. We don't need to block shutdown by stayin in the list
    // any more.
    Factory::Remove(this);
-@@ -644,52 +649,52 @@ StorageManager::RemoveStorageContext(Sto
+@@ -644,52 +648,52 @@ StorageManager::RemoveStorageContext(Sto
  
  void
  StorageManager::MaybeAllowContextToClose()
@@ -1862,7 +1861,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
                                    aOp.mArgs().get_SyncRegisterArgs());
        break;
      }
-@@ -707,17 +712,17 @@ StorageManager::ExecuteRequest(const nsI
+@@ -707,17 +711,17 @@ StorageManager::ExecuteRequest(const nsI
  
    ExecuteRequest(aRequestId, action);
  }
