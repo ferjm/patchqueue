@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  ce3c76a72143400b3f779b9cff7bbff03a353f70
+# Parent  8cd9650dc1bea769a6fee86eb8424100b33bab31
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: BackgroundSyncService. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSyncChild.cpp b/dom/backgroundsync/BackgroundSyncChild.cpp
@@ -1211,7 +1211,7 @@ diff --git a/dom/backgroundsync/ChromeStorageManager.h b/dom/backgroundsync/Chro
 diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageManager.cpp
 --- a/dom/backgroundsync/StorageManager.cpp
 +++ b/dom/backgroundsync/StorageManager.cpp
-@@ -48,17 +48,18 @@ public:
+@@ -47,17 +47,18 @@ public:
  // Singleton class to track StorageManager instances and ensure there is only
  // one for each unique StorageManagerId.
  class StorageManager::Factory
@@ -1231,7 +1231,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
      // below to use the same factory.
      nsresult rv = MaybeCreateInstance();
      if (NS_WARN_IF(NS_FAILED(rv))) {
-@@ -68,17 +69,17 @@ public:
+@@ -67,17 +68,17 @@ public:
      RefPtr<StorageManager> ref = Get(aManagerId);
      if (!ref) {
        nsCOMPtr<nsIThread> ioThread;
@@ -1250,7 +1250,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
        ref->Init(oldManager);
  
        MOZ_ASSERT(!sFactory->mManagerList.Contains(ref));
-@@ -494,21 +495,22 @@ private:
+@@ -493,21 +494,22 @@ private:
    SyncChangeStateArgs mArgs;
    Registration mRegistration;
  };
@@ -1275,7 +1275,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
  {
    mozilla::ipc::AssertIsOnBackgroundThread();
  
-@@ -525,35 +527,39 @@ StorageManager::ShutdownAll()
+@@ -524,35 +526,39 @@ StorageManager::ShutdownAll()
  void
  StorageManager::Abort(const nsACString& aOrigin)
  {
@@ -1316,8 +1316,8 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
  {
    NS_ASSERT_OWNINGTHREAD(StorageManager);
  
-   RefPtr<StorageContext> oldContext;
-@@ -654,39 +660,41 @@ StorageManager::MaybeAllowContextToClose
+   RefPtr<ClientContext> oldContext;
+@@ -658,39 +664,41 @@ StorageManager::MaybeAllowContextToClose
      // Mark the StorageManager as invalid so that it won't get used again.
      NoteClosing();
  
@@ -1328,7 +1328,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
  // Common to DOM and internal requests.
 -void
 +bool
- StorageManager::ExecuteRequest(const nsID& aRequestId, StorageAction* aAction)
+ StorageManager::ExecuteRequest(const nsID& aRequestId, ClientAction* aAction)
  {
    NS_ASSERT_OWNINGTHREAD(StorageManager);
    MOZ_ASSERT(mContext);
@@ -1343,7 +1343,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
 +    return false;
    }
  
-   RefPtr<StorageContext> context = mContext;
+   RefPtr<ClientContext> context = mContext;
    MOZ_ASSERT(!context->IsCanceled());
  
    context->Dispatch(aAction);
@@ -1356,13 +1356,13 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
 +bool
  StorageManager::ExecuteRequest(const nsID& aRequestId, const SyncOp& aOp)
  {
-   RefPtr<StorageAction> action;
+   RefPtr<ClientAction> action;
  
    switch(aOp.mArgs().type()) {
      case SyncOpArgs::TSyncRegisterArgs:
      {
        action = new RegisterAction(aRequestId, this,
-@@ -700,17 +708,17 @@ StorageManager::ExecuteRequest(const nsI
+@@ -704,17 +712,17 @@ StorageManager::ExecuteRequest(const nsI
        break;
      }
      default:
@@ -1379,9 +1379,9 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
  void
  StorageManager::ExecuteRequest(const nsID& aRequestId, const SyncInternalOp& aOp)
  {
-   RefPtr<StorageAction> action;
+   RefPtr<ClientAction> action;
  
-@@ -748,20 +756,19 @@ StorageManager::OnRequestComplete(const 
+@@ -752,20 +760,19 @@ StorageManager::OnRequestComplete(const 
    NS_ASSERT_OWNINGTHREAD(StorageManager);
    MOZ_ASSERT(mPendingRequests.Contains(aRequestId));
  
@@ -1408,14 +1408,32 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
 diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageManager.h
 --- a/dom/backgroundsync/StorageManager.h
 +++ b/dom/backgroundsync/StorageManager.h
-@@ -26,20 +26,23 @@ namespace backgroundsync {
+@@ -9,16 +9,17 @@
+ 
+ #include "mozilla/dom/quota/ClientContext.h"
+ 
+ namespace mozilla {
+ namespace dom {
+ namespace backgroundsync {
+ 
+ using quota::ClientContext;
++using quota::ClientAction;
+ 
+ /**
+  * The StorageManager class is responsible for managing the storage of sync
+  * requests. The DOM objects and IPC actors are basically just plumbing to
+  * get the request to the right StorageManager object running in the parent
+  * process.
+  *
+  * There should be exactly one StorageManager object for each origin or app
+@@ -28,20 +29,23 @@ using quota::ClientContext;
   *
   * The StorageManager instances are kept alive by the BackgroundSyncService,
   * which keeps a reference to the StorageManager dealing with a storage request
   * until that request is completed or the actor requesting it is destroyed.
   */
  
- class StorageManager final
+ class StorageManager final : public quota::ClientContext::Listener
  {
 +  friend class BackgroundSyncService;
 +
@@ -1433,17 +1451,21 @@ diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageMan
      Closing
    };
  
-@@ -63,44 +66,47 @@ public:
-   // Must be called by StorageContext objects before they are destroyed.
-   void RemoveStorageContext(StorageContext* aContext);
+@@ -57,48 +61,51 @@ public:
+   }
  
-   // Marks the StorageManager "invalid". Once the StorageContext completes
-   // no new operations will be permitted with this StorageManager.
-   // New actors will get a new StorageManager.
-   void NoteClosing();
+   // Synchronously shutdown.  This spins the event loop.
+   static void ShutdownAll();
+ 
+   // Cancel actions for given origin or all actions if passed string is null.
+   static void Abort(const nsACString& aOrigin);
  
 -  void ExecuteRequest(const nsID& aRequestId, const SyncOp& aOp);
 +  bool ExecuteRequest(const nsID& aRequestId, const SyncOp& aOp);
+ 
+   // quota::ClientContext::Listener
+   virtual void NoteClosing() override;
+   virtual void RemoveClientContext(ClientContext* aContext) override;
  
  private:
    class BaseAction;
@@ -1472,8 +1494,8 @@ diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageMan
 +  void OnRequestComplete(const nsID& aRequestId,
 +                         const SyncOpResponse& aResponse);
  
--  void ExecuteRequest(const nsID& aRequestId, StorageAction* aAction);
-+  bool ExecuteRequest(const nsID& aRequestId, StorageAction* aAction);
+-  void ExecuteRequest(const nsID& aRequestId, ClientAction* aAction);
++  bool ExecuteRequest(const nsID& aRequestId, ClientAction* aAction);
    void ExecuteRequest(const nsID& aRequestId, const SyncInternalOp& aOp);
  
 +  RefPtr<BackgroundSyncService> mService;
@@ -1481,9 +1503,9 @@ diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageMan
    RefPtr<StorageManagerId> mManagerId;
    nsCOMPtr<nsIThread> mIOThread;
  
-   // Weak reference cleared by RemoveStorageContext() in StorageContext
+   // Weak reference cleared by RemoveContext() in ClientContext
    // destructor.
-   StorageContext* MOZ_NON_OWNING_REF mContext;
+   ClientContext* MOZ_NON_OWNING_REF mContext;
  
    bool mShuttingDown;
 diff --git a/dom/backgroundsync/StorageManagerId.cpp b/dom/backgroundsync/StorageManagerId.cpp
