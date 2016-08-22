@@ -1533,7 +1533,7 @@ new file mode 100644
 +    virtual void NoteClosing() = 0;
 +    virtual void RemoveClientContext(ClientContext* aContext) = 0;
 +
-+  private:
++  protected:
 +    virtual ~Listener() {};
 +  };
 +
