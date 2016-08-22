@@ -182,7 +182,7 @@ diff --git a/dom/quota/ClientContext.cpp b/dom/quota/ClientContext.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/quota/ClientContext.cpp
-@@ -0,0 +1,1242 @@
+@@ -0,0 +1,1249 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -192,6 +192,13 @@ new file mode 100644
 +#include "ClientContext.h"
 +
 +#include "mozilla/AutoRestore.h"
++#include "mozilla/DebugOnly.h"
++#include "mozIStorageConnection.h"
++#include "nsIFile.h"
++#include "nsIPrincipal.h"
++#include "nsProxyRelease.h"
++#include "nsIRunnable.h"
++#include "nsThreadUtils.h"
 +
 +namespace {
 +
@@ -1429,7 +1436,7 @@ diff --git a/dom/quota/ClientContext.h b/dom/quota/ClientContext.h
 new file mode 100644
 --- /dev/null
 +++ b/dom/quota/ClientContext.h
-@@ -0,0 +1,250 @@
+@@ -0,0 +1,255 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -1518,12 +1525,17 @@ new file mode 100644
 +  };
 +
 +  // An interface to be implemented by code wishing to use the ClientContext.
-+  // XXX lifetime.
 +  class Listener
 +  {
++    NS_INLINE_DECL_REFCOUNTING(quota::ClientContext::Listener)
++
 +  public:
 +    virtual void NoteClosing() = 0;
 +    virtual void RemoveClientContext(ClientContext* aContext) = 0;
++
++  private:
++    Listener() {};
++    virtual ~Listener() {};
 +  };
 +
 +  // Different objects hold references to the ClientContext while some work is
