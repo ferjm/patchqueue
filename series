@@ -5,7 +5,6 @@ bug1217544.background.sync.part4.syncevent.patch
 bug1217544.background.sync.part5.quotaclienthelpers.patch
 bug1217544.background.sync.part5.managerid.patch
 applyqch.patch
-applyquotaclienthelper.patch
 bug1217544.background.sync.part6.onlineobserver.patch
 bug1217544.background.sync.part7.service.patch
 bug1217544.background.sync.tests.patch
