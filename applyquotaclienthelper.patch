@@ -1675,7 +1675,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
    SetupAction()
      : SyncDBAction(DBAction::Create)
    { }
-@@ -278,17 +277,17 @@ StaticAutoPtr<StorageManager::Factory> S
+@@ -278,17 +277,52 @@ StaticAutoPtr<StorageManager::Factory> S
  // static
  StaticMutex StorageManager::Factory::sMutex;
  
@@ -1685,6 +1685,41 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
  // ---------------------------------------------------------------------------
  
 -// Abstract class to help implement the varios StorageActions.
++class StorageManager::PendingRequest final
++{
++public:
++  NS_INLINE_DECL_REFCOUNTING(PendingRequest)
++
++  PendingRequest(const nsID& aRequestId, ClientAction* aAction)
++    : mRequestId(aRequestId)
++    , mAction(aAction)
++  {
++    MOZ_ASSERT(mAction);
++  }
++
++  nsID
++  RequestId()
++  {
++    return mRequestId;
++  }
++
++  nsresult
++  Action(ClientAction** aAction)
++  {
++    NS_ADDREF(*aAction = mAction);
++
++    return NS_OK;
++  }
++
++private:
++  ~PendingRequest() {}
++
++  nsID mRequestId;
++  RefPtr<ClientAction> mAction;
++};
++
++// ---------------------------------------------------------------------------
++
 +// Abstract class to help implement the varios ClientActions.
  class StorageManager::BaseAction : public SyncDBAction
  {
@@ -1694,10 +1729,81 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
      , mRequestId(aRequestId)
      , mManager(aManager)
    {}
-@@ -551,43 +550,46 @@ StorageManager::~StorageManager()
+@@ -546,48 +580,112 @@ StorageManager::~StorageManager()
+ {
+   NS_ASSERT_OWNINGTHREAD(StorageManager);
+   MOZ_ASSERT(mState == Closing);
+   MOZ_ASSERT(!mContext);
+ 
    mIOThread->Shutdown();
  }
  
++class StorageManager::InitRunnable final : public nsIRunnable,
++                                           public nsICancelableRunnable
++{
++public:
++  NS_DECL_THREADSAFE_ISUPPORTS
++
++  InitRunnable(StorageManager* aManager,
++               StorageManagerId* aManagerId,
++               nsIThread* aIOThread,
++               ClientContext* aOldContext)
++    : mManager(aManager)
++    , mManagerId(aManagerId)
++    , mIOThread(aIOThread)
++    , mOldContext(aOldContext)
++    , mInitiatingThread(do_GetCurrentThread())
++  {
++    MOZ_ASSERT(mManager);
++    MOZ_ASSERT(mManagerId);
++    MOZ_ASSERT(mIOThread);
++    MOZ_ASSERT(mInitiatingThread);
++  }
++
++  // This method is called twice. The first time on the main thread to create
++  // the ClientContext instance. And the second time on the background thread
++  // to set the context on the StorageManager.
++  NS_IMETHOD
++  Run() override
++  {
++    if (!NS_IsMainThread()) {
++      mManager->SetContext(mContext);
++      return NS_OK;
++    }
++
++    // Create the context.
++    // Since there can at most be one ClientContext per StorageManager,
++    // this lets us cleanly call Factory::Remove() once the ClientContext
++    // goes away.
++    RefPtr<ClientAction> setupAction = new SetupAction();
++    RefPtr<nsIPrincipal> principal = mManagerId->Principal();
++    RefPtr<ClientContext> mContext =
++      ClientContext::Create(mManager, principal, quota::Client::BACKGROUNDSYNC,
++                            NS_LITERAL_STRING("backgroundsync"), mIOThread,
++                            setupAction, mOldContext);
++
++    return mInitiatingThread->Dispatch(this, nsIThread::DISPATCH_NORMAL);
++  }
++
++  NS_IMETHOD
++  Cancel() override
++  {
++    return NS_OK;
++  }
++
++private:
++  ~InitRunnable() {}
++
++  RefPtr<StorageManager> mManager;
++  RefPtr<StorageManagerId> mManagerId;
++  RefPtr<nsIThread> mIOThread;
++  RefPtr<ClientContext> mOldContext;
++  RefPtr<nsIThread> mInitiatingThread;
++  RefPtr<ClientContext> mContext;
++};
++
++NS_IMPL_ISUPPORTS(StorageManager::InitRunnable, nsICancelableRunnable, nsIRunnable);
++
  void
  StorageManager::Init(StorageManager* aOldManager)
  {
@@ -1709,21 +1815,18 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
      oldContext = aOldManager->mContext;
    }
  
-   // Create the context immediately. Since there can at most be one
+-  // Create the context immediately. Since there can at most be one
 -  // StorageContext per StorageManager, this lets us cleanly call
 -  // Factory::Remove() once the StorageContext goes away.
 -  RefPtr<StorageAction> setupAction = new SetupAction();
 -  RefPtr<StorageContext> ref = StorageContext::Create(this, mIOThread,
 -                                                      setupAction, oldContext);
-+  // ClientContext per StorageManager, this lets us cleanly call
-+  // Factory::Remove() once the ClientContext goes away.
-+  RefPtr<ClientAction> setupAction = new SetupAction();
-+  nsCOMPtr<nsIPrincipal> principal = mManagerId->Principal();
-+  RefPtr<ClientContext> ref =
-+    ClientContext::Create(this, principal, quota::Client::BACKGROUNDSYNC,
-+                          NS_LITERAL_STRING("backgroundsync"),
-+                          mIOThread, setupAction, oldContext);
-   mContext = ref;
+-  mContext = ref;
++  // Since ClientContext requires the StorageManagerId's Principal we first
++  // need to jump to the main thread to get it.
++  RefPtr<InitRunnable> runnable = new InitRunnable(this, mManagerId,
++                                                   mIOThread, oldContext);
++  Unused << NS_WARN_IF(NS_FAILED(NS_DispatchToMainThread(runnable)));
  }
  
  void
@@ -1749,7 +1852,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
  {
    NS_ASSERT_OWNINGTHREAD(StorageManager);
  
-@@ -596,47 +598,49 @@ StorageManager::Shutdown()
+@@ -596,47 +694,72 @@ StorageManager::Shutdown()
    // calls Shutdown().
    if (mShuttingDown) {
      return;
@@ -1770,11 +1873,34 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
 +    RefPtr<ClientContext> context = mContext;
      context->CancelAll();
    }
++
++  mPendingRequests.Clear();
  }
  
+ void
++StorageManager::SetContext(ClientContext* aContext)
++{
++  NS_ASSERT_OWNINGTHREAD(StorageManager);
++  MOZ_ASSERT(aContext);
++
++  mContext = aContext;
++
++  // Flush pending requests.
++  for (uint32_t i = 0, len = mPendingRequests.Length(); i < len; i++) {
++    RefPtr<PendingRequest> req = mPendingRequests[i];
++    MOZ_ASSERT(req);
++    RefPtr<ClientAction> action;
++    if (NS_WARN_IF(NS_FAILED(req->Action(getter_AddRefs(action))))) {
++      continue;
++    }
++    ExecuteRequest(req->RequestId(), action);
++  }
++  mPendingRequests.Clear();
++}
++
 +// quota::ClientContext::Listener implementation
 +
- void
++void
  StorageManager::NoteClosing()
  {
    NS_ASSERT_OWNINGTHREAD(StorageManager);
@@ -1804,7 +1930,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
    // Factory list. We don't need to block shutdown by stayin in the list
    // any more.
    Factory::Remove(this);
-@@ -644,52 +648,52 @@ StorageManager::RemoveStorageContext(Sto
+@@ -644,52 +767,61 @@ StorageManager::RemoveStorageContext(Sto
  
  void
  StorageManager::MaybeAllowContextToClose()
@@ -1814,8 +1940,9 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
    // then let it shut itself down. We must wait for all possible users
    // of state information to complete before doing this.
 -  RefPtr<StorageContext> context = mContext;
+-  if (context && mPendingRequests.IsEmpty()) {
 +  RefPtr<ClientContext> context = mContext;
-   if (context && mPendingRequests.IsEmpty()) {
++  if (context && mRequestIds.IsEmpty()) {
      // Mark the StorageManager as invalid so that it won't get used again.
      NoteClosing();
  
@@ -1829,10 +1956,21 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
 +StorageManager::ExecuteRequest(const nsID& aRequestId, ClientAction* aAction)
  {
    NS_ASSERT_OWNINGTHREAD(StorageManager);
-   MOZ_ASSERT(mContext);
+-  MOZ_ASSERT(mContext);
    MOZ_ASSERT(aAction);
  
-   mPendingRequests.AppendElement(aRequestId);
+-  mPendingRequests.AppendElement(aRequestId);
++  if (!mContext) {
++    // We still don't have a proper ClientContext, so we need to queue the
++    // request.
++    RefPtr<PendingRequest> pendingRequest = new PendingRequest(aRequestId,
++                                                               aAction);
++    mPendingRequests.AppendElement(pendingRequest);
++    return false;
++  }
++
++  MOZ_ASSERT(mContext);
++  mRequestIds.AppendElement(aRequestId);
  
    if (NS_WARN_IF(mState == Closing)) {
      OnRequestComplete(aRequestId,
@@ -1861,7 +1999,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
                                    aOp.mArgs().get_SyncRegisterArgs());
        break;
      }
-@@ -707,17 +711,17 @@ StorageManager::ExecuteRequest(const nsI
+@@ -707,17 +839,17 @@ StorageManager::ExecuteRequest(const nsI
  
    ExecuteRequest(aRequestId, action);
  }
@@ -1880,6 +2018,28 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
        break;
      }
      case SyncInternalOpArgs::TSyncChangeStateArgs:
+@@ -741,19 +873,19 @@ StorageManager::ExecuteRequest(const nsI
+   ExecuteRequest(aRequestId, action);
+ }
+ 
+ // Common to DOM and internal responses.
+ void
+ StorageManager::OnRequestComplete(const nsID& aRequestId)
+ {
+   NS_ASSERT_OWNINGTHREAD(StorageManager);
+-  MOZ_ASSERT(mPendingRequests.Contains(aRequestId));
++  MOZ_ASSERT(mRequestIds.Contains(aRequestId));
+ 
+-  mPendingRequests.RemoveElement(aRequestId);
++  mRequestIds.RemoveElement(aRequestId);
+ 
+   MaybeAllowContextToClose();
+ }
+ 
+ template<typename T>
+ void
+ StorageManager::OnRequestComplete(const nsID& aRequestId, const T& aResponse)
+ {
 diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageManager.h
 --- a/dom/backgroundsync/StorageManager.h
 +++ b/dom/backgroundsync/StorageManager.h
@@ -1927,7 +2087,7 @@ diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageMan
                                StorageManager** aManagerOut);
  
    enum State
-@@ -55,25 +57,21 @@ public:
+@@ -55,63 +57,68 @@ public:
    }
  
    // Synchronously shutdown.  This spins the event loop.
@@ -1956,10 +2116,20 @@ diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageMan
    class Factory;
    class GetAllAction;
    class GetTagsAction;
++  class InitRunnable;
    class RegisterAction;
-@@ -88,25 +86,25 @@ private:
+   class RemoveAction;
+ 
+   StorageManager(StorageManagerId* aManagerId,
+                  nsIThread* aIOThread);
+   ~StorageManager();
+ 
+   void Init(StorageManager* aOldManager);
+   void Abort();
    void Shutdown();
  
++  void SetContext(ClientContext* aContext);
++
    void MaybeAllowContextToClose();
  
    void OnRequestComplete(const nsID& aRequestId);
@@ -1982,10 +2152,22 @@ diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageMan
    bool mShuttingDown;
    State mState;
  
++  // We might receive operation requests while we are doing the initialization
++  // process. In that case, we need to queue the requests until the
++  // initialization is completed.
++  class PendingRequest;
++  nsTArray<RefPtr<PendingRequest>> mPendingRequests;
++
    // Keep a list of the request IDs coming from BackgroundSyncService.
-   nsTArray<nsID> mPendingRequests;
+-  nsTArray<nsID> mPendingRequests;
++  nsTArray<nsID> mRequestIds;
  };
  
+ } // namespace backgroundsync
+ } // namespace dom
+ } // namespace mozilla
+ 
+ #endif // mozilla_dom_StorageManager_h
 diff --git a/dom/backgroundsync/moz.build b/dom/backgroundsync/moz.build
 --- a/dom/backgroundsync/moz.build
 +++ b/dom/backgroundsync/moz.build
