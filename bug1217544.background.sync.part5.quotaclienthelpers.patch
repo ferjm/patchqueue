@@ -1525,7 +1525,7 @@ new file mode 100644
 +  public:
 +    virtual void NoteClosing() = 0;
 +    virtual void RemoveClientContext(ClientContext* aContext) = 0;
-+    virtual already_AddRefed<nsIPrincipal> GetPrincipal() const = 0;
++    virtual nsIPrincipal* GetPrincipal() const = 0;
 +
 +  protected:
 +    virtual ~Listener() {};
