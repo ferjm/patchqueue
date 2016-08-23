@@ -182,7 +182,7 @@ diff --git a/dom/quota/ClientContext.cpp b/dom/quota/ClientContext.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/quota/ClientContext.cpp
-@@ -0,0 +1,1249 @@
+@@ -0,0 +1,1243 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -280,7 +280,6 @@ new file mode 100644
 +{
 +public:
 +  QuotaInitRunnable(ClientContext* aContext,
-+                    nsIPrincipal* aPrincipal,
 +                    Client::Type aClientType,
 +                    const nsAString& aDirName,
 +                    Data* aData,
@@ -288,7 +287,6 @@ new file mode 100644
 +                    ClientAction* aInitAction)
 +    : mContext(aContext)
 +    , mThreadsafeHandle(aContext->CreateThreadsafeHandle())
-+    , mPrincipal(aPrincipal)
 +    , mQuotaClientType(aClientType)
 +    , mDirName(aDirName)
 +    , mData(aData)
@@ -300,7 +298,6 @@ new file mode 100644
 +    , mCanceled(false)
 +  {
 +    MOZ_ASSERT(mContext);
-+    MOZ_ASSERT(mPrincipal);
 +    MOZ_ASSERT(!mDirName.IsEmpty());
 +    MOZ_ASSERT(mData);
 +    MOZ_ASSERT(mTarget);
@@ -408,13 +405,11 @@ new file mode 100644
 +    NS_ASSERT_OWNINGTHREAD(QuotaInitRunnable);
 +    MOZ_ASSERT(mContext);
 +    mContext = nullptr;
-+    mPrincipal = nullptr;
 +    mInitAction = nullptr;
 +  }
 +
 +  RefPtr<ClientContext> mContext;
 +  RefPtr<ThreadsafeHandle> mThreadsafeHandle;
-+  RefPtr<nsIPrincipal> mPrincipal;
 +  Client::Type mQuotaClientType;
 +  nsString mDirName;
 +  RefPtr<Data> mData;
@@ -559,7 +554,8 @@ new file mode 100644
 +        break;
 +      }
 +
-+      nsresult rv = QuotaManager::GetInfoFromPrincipal(mPrincipal,
++      nsCOMPtr<nsIPrincipal> principal = mContext->mListener->Principal();
++      nsresult rv = QuotaManager::GetInfoFromPrincipal(principal,
 +                                                       &mQuotaInfo.mSuffix,
 +                                                       &mQuotaInfo.mGroup,
 +                                                       &mQuotaInfo.mOrigin,
@@ -1016,23 +1012,21 @@ new file mode 100644
 +
 +// static
 +already_AddRefed<ClientContext>
-+ClientContext::Create(Listener* aListener, nsIPrincipal* aPrincipal,
-+                      Client::Type aClientType, const nsAString& aDirName,
-+                      nsIThread* aTarget, ClientAction* aInitAction,
-+                      ClientContext* aOldContext)
++ClientContext::Create(Listener* aListener, Client::Type aClientType,
++                      const nsAString& aDirName, nsIThread* aTarget,
++                      ClientAction* aInitAction, ClientContext* aOldContext)
 +{
-+  RefPtr<ClientContext> context = new ClientContext(aListener, aPrincipal,
-+                                                    aClientType, aDirName,
-+                                                    aTarget, aInitAction);
++  RefPtr<ClientContext> context = new ClientContext(aListener, aClientType,
++                                                    aDirName, aTarget,
++                                                    aInitAction);
 +  context->Init(aOldContext);
 +  return context.forget();
 +}
 +
-+ClientContext::ClientContext(Listener* aListener, nsIPrincipal* aPrincipal,
-+                             Client::Type aClientType, const nsAString& aDirName,
-+                             nsIThread* aTarget, ClientAction* aInitAction)
++ClientContext::ClientContext(Listener* aListener, Client::Type aClientType,
++                             const nsAString& aDirName, nsIThread* aTarget,
++                             ClientAction* aInitAction)
 +  : mListener(aListener)
-+  , mPrincipal(aPrincipal)
 +  , mTarget(aTarget)
 +  , mClientType(aClientType)
 +  , mDirName(aDirName)
@@ -1192,8 +1186,8 @@ new file mode 100644
 +  MOZ_ASSERT(mState == STATE_CONTEXT_PREINIT);
 +  MOZ_ASSERT(!mInitRunnable);
 +
-+  mInitRunnable = new QuotaInitRunnable(this, mPrincipal, mClientType, mDirName,
-+                                        mData, mTarget, mInitAction);
++  mInitRunnable = new QuotaInitRunnable(this, mClientType, mDirName, mData,
++                                        mTarget, mInitAction);
 +  mInitAction = nullptr;
 +
 +  mState = STATE_CONTEXT_INIT;
@@ -1436,7 +1430,7 @@ diff --git a/dom/quota/ClientContext.h b/dom/quota/ClientContext.h
 new file mode 100644
 --- /dev/null
 +++ b/dom/quota/ClientContext.h
-@@ -0,0 +1,253 @@
+@@ -0,0 +1,252 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -1531,6 +1525,7 @@ new file mode 100644
 +  public:
 +    virtual void NoteClosing() = 0;
 +    virtual void RemoveClientContext(ClientContext* aContext) = 0;
++    virtual already_AddRefed<nsIPrincipal> Principal() const = 0;
 +
 +  protected:
 +    virtual ~Listener() {};
@@ -1552,10 +1547,9 @@ new file mode 100644
 +  // Create a ClientContext. The given ClientAction will run on the QuotaManager
 +  // IO thread. Note, this Action must be execute asynchronously.
 +  static already_AddRefed<ClientContext>
-+  Create(Listener* aListener, nsIPrincipal* aPrincipal,
-+         Client::Type aClientType, const nsAString& aDirName,
-+         nsIThread* aTarget, ClientAction* aInitAction,
-+         ClientContext* aOldContext);
++  Create(Listener* aListener, Client::Type aClientType,
++         const nsAString& aDirName, nsIThread* aTarget,
++         ClientAction* aInitAction, ClientContext* aOldContext);
 +
 +  // Execute a given action on the target once the quota manager has been
 +  // initialized.
@@ -1616,9 +1610,9 @@ new file mode 100644
 +    RefPtr<ClientAction> mAction;
 +  };
 +
-+  ClientContext(Listener* aListener, nsIPrincipal* principal,
-+                Client::Type aClientType, const nsAString& aDirName,
-+                nsIThread* aTarget, ClientAction* aInitAction);
++  ClientContext(Listener* aListener, Client::Type aClientType,
++                const nsAString& aDirName, nsIThread* aTarget,
++                ClientAction* aInitAction);
 +  ~ClientContext();
 +  void Init(ClientContext* aOldContext);
 +  void Start();
@@ -1636,7 +1630,6 @@ new file mode 100644
 +  DoomTargetData();
 +
 +  RefPtr<Listener> mListener;
-+  nsCOMPtr<nsIPrincipal> mPrincipal;
 +  nsCOMPtr<nsIThread> mTarget;
 +  Client::Type mClientType;
 +  nsString mDirName;
