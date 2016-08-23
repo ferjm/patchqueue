@@ -554,7 +554,7 @@ new file mode 100644
 +        break;
 +      }
 +
-+      nsCOMPtr<nsIPrincipal> principal = mContext->mListener->Principal();
++      nsCOMPtr<nsIPrincipal> principal = mContext->mListener->GetPrincipal();
 +      nsresult rv = QuotaManager::GetInfoFromPrincipal(principal,
 +                                                       &mQuotaInfo.mSuffix,
 +                                                       &mQuotaInfo.mGroup,
