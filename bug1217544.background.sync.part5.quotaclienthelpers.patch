@@ -1436,7 +1436,7 @@ diff --git a/dom/quota/ClientContext.h b/dom/quota/ClientContext.h
 new file mode 100644
 --- /dev/null
 +++ b/dom/quota/ClientContext.h
-@@ -0,0 +1,254 @@
+@@ -0,0 +1,253 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -1473,7 +1473,6 @@ new file mode 100644
 +//    cancels all existing ClientAction objects.
 +// 3) Browser shutdown occurs and the quota client calls
 +//    ClientContext::CancelAll().
-+//    XXX Maybe (3) needs to be handled inside ClientContext
 +//
 +// In either case, though, the ClientAction objects must be destroyed first to
 +// allow the ClientContext to be destroyed.
@@ -1527,7 +1526,7 @@ new file mode 100644
 +  // An interface to be implemented by code wishing to use the ClientContext.
 +  class Listener
 +  {
-+    NS_INLINE_DECL_REFCOUNTING(quota::ClientContext::Listener)
++    NS_INLINE_DECL_THREADSAFE_REFCOUNTING(quota::ClientContext::Listener)
 +
 +  public:
 +    virtual void NoteClosing() = 0;
