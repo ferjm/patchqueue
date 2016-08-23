@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  243c2c234e78654d3e4cabd2be27e9d3d4692e1c
+# Parent  f1d54090a825c0b96aa1fa038af3414b057fb89c
 
 diff --git a/dom/backgroundsync/BackgroundSyncTypes.h b/dom/backgroundsync/BackgroundSyncTypes.h
 --- a/dom/backgroundsync/BackgroundSyncTypes.h
@@ -1748,7 +1748,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
  {
    NS_ASSERT_OWNINGTHREAD(StorageManager);
  
-@@ -596,100 +597,106 @@ StorageManager::Shutdown()
+@@ -596,100 +597,109 @@ StorageManager::Shutdown()
    // calls Shutdown().
    if (mShuttingDown) {
      return;
@@ -1803,10 +1803,13 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
    Factory::Remove(this);
  }
  
-+nsIPrincipal*
++already_AddRefed<nsIPrincipal>
 +StorageManager::GetPrincipal() const
 +{
-+  return mManagerId->Principal();
++  MOZ_ASSERT(NS_IsMainThread());
++
++  nsCOMPtr<nsIPrincipal> ref = mManagerId->Principal();
++  return ref.forget():
 +}
 +
  void
@@ -1864,7 +1867,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
                                    aOp.mArgs().get_SyncRegisterArgs());
        break;
      }
-@@ -707,17 +714,17 @@ StorageManager::ExecuteRequest(const nsI
+@@ -707,17 +717,17 @@ StorageManager::ExecuteRequest(const nsI
  
    ExecuteRequest(aRequestId, action);
  }
@@ -1952,7 +1955,7 @@ diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageMan
 +  // quota::ClientContext::Listener
 +  virtual void NoteClosing() override;
 +  virtual void RemoveClientContext(ClientContext* aContext) override;
-+  virtual already_AddRefed<nsIPrincipal> GetPrincipal() override;
++  virtual already_AddRefed<nsIPrincipal> GetPrincipal() const override;
  
  private:
    class BaseAction;
