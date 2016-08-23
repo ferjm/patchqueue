@@ -1966,7 +1966,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
 +    RefPtr<PendingRequest> pendingRequest = new PendingRequest(aRequestId,
 +                                                               aAction);
 +    mPendingRequests.AppendElement(pendingRequest);
-+    return false;
++    return;
 +  }
 +
 +  MOZ_ASSERT(mContext);
