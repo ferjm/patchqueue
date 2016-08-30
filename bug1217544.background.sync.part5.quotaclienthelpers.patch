@@ -1430,7 +1430,7 @@ diff --git a/dom/quota/ClientContext.h b/dom/quota/ClientContext.h
 new file mode 100644
 --- /dev/null
 +++ b/dom/quota/ClientContext.h
-@@ -0,0 +1,252 @@
+@@ -0,0 +1,256 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -1520,9 +1520,13 @@ new file mode 100644
 +  // An interface to be implemented by code wishing to use the ClientContext.
 +  class Listener
 +  {
-+    NS_INLINE_DECL_THREADSAFE_REFCOUNTING(quota::ClientContext::Listener)
-+
 +  public:
++    NS_IMETHOD_(MozExternalRefCountType)
++    AddRef() = 0;
++
++    NS_IMETHOD_(MozExternalRefCountType)
++    Release() = 0;
++
 +    virtual void NoteClosing() = 0;
 +    virtual void RemoveClientContext(ClientContext* aContext) = 0;
 +    virtual already_AddRefed<nsIPrincipal> GetPrincipal() const = 0;
