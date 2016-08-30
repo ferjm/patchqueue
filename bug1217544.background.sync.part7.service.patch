@@ -1129,7 +1129,8 @@ diff --git a/dom/backgroundsync/ChromeStorageManager.cpp b/dom/backgroundsync/Ch
  
  // static
  already_AddRefed<ChromeStorageManager>
- ChromeStorageManager::GetOrCreate()
+-ChromeStorageManager::GetOrCreate()
++ChromeStorageManager::GetOrCreate(BackgroundSyncService* aService)
  {
    AssertIsOnBackgroundThread();
 +  MOZ_ASSERT(aService);
