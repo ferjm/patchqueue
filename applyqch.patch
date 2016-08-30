@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  f72a853d4bf1a5200641cda7026f9a20582b93be
+# Parent  f01df2626fbe8de47116d4ebf49b35f33683875c
 
 diff --git a/dom/backgroundsync/BackgroundSyncTypes.h b/dom/backgroundsync/BackgroundSyncTypes.h
 --- a/dom/backgroundsync/BackgroundSyncTypes.h
@@ -1694,8 +1694,8 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
      , mRequestId(aRequestId)
      , mManager(aManager)
    {}
-@@ -551,43 +550,45 @@ StorageManager::~StorageManager()
-   mIOThread->Shutdown();
+@@ -554,43 +553,45 @@ StorageManager::~StorageManager()
+         NewRunnableMethod(ioThread, &nsIThread::Shutdown)));
  }
  
  void
@@ -1748,7 +1748,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
  {
    NS_ASSERT_OWNINGTHREAD(StorageManager);
  
-@@ -596,100 +597,109 @@ StorageManager::Shutdown()
+@@ -599,100 +600,109 @@ StorageManager::Shutdown()
    // calls Shutdown().
    if (mShuttingDown) {
      return;
@@ -1867,7 +1867,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
                                    aOp.mArgs().get_SyncRegisterArgs());
        break;
      }
-@@ -707,17 +717,17 @@ StorageManager::ExecuteRequest(const nsI
+@@ -710,17 +720,17 @@ StorageManager::ExecuteRequest(const nsI
  
    ExecuteRequest(aRequestId, action);
  }
@@ -1889,7 +1889,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
 diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageManager.h
 --- a/dom/backgroundsync/StorageManager.h
 +++ b/dom/backgroundsync/StorageManager.h
-@@ -2,39 +2,41 @@
+@@ -2,42 +2,44 @@
  /* vim: set ts=8 sts=2 et sw=2 tw=80: */
  /* This Source Code Form is subject to the terms of the Mozilla Public
   * License, v. 2.0. If a copy of the MPL was not distributed with this file,
@@ -1927,12 +1927,16 @@ diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageMan
 +class StorageManager final : public quota::ClientContext::Listener
  {
  public:
-   NS_INLINE_DECL_REFCOUNTING(StorageManager)
+-  NS_INLINE_DECL_REFCOUNTING(StorageManager)
++  NS_INLINE_DECL_REFCOUNTING(StorageManager, override)
  
    static nsresult GetOrCreate(StorageManagerId* aManagerId,
                                StorageManager** aManagerOut);
  
    enum State
+   {
+     Open,
+     Closing
 @@ -55,25 +57,22 @@ public:
    }
  
