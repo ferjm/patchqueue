@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  b9516de1871285ca7de135454d166349f985d48d
+# Parent  484bda64ad1272e5072c6e3387ce18427798766c
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: BackgroundSyncService. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSyncChild.cpp b/dom/backgroundsync/BackgroundSyncChild.cpp
@@ -1441,7 +1441,7 @@ diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageMan
 +  friend class BackgroundSyncService;
 +
  public:
-   NS_INLINE_DECL_REFCOUNTING(StorageManager)
+   NS_INLINE_DECL_REFCOUNTING(StorageManager, override)
  
 -  static nsresult GetOrCreate(StorageManagerId* aManagerId,
 +  static nsresult GetOrCreate(BackgroundSyncService* aService,
