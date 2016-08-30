@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  eb71f81bcc5b98f4d0d6ef95af6966c56c85433e
+# Parent  dcfae3e504b3e53cdbb87ba4a759697466e7c7f4
 Bug 1217544 - Implement one-off BackgroundSync API. Part 5: Storage. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
@@ -1145,7 +1145,7 @@ diff --git a/dom/backgroundsync/ChromeStorageManager.cpp b/dom/backgroundsync/Ch
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/ChromeStorageManager.cpp
-@@ -0,0 +1,398 @@
+@@ -0,0 +1,403 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -1440,7 +1440,12 @@ new file mode 100644
 +
 +  mPendingActions.Clear();
 +
-+  mIOThread->Shutdown();
++  nsCOMPtr<nsIThread> ioThread;
++  mIOThread.swap(ioThread);
++  MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(
++        NewRunnableMethod(ioThread, &nsIThread::Shutdown)));
++
++  csmInstance = nullptr;
 +}
 +
 +// static
@@ -4887,7 +4892,7 @@ diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageM
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/StorageManager.cpp
-@@ -0,0 +1,767 @@
+@@ -0,0 +1,770 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -5438,7 +5443,10 @@ new file mode 100644
 +  MOZ_ASSERT(mState == Closing);
 +  MOZ_ASSERT(!mContext);
 +
-+  mIOThread->Shutdown();
++  nsCOMPtr<nsIThread> ioThread;
++  mIOThread.swap(ioThread);
++  MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(
++        NewRunnableMethod(ioThread, &nsIThread::Shutdown)));
 +}
 +
 +void
