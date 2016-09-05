@@ -23,7 +23,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
  #include "mozilla/ipc/BackgroundChild.h"
  #include "mozilla/ipc/BackgroundUtils.h"
  #include "mozilla/ipc/PBackgroundChild.h"
-+#include "mozilla/unused.h"
++#include "mozilla/Unused.h"
  #include "mozilla/Preferences.h"
 +#include "nsISupportsPrimitives.h"
  #include "nsIGlobalObject.h"
