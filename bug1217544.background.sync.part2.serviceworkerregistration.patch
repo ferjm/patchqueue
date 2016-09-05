@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  efd985b7895a7e088537ca84aa4df9214b7222d3
+# Parent  61d7a7a8937703903724e18f46b0f6ef15998e51
 Bug 1217544 - Implement one-off BackgroundSync API. Part 2: ServiceWorkerRegistration. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
@@ -79,15 +79,15 @@ diff --git a/dom/backgroundsync/BackgroundSync.h b/dom/backgroundsync/Background
 diff --git a/dom/webidl/ServiceWorkerRegistration.webidl b/dom/webidl/ServiceWorkerRegistration.webidl
 --- a/dom/webidl/ServiceWorkerRegistration.webidl
 +++ b/dom/webidl/ServiceWorkerRegistration.webidl
-@@ -27,9 +27,12 @@ interface ServiceWorkerRegistration : Ev
+@@ -25,9 +25,12 @@ interface ServiceWorkerRegistration : Ev
+ 
+   // event
    attribute EventHandler onupdatefound;
  };
  
  partial interface ServiceWorkerRegistration {
- #ifndef MOZ_SIMPLEPUSH
    [Throws, Exposed=(Window,Worker), Func="nsContentUtils::PushEnabled"]
    readonly attribute PushManager pushManager;
- #endif
 +  [Throws, Exposed=(Window,Worker),
 +   Func="backgroundsync::BackgroundSync::PrefEnabled"]
 +  readonly attribute BackgroundSync sync;
@@ -95,14 +95,14 @@ diff --git a/dom/webidl/ServiceWorkerRegistration.webidl b/dom/webidl/ServiceWor
 diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWorkerRegistration.cpp
 --- a/dom/workers/ServiceWorkerRegistration.cpp
 +++ b/dom/workers/ServiceWorkerRegistration.cpp
-@@ -30,17 +30,21 @@
+@@ -27,17 +27,21 @@
+ #include "nsISupportsPrimitives.h"
+ #include "nsPIDOMWindow.h"
+ #include "nsContentUtils.h"
+ 
+ #include "WorkerPrivate.h"
  #include "Workers.h"
  #include "WorkerScope.h"
- 
- #ifndef MOZ_SIMPLEPUSH
- #include "mozilla/dom/PushManagerBinding.h"
- #include "mozilla/dom/PushManager.h"
- #endif
  
 +#include "mozilla/dom/BackgroundSyncBinding.h"
 +#include "mozilla/dom/backgroundsync/BackgroundSync.h"
@@ -117,7 +117,7 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
  ServiceWorkerRegistration::Visible(JSContext* aCx, JSObject* aObj)
  {
    if (NS_IsMainThread()) {
-@@ -111,16 +115,19 @@ public:
+@@ -108,16 +112,19 @@ public:
    GetWaiting() override;
  
    already_AddRefed<ServiceWorker>
@@ -137,15 +137,15 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
    }
  
    // ServiceWorkerRegistrationListener
-@@ -159,32 +166,35 @@ private:
+@@ -154,27 +161,29 @@ private:
+   // instead of acquiring a new worker instance from the ServiceWorkerManager
+   // for every access. A null value is considered a cache miss.
    // These three may change to a new worker at any time.
    RefPtr<ServiceWorker> mInstallingWorker;
    RefPtr<ServiceWorker> mWaitingWorker;
    RefPtr<ServiceWorker> mActiveWorker;
  
- #ifndef MOZ_SIMPLEPUSH
    RefPtr<PushManager> mPushManager;
- #endif
 +
 +  RefPtr<backgroundsync::BackgroundSync> mBackgroundSync;
  };
@@ -156,31 +156,25 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
  NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(ServiceWorkerRegistrationMainThread)
  NS_INTERFACE_MAP_END_INHERITING(ServiceWorkerRegistration)
  
- #ifndef MOZ_SIMPLEPUSH
  NS_IMPL_CYCLE_COLLECTION_INHERITED(ServiceWorkerRegistrationMainThread,
                                     ServiceWorkerRegistration,
 -                                   mPushManager,
 +                                   mPushManager, mBackgroundSync,
                                     mInstallingWorker, mWaitingWorker, mActiveWorker);
- #else
- NS_IMPL_CYCLE_COLLECTION_INHERITED(ServiceWorkerRegistrationMainThread,
-                                    ServiceWorkerRegistration,
-+                                   mBackgroundSync,
-                                    mInstallingWorker, mWaitingWorker, mActiveWorker);
- #endif
  
  ServiceWorkerRegistrationMainThread::ServiceWorkerRegistrationMainThread(nsPIDOMWindowInner* aWindow,
                                                                           const nsAString& aScope)
    : ServiceWorkerRegistration(aWindow, aScope)
    , mListeningForEvents(false)
  {
-@@ -856,16 +866,48 @@ ServiceWorkerRegistrationMainThread::Get
+   AssertIsOnMainThread();
+@@ -841,16 +850,48 @@ ServiceWorkerRegistrationMainThread::Get
+       return nullptr;
+     }
    }
  
    RefPtr<PushManager> ret = mPushManager;
    return ret.forget();
- 
- #endif /* ! MOZ_SIMPLEPUSH */
  }
  
 +BackgroundSync*
@@ -223,7 +217,7 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
  {
  public:
    NS_DECL_ISUPPORTS_INHERITED
-@@ -908,16 +950,19 @@ public:
+@@ -893,16 +934,19 @@ public:
    }
  
    bool
@@ -243,15 +237,15 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
    };
  
    ~ServiceWorkerRegistrationWorkerThread();
-@@ -929,16 +974,18 @@ private:
+@@ -912,16 +956,18 @@ private:
+ 
+   void
    ReleaseListener(Reason aReason);
  
    WorkerPrivate* mWorkerPrivate;
    RefPtr<WorkerListener> mListener;
  
- #ifndef MOZ_SIMPLEPUSH
    RefPtr<PushManager> mPushManager;
- #endif
 +
 +  RefPtr<backgroundsync::BackgroundSync> mBackgroundSync;
  };
@@ -262,23 +256,22 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
    WorkerPrivate* mWorkerPrivate;
    nsString mScope;
    bool mListeningForEvents;
-@@ -1053,23 +1100,25 @@ NS_INTERFACE_MAP_END_INHERITING(ServiceW
+@@ -1034,22 +1080,23 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_
+ NS_INTERFACE_MAP_END_INHERITING(ServiceWorkerRegistration)
+ 
  // Expanded macros since we need special behaviour to release the proxy.
  NS_IMPL_CYCLE_COLLECTION_CLASS(ServiceWorkerRegistrationWorkerThread)
  
  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(ServiceWorkerRegistrationWorkerThread,
                                                    ServiceWorkerRegistration)
- #ifndef MOZ_SIMPLEPUSH
    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPushManager)
- #endif
+-
 +  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mBackgroundSync)
  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
  
  NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(ServiceWorkerRegistrationWorkerThread,
                                                  ServiceWorkerRegistration)
- #ifndef MOZ_SIMPLEPUSH
    NS_IMPL_CYCLE_COLLECTION_UNLINK(mPushManager)
- #endif
 +  NS_IMPL_CYCLE_COLLECTION_UNLINK(mBackgroundSync)
    tmp->ReleaseListener(RegistrationIsGoingAway);
  NS_IMPL_CYCLE_COLLECTION_UNLINK_END
@@ -288,13 +281,13 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
    : ServiceWorkerRegistration(nullptr, aScope)
    , mWorkerPrivate(aWorkerPrivate)
  {
-@@ -1363,16 +1412,27 @@ ServiceWorkerRegistrationWorkerThread::G
+@@ -1337,16 +1384,27 @@ ServiceWorkerRegistrationWorkerThread::G
+   if (!mPushManager) {
+     mPushManager = new PushManager(mScope);
    }
  
    RefPtr<PushManager> ret = mPushManager;
    return ret.forget();
- 
- #endif /* ! MOZ_SIMPLEPUSH */
  }
  
 +BackgroundSync*
