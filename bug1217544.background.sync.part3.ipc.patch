@@ -217,7 +217,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
                                                    principalInfo);
 +
 +  ref->mWorkerHolder = new BackgroundSyncHolder(ref);
-+  if (NS_WARN_IF(!ref->mWorkerHolder->HoldWorker(aWorkerPrivate))) {
++  if (NS_WARN_IF(!ref->mWorkerHolder->HoldWorker(aWorkerPrivate, Terminating))) {
 +    ref->mWorkerHolder = nullptr;
 +    return nullptr;
 +  }
@@ -588,7 +588,7 @@ new file mode 100644
 +
 +#include "BackgroundSyncChild.h"
 +
-+#include "mozilla/unused.h"
++#include "mozilla/Unused.h"
 +#include "mozilla/ipc/PBackgroundChild.h"
 +#include "nsContentUtils.h"
 +
@@ -850,7 +850,7 @@ new file mode 100644
 +
 +#include "BackgroundSyncParent.h"
 +
-+#include "mozilla/unused.h"
++#include "mozilla/Unused.h"
 +#include "mozilla/ipc/BackgroundParent.h"
 +
 +namespace mozilla {
