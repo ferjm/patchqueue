@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  484bda64ad1272e5072c6e3387ce18427798766c
+# Parent  27fb179a80f8fe0bd64a9f39620394969842fc97
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: BackgroundSyncService. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSyncChild.cpp b/dom/backgroundsync/BackgroundSyncChild.cpp
@@ -37,7 +37,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
  #include "BackgroundSyncParent.h"
 +#include "BackgroundSyncService.h"
  
- #include "mozilla/unused.h"
+ #include "mozilla/Unused.h"
  #include "mozilla/ipc/BackgroundParent.h"
  
  namespace mozilla {
@@ -1708,7 +1708,7 @@ diff --git a/dom/workers/PServiceWorkerManager.ipdl b/dom/workers/PServiceWorker
 diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
 --- a/dom/workers/ServiceWorkerManager.cpp
 +++ b/dom/workers/ServiceWorkerManager.cpp
-@@ -1031,17 +1031,17 @@ ServiceWorkerManager::SendNotificationCl
+@@ -1026,17 +1026,17 @@ ServiceWorkerManager::SendNotificationCl
  
  NS_IMETHODIMP
  ServiceWorkerManager::SendBackgroundSyncEvent(const nsACString& aOriginAttributes,
@@ -1811,7 +1811,7 @@ diff --git a/dom/workers/ServiceWorkerManagerParent.cpp b/dom/workers/ServiceWor
  #include "mozilla/dom/ServiceWorkerRegistrar.h"
  #include "mozilla/ipc/BackgroundParent.h"
  #include "mozilla/ipc/BackgroundUtils.h"
- #include "mozilla/unused.h"
+ #include "mozilla/Unused.h"
 @@ -148,22 +149,24 @@ private:
    PrincipalInfo mPrincipalInfo;
    RefPtr<Runnable> mCallback;
