@@ -206,7 +206,7 @@ new file mode 100644
 +++ b/dom/backgroundsync/tests/test_utils.js
 @@ -0,0 +1,41 @@
 +function debug(str) {
-+  console.log(str + "\n");
++  console.log(str);
 +}
 +
 +// Remove permissions and prefs when the test finishes.
