@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  093c3e7979e639561ac179da9aab2f392d452c47
+# Parent  818ec0481c02c44902c6f17479baeef2c3cc81f6
 Bug 1217544 - Implement one-off BackgroundSync API. Part 5: QuotaClient helpers. r=bkelly
 
 diff --git a/dom/cache/Context.cpp b/dom/cache/Context.cpp
@@ -154,7 +154,7 @@ new file mode 100644
 +
 +  // Executed on the initiating thread. If this ClientAction will operate
 +  // on the give storage ID then override this to return true.
-+  // XXX virtual bool MatchesStorageId
++  virtual bool MatchesStorageId(int64_t aId) const { return false; }
 +
 +  NS_INLINE_DECL_REFCOUNTING(ClientAction)
 +
@@ -182,7 +182,7 @@ diff --git a/dom/quota/ClientContext.cpp b/dom/quota/ClientContext.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/quota/ClientContext.cpp
-@@ -0,0 +1,1243 @@
+@@ -0,0 +1,1248 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -725,7 +725,12 @@ new file mode 100644
 +    return rv;
 +  }
 +
-+  // XXX MatchesCacheId
++  virtual bool
++  MatchesStorageId(int64_t aId) const override
++  {
++    NS_ASSERT_OWNINGTHREAD(ClientActionRunnable);
++    return mAction->MatchesStorageId(aId);
++  }
 +
 +  virtual void
 +  Cancel() override
@@ -734,7 +739,8 @@ new file mode 100644
 +    mAction->CancelOnInitiatingThread();
 +  }
 +
-+  virtual void Resolve(nsresult aRv) override
++  virtual void
++  Resolve(nsresult aRv) override
 +  {
 +    MOZ_ASSERT(mTarget == NS_GetCurrentThread());
 +    MOZ_ASSERT(mState == STATE_RUNNING);
@@ -1113,15 +1119,14 @@ new file mode 100644
 +  }
 +}
 +
-+/* XXX
 +void
-+ClientContext::CancelForCacheId(CacheId aCacheId)
++ClientContext::CancelForStorageId(int64_t aId)
 +{
 +  NS_ASSERT_OWNINGTHREAD(Context);
 +
 +  // Remove matching pending actions
 +  for (int32_t i = mPendingActions.Length() - 1; i >= 0; --i) {
-+    if (mPendingActions[i].mAction->MatchesCacheId(aCacheId)) {
++    if (mPendingActions[i].mAction->MatchesStorageId(aId)) {
 +      mPendingActions.RemoveElementAt(i);
 +    }
 +  }
@@ -1130,11 +1135,11 @@ new file mode 100644
 +  ActivityList::ForwardIterator iter(mActivityList);
 +  while (iter.HasMore()) {
 +    Activity* activity = iter.GetNext();
-+    if (activity->MatchesCacheId(aCacheId)) {
++    if (activity->MatchesStorageId(aId)) {
 +      activity->Cancel();
 +    }
 +  }
-+}*/
++}
 +
 +ClientContext::~ClientContext()
 +{
@@ -1430,7 +1435,7 @@ diff --git a/dom/quota/ClientContext.h b/dom/quota/ClientContext.h
 new file mode 100644
 --- /dev/null
 +++ b/dom/quota/ClientContext.h
-@@ -0,0 +1,256 @@
+@@ -0,0 +1,257 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -1544,8 +1549,7 @@ new file mode 100644
 +  {
 +  public:
 +    virtual void Cancel() = 0;
-+    // XXX
-+    // virtual bool MatchesCacheId(CacheId aCacheId) const = 0;
++    virtual bool MatchesStorageId(int64_t aId) const = 0;
 +  };
 +
 +  // Create a ClientContext. The given ClientAction will run on the QuotaManager
@@ -1577,9 +1581,11 @@ new file mode 100644
 +  // there are no more ClientActions to process.
 +  void AllowToClose();
 +
-+  //XXX Cancel any ClientActions running or waiting to run that operate on the
++  // Cancel any ClientActions running or waiting to run that operate on the
 +  // given storage ID.
 +  //
++  // Only callable from the thread that created the ClientContext.
++  void CancelForStorageId(int64_t aId);
 +
 +  void AddActivity(Activity* aActivity);
 +  void RemoveActivity(Activity* aActivity);
