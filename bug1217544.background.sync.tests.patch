@@ -1,12 +1,12 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  888065737f073c38462d918fe7ba0b9ee8fc5574
+# Parent  163df56e617fe897305b28f31756966f2b8433e3
 Bug 1217544 - Implement one-off BackgroundSync API. Tests. r=baku
 
 diff --git a/dom/backgroundsync/moz.build b/dom/backgroundsync/moz.build
 --- a/dom/backgroundsync/moz.build
 +++ b/dom/backgroundsync/moz.build
-@@ -29,16 +29,20 @@ UNIFIED_SOURCES += [
+@@ -27,16 +27,20 @@ UNIFIED_SOURCES += [
      'StorageManagerId.cpp'
  ]
  
