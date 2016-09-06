@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  dcfae3e504b3e53cdbb87ba4a759697466e7c7f4
+# Parent  c9b11324601f719b787c74b9287db2fef395774f
 Bug 1217544 - Implement one-off BackgroundSync API. Part 5: Storage. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
@@ -20,7 +20,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
  #include "mozilla/ipc/BackgroundChild.h"
  #include "mozilla/ipc/BackgroundUtils.h"
  #include "mozilla/ipc/PBackgroundChild.h"
- #include "mozilla/unused.h"
+ #include "mozilla/Unused.h"
  #include "mozilla/Preferences.h"
  #include "nsISupportsPrimitives.h"
  #include "nsIGlobalObject.h"
@@ -6238,7 +6238,7 @@ diff --git a/dom/quota/Client.h b/dom/quota/Client.h
 diff --git a/ipc/glue/BackgroundChildImpl.cpp b/ipc/glue/BackgroundChildImpl.cpp
 --- a/ipc/glue/BackgroundChildImpl.cpp
 +++ b/ipc/glue/BackgroundChildImpl.cpp
-@@ -525,18 +525,19 @@ BackgroundChildImpl::DeallocPGamepadTest
+@@ -508,18 +508,19 @@ BackgroundChildImpl::DeallocPGamepadTest
  #endif
    return true;
  }
@@ -6263,7 +6263,7 @@ diff --git a/ipc/glue/BackgroundChildImpl.cpp b/ipc/glue/BackgroundChildImpl.cpp
 diff --git a/ipc/glue/BackgroundChildImpl.h b/ipc/glue/BackgroundChildImpl.h
 --- a/ipc/glue/BackgroundChildImpl.h
 +++ b/ipc/glue/BackgroundChildImpl.h
-@@ -181,17 +181,17 @@ protected:
+@@ -175,17 +175,17 @@ protected:
  
    virtual PGamepadTestChannelChild*
    AllocPGamepadTestChannelChild() override;
@@ -6285,7 +6285,7 @@ diff --git a/ipc/glue/BackgroundChildImpl.h b/ipc/glue/BackgroundChildImpl.h
 diff --git a/ipc/glue/BackgroundParentImpl.cpp b/ipc/glue/BackgroundParentImpl.cpp
 --- a/ipc/glue/BackgroundParentImpl.cpp
 +++ b/ipc/glue/BackgroundParentImpl.cpp
-@@ -969,33 +969,39 @@ BackgroundParentImpl::DeallocPGamepadTes
+@@ -946,33 +946,39 @@ BackgroundParentImpl::DeallocPGamepadTes
  #ifdef MOZ_GAMEPAD
    MOZ_ASSERT(aActor);
    RefPtr<dom::GamepadTestChannelParent> parent =
@@ -6332,7 +6332,7 @@ diff --git a/ipc/glue/BackgroundParentImpl.cpp b/ipc/glue/BackgroundParentImpl.c
 diff --git a/ipc/glue/BackgroundParentImpl.h b/ipc/glue/BackgroundParentImpl.h
 --- a/ipc/glue/BackgroundParentImpl.h
 +++ b/ipc/glue/BackgroundParentImpl.h
-@@ -212,17 +212,17 @@ protected:
+@@ -203,17 +203,17 @@ protected:
  
    virtual PGamepadTestChannelParent*
    AllocPGamepadTestChannelParent() override;
@@ -6372,7 +6372,7 @@ diff --git a/ipc/glue/IPCMessageUtils.h b/ipc/glue/IPCMessageUtils.h
  #include "mozilla/TimeStamp_windows.h"
  #endif
  #include "mozilla/TypeTraits.h"
-@@ -781,11 +782,20 @@ struct ParamTraits<mozilla::Maybe<T>>
+@@ -820,11 +821,20 @@ struct ParamTraits<mozilla::Maybe<T>>
        *result = mozilla::Some(mozilla::Move(tmp));
      } else {
        *result = mozilla::Nothing();
@@ -6396,7 +6396,7 @@ diff --git a/ipc/glue/IPCMessageUtils.h b/ipc/glue/IPCMessageUtils.h
 diff --git a/ipc/glue/PBackground.ipdl b/ipc/glue/PBackground.ipdl
 --- a/ipc/glue/PBackground.ipdl
 +++ b/ipc/glue/PBackground.ipdl
-@@ -109,17 +109,17 @@ parent:
+@@ -105,17 +105,17 @@ parent:
    async PQuota();
  
    async PFileSystemRequest(FileSystemParams params);
