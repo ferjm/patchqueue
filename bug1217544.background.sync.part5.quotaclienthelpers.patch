@@ -294,7 +294,7 @@ new file mode 100644
 +    , mInitAction(aInitAction)
 +    , mInitiatingThread(NS_GetCurrentThread())
 +    , mResult(NS_OK)
-+    , mState(STATE_INIT)
++    , mState(eInit)
 +    , mCanceled(false)
 +  {
 +    MOZ_ASSERT(mContext);
@@ -308,12 +308,12 @@ new file mode 100644
 +  nsresult Dispatch()
 +  {
 +    NS_ASSERT_OWNINGTHREAD(QuotaInitRunnable);
-+    MOZ_ASSERT(mState == STATE_INIT);
++    MOZ_ASSERT(mState == eInit);
 +
-+    mState = STATE_GET_INFO;
++    mState = eGetInfo;
 +    nsresult rv = NS_DispatchToMainThread(this, nsIThread::DISPATCH_NORMAL);
 +    if (NS_WARN_IF(NS_FAILED(rv))) {
-+      mState = STATE_COMPLETE;
++      mState = eComplete;
 +      Clear();
 +    }
 +
@@ -369,33 +369,33 @@ new file mode 100644
 +
 +  ~QuotaInitRunnable()
 +  {
-+    MOZ_ASSERT(mState == STATE_COMPLETE);
++    MOZ_ASSERT(mState == eComplete);
 +    MOZ_ASSERT(!mContext);
 +    MOZ_ASSERT(!mInitAction);
 +  }
 +
 +  enum State
 +  {
-+    STATE_INIT,
-+    STATE_GET_INFO,
-+    STATE_CREATE_QUOTA_MANAGER,
-+    STATE_OPEN_DIRECTORY,
-+    STATE_WAIT_FOR_DIRECTORY_LOCK,
-+    STATE_ENSURE_ORIGIN_INITIALIZED,
-+    STATE_RUN_ON_TARGET,
-+    STATE_RUNNING,
-+    STATE_COMPLETING,
-+    STATE_COMPLETE
++    eInit,
++    eGetInfo,
++    eCreateQuotaManager,
++    eOpenDirectory,
++    eWaitForDirectoryLock,
++    eEnsureOriginInitialized,
++    eRunOnTarget,
++    eRunning,
++    eCompleting,
++    eComplete
 +  };
 +
 +  void Complete(nsresult aResult)
 +  {
-+    MOZ_ASSERT(mState == STATE_RUNNING || NS_FAILED(aResult));
++    MOZ_ASSERT(mState == eRunning || NS_FAILED(aResult));
 +
 +    MOZ_ASSERT(NS_SUCCEEDED(mResult));
 +    mResult = aResult;
 +
-+    mState = STATE_COMPLETING;
++    mState = eCompleting;
 +    MOZ_ALWAYS_SUCCEEDS(
 +      mInitiatingThread->Dispatch(this, nsIThread::DISPATCH_NORMAL));
 +  }
@@ -431,14 +431,14 @@ new file mode 100644
 +ClientContext::QuotaInitRunnable::OpenDirectory()
 +{
 +  NS_ASSERT_OWNINGTHREAD(QuotaInitRunnable);
-+  MOZ_ASSERT(mState == STATE_CREATE_QUOTA_MANAGER ||
-+             mState == STATE_OPEN_DIRECTORY);
++  MOZ_ASSERT(mState == eCreateQuotaManager ||
++             mState == eOpenDirectory);
 +  MOZ_ASSERT(QuotaManager::Get());
 +
 +  // QuotaManager::OpenDirectory() will hold a reference to us as
 +  // a listener. We will then get DirectoryLockAcquired() on the owning
 +  // thread when it is safe to access our storage directory.
-+  mState = STATE_WAIT_FOR_DIRECTORY_LOCK;
++  mState = eWaitForDirectoryLock;
 +  QuotaManager::Get()->OpenDirectory(PERSISTENCE_TYPE_DEFAULT,
 +                                     mQuotaInfo.mGroup,
 +                                     mQuotaInfo.mOrigin,
@@ -452,7 +452,7 @@ new file mode 100644
 +ClientContext::QuotaInitRunnable::DirectoryLockAcquired(DirectoryLock* aLock)
 +{
 +  NS_ASSERT_OWNINGTHREAD(QuotaInitRunnable);
-+  MOZ_ASSERT(mState == STATE_WAIT_FOR_DIRECTORY_LOCK);
++  MOZ_ASSERT(mState == eWaitForDirectoryLock);
 +  MOZ_ASSERT(!mDirectoryLock);
 +
 +  mDirectoryLock = aLock;
@@ -465,7 +465,7 @@ new file mode 100644
 +  QuotaManager* qm = QuotaManager::Get();
 +  MOZ_ASSERT(qm);
 +
-+  mState = STATE_ENSURE_ORIGIN_INITIALIZED;
++  mState = eEnsureOriginInitialized;
 +  nsresult rv = qm->IOThread()->Dispatch(this, nsIThread::DISPATCH_NORMAL);
 +  if (NS_WARN_IF(NS_FAILED(rv))) {
 +    Complete(rv);
@@ -477,7 +477,7 @@ new file mode 100644
 +ClientContext::QuotaInitRunnable::DirectoryLockFailed()
 +{
 +  NS_ASSERT_OWNINGTHREAD(QuotaInitRunnable);
-+  MOZ_ASSERT(mState == STATE_WAIT_FOR_DIRECTORY_LOCK);
++  MOZ_ASSERT(mState == eWaitForDirectoryLock);
 +  MOZ_ASSERT(!mDirectoryLock);
 +
 +  NS_WARNING("Failed to acquire a directory lock!");
@@ -545,7 +545,7 @@ new file mode 100644
 +
 +  switch(mState) {
 +    // -----------------------------------
-+    case STATE_GET_INFO:
++    case eGetInfo:
 +    {
 +      MOZ_ASSERT(NS_IsMainThread());
 +
@@ -565,13 +565,13 @@ new file mode 100644
 +        break;
 +      }
 +
-+      mState = STATE_CREATE_QUOTA_MANAGER;
++      mState = eCreateQuotaManager;
 +      MOZ_ALWAYS_SUCCEEDS(
 +        mInitiatingThread->Dispatch(this, nsIThread::DISPATCH_NORMAL));
 +      break;
 +    }
 +    // ----------------------------------
-+    case STATE_CREATE_QUOTA_MANAGER:
++    case eCreateQuotaManager:
 +    {
 +      NS_ASSERT_OWNINGTHREAD(QuotaInitRunnable);
 +
@@ -585,12 +585,12 @@ new file mode 100644
 +        return NS_OK;
 +      }
 +
-+      mState = STATE_OPEN_DIRECTORY;
++      mState = eOpenDirectory;
 +      QuotaManager::GetOrCreate(this);
 +      break;
 +    }
 +    // ----------------------------------
-+    case STATE_OPEN_DIRECTORY:
++    case eOpenDirectory:
 +    {
 +      NS_ASSERT_OWNINGTHREAD(QuotaInitRunnable);
 +
@@ -603,7 +603,7 @@ new file mode 100644
 +      break;
 +    }
 +    // ----------------------------------
-+    case STATE_ENSURE_ORIGIN_INITIALIZED:
++    case eEnsureOriginInitialized:
 +    {
 +      AssertIsOnIOThread();
 +
@@ -625,18 +625,18 @@ new file mode 100644
 +        break;
 +      }
 +
-+      mState = STATE_RUN_ON_TARGET;
++      mState = eRunOnTarget;
 +
 +      MOZ_ALWAYS_SUCCEEDS(
 +        mTarget->Dispatch(this, nsIThread::DISPATCH_NORMAL));
 +      break;
 +    }
 +    // -------------------
-+    case STATE_RUN_ON_TARGET:
++    case eRunOnTarget:
 +    {
 +      MOZ_ASSERT(NS_GetCurrentThread() == mTarget);
 +
-+      mState = STATE_RUNNING;
++      mState = eRunning;
 +
 +      // Execute the provided initialization ClientAction. The ClientAction must
 +      // Resolve() before returning.
@@ -655,12 +655,12 @@ new file mode 100644
 +      break;
 +    }
 +    // -------------------
-+    case STATE_COMPLETING:
++    case eCompleting:
 +    {
 +      NS_ASSERT_OWNINGTHREAD(QuotaInitRunnable);
 +      mInitAction->CompleteOnInitiatingThread(mResult);
 +      mContext->OnQuotaInit(mResult, mQuotaInfo, mDirectoryLock.forget());
-+      mState = STATE_COMPLETE;
++      mState = eComplete;
 +
 +      // Explicitly cleanup here as the destructor could fire on any of
 +      // the threads we have bounced through.
@@ -668,7 +668,7 @@ new file mode 100644
 +      break;
 +    }
 +    // -----
-+    case STATE_WAIT_FOR_DIRECTORY_LOCK:
++    case eWaitForDirectoryLock:
 +    default:
 +    {
 +      MOZ_CRASH("unexpected state in QuotaInitRunnable");
@@ -699,7 +699,7 @@ new file mode 100644
 +    , mAction(aAction)
 +    , mQuotaInfo(aQuotaInfo)
 +    , mInitiatingThread(NS_GetCurrentThread())
-+    , mState(STATE_INIT)
++    , mState(eInit)
 +    , mResult(NS_OK)
 +    , mExecutingRunOnTarget(false)
 +  {
@@ -714,12 +714,12 @@ new file mode 100644
 +  nsresult Dispatch()
 +  {
 +    NS_ASSERT_OWNINGTHREAD(ClientActionRunnable);
-+    MOZ_ASSERT(mState == STATE_INIT);
++    MOZ_ASSERT(mState == eInit);
 +
-+    mState = STATE_RUN_ON_TARGET;
++    mState = eRunOnTarget;
 +    nsresult rv = mTarget->Dispatch(this, nsIEventTarget::DISPATCH_NORMAL);
 +    if (NS_WARN_IF(NS_FAILED(rv))) {
-+      mState = STATE_COMPLETE;
++      mState = eComplete;
 +      Clear();
 +    }
 +    return rv;
@@ -743,14 +743,14 @@ new file mode 100644
 +  Resolve(nsresult aRv) override
 +  {
 +    MOZ_ASSERT(mTarget == NS_GetCurrentThread());
-+    MOZ_ASSERT(mState == STATE_RUNNING);
++    MOZ_ASSERT(mState == eRunning);
 +
 +    mResult = aRv;
 +
 +    // We ultimately must complete on the initiating thread, but bounce through
 +    // the current thread again to ensure that we don't destroy objects and
 +    // state out from under the currently running action's stack.
-+    mState = STATE_RESOLVING;
++    mState = eResolving;
 +
 +    // If we were resolved synchronously within ClientAction::RunOnTarget()
 +    // then we can avoid a thread bounce and just resolve once RunOnTarget()
@@ -769,7 +769,7 @@ new file mode 100644
 +private:
 +  ~ClientActionRunnable()
 +  {
-+    MOZ_ASSERT(mState == STATE_COMPLETE);
++    MOZ_ASSERT(mState == eComplete);
 +    MOZ_ASSERT(!mContext);
 +    MOZ_ASSERT(!mAction);
 +  }
@@ -786,12 +786,12 @@ new file mode 100644
 +
 +  enum State
 +  {
-+    STATE_INIT,
-+    STATE_RUN_ON_TARGET,
-+    STATE_RUNNING,
-+    STATE_RESOLVING,
-+    STATE_COMPLETING,
-+    STATE_COMPLETE
++    eInit,
++    eRunOnTarget,
++    eRunning,
++    eResolving,
++    eCompleting,
++    eComplete
 +  };
 +
 +  RefPtr<ClientContext> mContext;
@@ -852,7 +852,7 @@ new file mode 100644
 +{
 +  switch(mState) {
 +    // ----------------------
-+    case STATE_RUN_ON_TARGET:
++    case eRunOnTarget:
 +    {
 +      MOZ_ASSERT(NS_GetCurrentThread() == mTarget);
 +      MOZ_ASSERT(!mExecutingRunOnTarget);
@@ -862,7 +862,7 @@ new file mode 100644
 +      AutoRestore<bool> executingRunOnTarget(mExecutingRunOnTarget);
 +      mExecutingRunOnTarget = true;
 +
-+      mState = STATE_RUNNING;
++      mState = eRunning;
 +      mAction->RunOnTarget(this, mQuotaInfo, mData);
 +
 +      mData = nullptr;
@@ -870,7 +870,7 @@ new file mode 100644
 +      // Resolve was called synchronously from RunOnTarget(). We can
 +      // immediately move to completing now since we are sure RunOnTarget()
 +      // completed.
-+      if (mState == STATE_RESOLVING) {
++      if (mState == eResolving) {
 +        // Use recursion instead of switch case fall-through...  Seems slightly
 +        // easier to understand.
 +        Run();
@@ -879,13 +879,13 @@ new file mode 100644
 +      break;
 +    }
 +    // -----------------
-+    case STATE_RESOLVING:
++    case eResolving:
 +    {
 +      MOZ_ASSERT(NS_GetCurrentThread() == mTarget);
 +      // The call to ClientAction::RunOnTarget() must have returned now if we
 +      // are running on the target thread again.  We may now proceed with
 +      // completion.
-+      mState = STATE_COMPLETING;
++      mState = eCompleting;
 +      // Shutdown must be delayed until all ClientContexts are destroyed. Crash
 +      // for this invariant violation.
 +      MOZ_ALWAYS_SUCCEEDS(
@@ -893,11 +893,11 @@ new file mode 100644
 +      break;
 +    }
 +    // -------------------
-+    case STATE_COMPLETING:
++    case eCompleting:
 +    {
 +      NS_ASSERT_OWNINGTHREAD(ClientActionRunnable);
 +      mAction->CompleteOnInitiatingThread(mResult);
-+      mState = STATE_COMPLETE;
++      mState = eComplete;
 +      // Explicitly cleanup here as the destructor could fire on any of the
 +      // threads we have bounced through.
 +      Clear();
