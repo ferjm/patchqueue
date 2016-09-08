@@ -7,6 +7,7 @@ bug1217544.background.sync.part6.managerid.patch
 bug1217544.background.sync.part7.onlineobserver.patch
 bug1217544.background.sync.part8.service.patch
 bug1217544.background.sync.tests.patch
+bug1300844.cache.quotaclient.helpers.patch
 debug.patch
 try-all
 attachment.cgi?id=8743366
