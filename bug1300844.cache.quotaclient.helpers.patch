@@ -1901,7 +1901,33 @@ diff --git a/dom/cache/Manager.cpp b/dom/cache/Manager.cpp
    }
  
    for (uint32_t i = 0; i < mBodyIdRefs.Length(); ++i) {
-@@ -1524,26 +1524,26 @@ Manager::ReleaseCacheId(CacheId aCacheId
+@@ -1481,16 +1481,25 @@ Manager::RemoveContext(Context* aContext
+   mContext = nullptr;
+ 
+   // Once the context is gone, we can immediately remove ourself from the
+   // Factory list.  We don't need to block shutdown by staying in the list
+   // any more.
+   Factory::Remove(this);
+ }
+ 
++already_AddRefed<nsIPrincipal>
++Manager::GetPrincipal() const
++{
++  MOZ_ASSERT(NS_IsMainThread());
++
++  nsCOMPtr<nsIPrincipal> ref = mManagerId->Principal();
++  return ref.forget();
++}
++
+ void
+ Manager::NoteClosing()
+ {
+   NS_ASSERT_OWNINGTHREAD(Manager);
+   // This can be called more than once legitimately through different paths.
+   mState = Closing;
+ }
+ 
+@@ -1524,26 +1533,26 @@ Manager::ReleaseCacheId(CacheId aCacheId
    for (uint32_t i = 0; i < mCacheIdRefs.Length(); ++i) {
      if (mCacheIdRefs[i].mCacheId == aCacheId) {
        DebugOnly<uint32_t> oldRef = mCacheIdRefs[i].mCount;
@@ -1932,7 +1958,7 @@ diff --git a/dom/cache/Manager.cpp b/dom/cache/Manager.cpp
        return;
      }
    }
-@@ -1573,24 +1573,24 @@ Manager::ReleaseBodyId(const nsID& aBody
+@@ -1573,24 +1582,24 @@ Manager::ReleaseBodyId(const nsID& aBody
    for (uint32_t i = 0; i < mBodyIdRefs.Length(); ++i) {
      if (mBodyIdRefs[i].mBodyId == aBodyId) {
        DebugOnly<uint32_t> oldRef = mBodyIdRefs[i].mCount;
@@ -1960,7 +1986,7 @@ diff --git a/dom/cache/Manager.cpp b/dom/cache/Manager.cpp
        return;
      }
    }
-@@ -1628,23 +1628,23 @@ Manager::ExecuteCacheOp(Listener* aListe
+@@ -1628,23 +1637,23 @@ Manager::ExecuteCacheOp(Listener* aListe
    MOZ_ASSERT(aListener);
    MOZ_ASSERT(aOpArgs.type() != CacheOpArgs::TCachePutAllArgs);
  
@@ -1986,7 +2012,7 @@ diff --git a/dom/cache/Manager.cpp b/dom/cache/Manager.cpp
      case CacheOpArgs::TCacheMatchAllArgs:
        action = new CacheMatchAllAction(this, listenerId, aCacheId,
                                         aOpArgs.get_CacheMatchAllArgs(),
-@@ -1672,23 +1672,23 @@ Manager::ExecuteStorageOp(Listener* aLis
+@@ -1672,23 +1681,23 @@ Manager::ExecuteStorageOp(Listener* aLis
    NS_ASSERT_OWNINGTHREAD(Manager);
    MOZ_ASSERT(aListener);
  
@@ -2012,7 +2038,7 @@ diff --git a/dom/cache/Manager.cpp b/dom/cache/Manager.cpp
        break;
      case CacheOpArgs::TStorageHasArgs:
        action = new StorageHasAction(this, listenerId, aNamespace,
-@@ -1721,24 +1721,24 @@ Manager::ExecutePutAll(Listener* aListen
+@@ -1721,24 +1730,24 @@ Manager::ExecutePutAll(Listener* aListen
    NS_ASSERT_OWNINGTHREAD(Manager);
    MOZ_ASSERT(aListener);
  
@@ -2041,7 +2067,7 @@ diff --git a/dom/cache/Manager.cpp b/dom/cache/Manager.cpp
    : mManagerId(aManagerId)
    , mIOThread(aIOThread)
    , mContext(nullptr)
-@@ -1763,27 +1763,27 @@ Manager::~Manager()
+@@ -1763,27 +1772,27 @@ Manager::~Manager()
    MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(NewRunnableMethod(ioThread, &nsIThread::Shutdown)));
  }
  
@@ -2076,7 +2102,7 @@ diff --git a/dom/cache/Manager.cpp b/dom/cache/Manager.cpp
  {
    NS_ASSERT_OWNINGTHREAD(Manager);
  
-@@ -1792,42 +1792,42 @@ Manager::Shutdown()
+@@ -1792,42 +1801,42 @@ Manager::Shutdown()
    // calls Shutdown().
    if (mShuttingDown) {
      return;
@@ -2125,7 +2151,7 @@ diff --git a/dom/cache/Manager.cpp b/dom/cache/Manager.cpp
  {
    NS_ASSERT_OWNINGTHREAD(Manager);
  
-@@ -1904,41 +1904,41 @@ Manager::NoteOrphanedBodyIdList(const ns
+@@ -1904,41 +1913,41 @@ Manager::NoteOrphanedBodyIdList(const ns
  
    for (uint32_t i = 0; i < aDeletedBodyIdList.Length(); ++i) {
      if (!SetBodyIdOrphanedIfRefed(aDeletedBodyIdList[i])) {
@@ -2306,6 +2332,126 @@ diff --git a/dom/cache/Manager.h b/dom/cache/Manager.h
        : mId(UINT64_MAX)
        , mListener(nullptr)
      {
+diff --git a/dom/cache/StreamList.cpp b/dom/cache/StreamList.cpp
+--- a/dom/cache/StreamList.cpp
++++ b/dom/cache/StreamList.cpp
+@@ -2,25 +2,24 @@
+ /* vim: set ts=8 sts=2 et sw=2 tw=80: */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "mozilla/dom/cache/StreamList.h"
+ 
+ #include "mozilla/dom/cache/CacheStreamControlParent.h"
+-#include "mozilla/dom/cache/Context.h"
+ #include "mozilla/dom/cache/Manager.h"
+ #include "nsIInputStream.h"
+ 
+ namespace mozilla {
+ namespace dom {
+ namespace cache {
+ 
+-StreamList::StreamList(Manager* aManager, Context* aContext)
++StreamList::StreamList(Manager* aManager, ClientContext* aContext)
+   : mManager(aManager)
+   , mContext(aContext)
+   , mCacheId(INVALID_CACHE_ID)
+   , mStreamControl(nullptr)
+   , mActivated(false)
+ {
+   MOZ_ASSERT(mManager);
+   mContext->AddActivity(this);
+@@ -145,17 +144,17 @@ StreamList::CloseAll()
+ void
+ StreamList::Cancel()
+ {
+   NS_ASSERT_OWNINGTHREAD(StreamList);
+   CloseAll();
+ }
+ 
+ bool
+-StreamList::MatchesCacheId(CacheId aCacheId) const
++StreamList::MatchesStorageId(int64_t aCacheId) const
+ {
+   NS_ASSERT_OWNINGTHREAD(StreamList);
+   return aCacheId == mCacheId;
+ }
+ 
+ StreamList::~StreamList()
+ {
+   NS_ASSERT_OWNINGTHREAD(StreamList);
+diff --git a/dom/cache/StreamList.h b/dom/cache/StreamList.h
+--- a/dom/cache/StreamList.h
++++ b/dom/cache/StreamList.h
+@@ -2,61 +2,61 @@
+ /* vim: set ts=8 sts=2 et sw=2 tw=80: */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #ifndef mozilla_dom_cache_StreamList_h
+ #define mozilla_dom_cache_StreamList_h
+ 
+-#include "mozilla/dom/cache/Context.h"
+ #include "mozilla/dom/cache/Types.h"
++#include "mozilla/dom/quota/ClientContext.h"
+ #include "mozilla/RefPtr.h"
+ #include "nsTArray.h"
+ 
+ class nsIInputStream;
+ 
+ namespace mozilla {
+ namespace dom {
+ namespace cache {
+ 
+ class CacheStreamControlParent;
+ class Manager;
+ 
+-class StreamList final : public Context::Activity
++class StreamList final : public ClientContext::Activity
+ {
+ public:
+-  StreamList(Manager* aManager, Context* aContext);
++  StreamList(Manager* aManager, ClientContext* aContext);
+ 
+   void SetStreamControl(CacheStreamControlParent* aStreamControl);
+   void RemoveStreamControl(CacheStreamControlParent* aStreamControl);
+ 
+   void Activate(CacheId aCacheId);
+ 
+   void Add(const nsID& aId, nsIInputStream* aStream);
+   already_AddRefed<nsIInputStream> Extract(const nsID& aId);
+ 
+   void NoteClosed(const nsID& aId);
+   void NoteClosedAll();
+   void Close(const nsID& aId);
+   void CloseAll();
+ 
+-  // Context::Activity methods
++  // ClientContext::Activity methods
+   virtual void Cancel() override;
+-  virtual bool MatchesCacheId(CacheId aCacheId) const override;
++  virtual bool MatchesStorageId(int64_t aCacheId) const override;
+ 
+ private:
+   ~StreamList();
+   struct Entry
+   {
+     nsID mId;
+     nsCOMPtr<nsIInputStream> mStream;
+   };
+   RefPtr<Manager> mManager;
+-  RefPtr<Context> mContext;
++  RefPtr<ClientContext> mContext;
+   CacheId mCacheId;
+   CacheStreamControlParent* mStreamControl;
+   nsTArray<Entry> mList;
+   bool mActivated;
+ 
+ public:
+   NS_INLINE_DECL_REFCOUNTING(cache::StreamList)
+ };
 diff --git a/dom/cache/moz.build b/dom/cache/moz.build
 --- a/dom/cache/moz.build
 +++ b/dom/cache/moz.build
