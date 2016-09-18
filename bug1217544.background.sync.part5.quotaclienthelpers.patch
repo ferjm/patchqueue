@@ -1,30 +1,8 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  818ec0481c02c44902c6f17479baeef2c3cc81f6
+# Parent  620051824c1aea485515a6efef04e8e11c92856a
 Bug 1217544 - Implement one-off BackgroundSync API. Part 5: QuotaClient helpers. r=bkelly
 
-diff --git a/dom/cache/Context.cpp b/dom/cache/Context.cpp
---- a/dom/cache/Context.cpp
-+++ b/dom/cache/Context.cpp
-@@ -462,17 +462,17 @@ Context::QuotaInitRunnable::Run()
-       // Execute the provided initialization Action.  The Action must Resolve()
-       // before returning.
-       mInitAction->RunOnTarget(resolver, mQuotaInfo, mData);
-       MOZ_ASSERT(resolver->Resolved());
- 
-       mData = nullptr;
- 
-       // If the database was opened, then we should always succeed when creating
--      // the marker file.  If it wasn't opened successfully, then no need to
-+      // the marker file. If it wasn't opened successfully, then no need to
-       // create a marker file anyway.
-       if (NS_SUCCEEDED(resolver->Result())) {
-         MOZ_ALWAYS_SUCCEEDS(CreateMarkerFile(mQuotaInfo));
-       }
- 
-       break;
-     }
-     // -------------------
 diff --git a/dom/quota/ClientAction.cpp b/dom/quota/ClientAction.cpp
 new file mode 100644
 --- /dev/null
