@@ -7,7 +7,7 @@ diff --git a/storage/IncrementalVacuumConnection.cpp b/storage/IncrementalVacuum
 new file mode 100644
 --- /dev/null
 +++ b/storage/IncrementalVacuumConnection.cpp
-@@ -0,0 +1,368 @@
+@@ -0,0 +1,371 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -17,15 +17,17 @@ new file mode 100644
 +#include "IncrementalVacuumConnection.h"
 +
 +#include "mozStorageHelper.h"
++#include "nsPrintfCString.h"
 +
 +namespace mozilla {
 +namespace storage {
 +
-+using quota::QuotaObject;
++using dom::quota::QuotaObject;
 +
 +namespace {
 +
-+nsresult IncrementalVacuum(mozIStorageConnection* aConn);
++nsresult IncrementalVacuum(mozIStorageConnection* aConn,
++                           const int32_t aMaxFreePages);
 +
 +} //anonymous namespace
 +
@@ -34,8 +36,9 @@ new file mode 100644
 +                  mozIStorageConnection);
 +
 +IncrementalVacuumConnection::IncrementalVacuumConnection(
-+  mozIStorageConnection* aBase)
++  mozIStorageConnection* aBase, const int32_t aMaxFreePages)
 +  : mBase(aBase)
++  , mMaxFreePages(aMaxFreePages)
 +  , mClosed(false)
 +{
 +  MOZ_ASSERT(mBase);
@@ -59,7 +62,7 @@ new file mode 100644
 +
 +  // If we are closing here, then we must not have a transaction
 +  // open anywhere else. This should be guaranteed to succeed.
-+  MOZ_ALWAYS_SUCCEEDS(IncrementalVacuum(this));
++  MOZ_ALWAYS_SUCCEEDS(IncrementalVacuum(this, mMaxFreePages));
 +
 +  return mBase->Close();
 +}
@@ -168,7 +171,7 @@ new file mode 100644
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +  nsCOMPtr<mozIStorageConnection> wrapped =
-+    new IncrementalVacuumConnection(conn);
++    new IncrementalVacuumConnection(conn, mMaxFreePages);
 +  wrapped.forget(aConnectionOut);
 +
 +  return rv;
@@ -309,7 +312,7 @@ new file mode 100644
 +namespace {
 +
 +nsresult
-+IncrementalVacuum(mozIStorageConnection* aConn)
++IncrementalVacuum(mozIStorageConnection* aConn, const int32_t aMaxFreePages)
 +{
 +  // Determine how much free space is in the database.
 +  nsCOMPtr<mozIStorageStatement> state;
@@ -338,13 +341,13 @@ new file mode 100644
 +  //
 +  // So only proceed with releasing pages if we have more than our constant
 +  // threshold.
-+  if (freePages <= kMaxFreePages) {
++  if (freePages <= aMaxFreePages) {
 +    return NS_OK;
 +  }
 +
 +  // Release the excess pages back to the sqlite VFS.  This may also release
 +  // chunks of multiple pages back to the OS.
-+  int32_t pagesToRelease = freePages - kMaxFreePages;
++  int32_t pagesToRelease = freePages - aMaxFreePages;
 +
 +  rv = aConn->ExecuteSimpleSQL(nsPrintfCString(
 +    "PRAGMA incremental_vacuum(%d);", pagesToRelease
@@ -366,7 +369,7 @@ new file mode 100644
 +  rv = state->GetInt32(0, &freePages);
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
-+  MOZ_ASSERT(freePages <= kMaxFreePages);
++  MOZ_ASSERT(freePages <= aMaxFreePages);
 +#endif
 +
 +  return NS_OK;
@@ -380,7 +383,7 @@ diff --git a/storage/IncrementalVacuumConnection.h b/storage/IncrementalVacuumCo
 new file mode 100644
 --- /dev/null
 +++ b/storage/IncrementalVacuumConnection.h
-@@ -0,0 +1,34 @@
+@@ -0,0 +1,36 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -398,12 +401,14 @@ new file mode 100644
 +class IncrementalVacuumConnection final : public mozIStorageConnection
 +{
 +public:
-+  explicit IncrementalVacuumConnection(mozIStorageConnection* aBase);
++  IncrementalVacuumConnection(mozIStorageConnection* aBase,
++                              const int32_t aMaxFreePages);
 +
 +private:
 +  ~IncrementalVacuumConnection();
 +
 +  nsCOMPtr<mozIStorageConnection> mBase;
++  int32_t mMaxFreePages;
 +  bool mClosed;
 +
 +  NS_DECL_ISUPPORTS
@@ -418,7 +423,16 @@ new file mode 100644
 diff --git a/storage/moz.build b/storage/moz.build
 --- a/storage/moz.build
 +++ b/storage/moz.build
-@@ -48,16 +48,17 @@ EXPORTS.mozilla.storage += [
+@@ -40,24 +40,26 @@ EXPORTS += [
+ 
+ EXPORTS.mozilla += [
+     'storage.h',
+ ]
+ 
+ # NOTE When adding something to this list, you probably need to add it to the
+ #      storage.h file too.
+ EXPORTS.mozilla.storage += [
++    'IncrementalVacuumConnection.h',
      'StatementCache.h',
      'Variant.h',
      'Variant_inl.h',
@@ -448,7 +462,7 @@ diff --git a/storage/storage.h b/storage/storage.h
  //// Native Language Helpers
  
  #include "mozStorageHelper.h"
-+#include "mozilla/storage/IncrementalVaccumConnection.h"
++#include "mozilla/storage/IncrementalVacuumConnection.h"
  #include "mozilla/storage/StatementCache.h"
  #include "mozilla/storage/Variant.h"
  
