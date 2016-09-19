@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  48258ff0abbb8e2f543ad01e1479a6f956f15185
+# Parent  2265a4551db45779deba50e0a2c867d09b8fe82d
 Bug 1217544 - Implement one-off BackgroundSync API. Part 5: Storage. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
@@ -697,20 +697,20 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
 +    , mOp(aOp)
 +  {}
 +
-+  nsID RequestId()
++  nsID RequestId() const
 +  {
 +    return mRequestId;
 +  }
 +
-+  SyncOp Op()
++  SyncOp Op() const
 +  {
 +    return mOp;
 +  }
 +private:
 +  ~PendingRequest() {}
 +
-+  nsID mRequestId;
-+  SyncOp mOp;
++  const nsID mRequestId;
++  const SyncOp mOp;
 +};
 +
 +BackgroundSyncParent::BackgroundSyncParent(const PrincipalInfo& aPrincipalInfo)
