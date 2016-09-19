@@ -1,0 +1,455 @@
+# HG changeset patch
+# User Fernando Jimenez <ferjmoreno@gmail.com>
+# Parent  2265a4551db45779deba50e0a2c867d09b8fe82d
+Bug 1217544 - Implement one-off BackgroundSync API. Part 6: mozStorageIncrementalVacuumConnection. r=bkelly
+
+diff --git a/storage/IncrementalVacuumConnection.cpp b/storage/IncrementalVacuumConnection.cpp
+new file mode 100644
+--- /dev/null
++++ b/storage/IncrementalVacuumConnection.cpp
+@@ -0,0 +1,368 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#include "IncrementalVacuumConnection.h"
++
++#include "mozStorageHelper.h"
++
++namespace mozilla {
++namespace storage {
++
++using quota::QuotaObject;
++
++namespace {
++
++nsresult IncrementalVacuum(mozIStorageConnection* aConn);
++
++} //anonymous namespace
++
++NS_IMPL_ISUPPORTS(IncrementalVacuumConnection,
++                  mozIStorageAsyncConnection,
++                  mozIStorageConnection);
++
++IncrementalVacuumConnection::IncrementalVacuumConnection(
++  mozIStorageConnection* aBase)
++  : mBase(aBase)
++  , mClosed(false)
++{
++  MOZ_ASSERT(mBase);
++}
++
++IncrementalVacuumConnection::~IncrementalVacuumConnection()
++{
++  NS_ASSERT_OWNINGTHREAD(IncrementalVacuumConnection);
++  MOZ_ALWAYS_SUCCEEDS(Close());
++}
++
++NS_IMETHODIMP
++IncrementalVacuumConnection::Close()
++{
++  NS_ASSERT_OWNINGTHREAD(IncrementalVacuumConnection);
++
++  if (mClosed) {
++    return NS_OK;
++  }
++  mClosed = true;
++
++  // If we are closing here, then we must not have a transaction
++  // open anywhere else. This should be guaranteed to succeed.
++  MOZ_ALWAYS_SUCCEEDS(IncrementalVacuum(this));
++
++  return mBase->Close();
++}
++
++// The following methods are all boilerplate that either forward to the
++// base connection or block the method. All the async execution methods
++// are blocked because we do not use them and they would require more
++// work to wrap properly.
++
++// mozIStorageAsyncConnection methods
++
++NS_IMETHODIMP
++IncrementalVacuumConnection::AsyncClose(mozIStorageCompletionCallback*)
++{
++  // async methods are not supported.
++  return NS_ERROR_NOT_IMPLEMENTED;
++}
++
++NS_IMETHODIMP
++IncrementalVacuumConnection::AsyncClone(bool, mozIStorageCompletionCallback*)
++{
++  // async methods are not supported.
++  return NS_ERROR_NOT_IMPLEMENTED;
++}
++
++NS_IMETHODIMP
++IncrementalVacuumConnection::GetDatabaseFile(nsIFile** aFileOut)
++{
++  return mBase->GetDatabaseFile(aFileOut);
++}
++
++NS_IMETHODIMP
++IncrementalVacuumConnection::CreateAsyncStatement(
++    const nsACString&, mozIStorageAsyncStatement**)
++{
++  // async methods are not supported.
++  return NS_ERROR_NOT_IMPLEMENTED;
++}
++
++NS_IMETHODIMP
++IncrementalVacuumConnection::ExecuteAsync(mozIStorageBaseStatement**, uint32_t,
++                                          mozIStorageStatementCallback*,
++                                          mozIStoragePendingStatement**)
++{
++  // async methods are not supported.
++  return NS_ERROR_NOT_IMPLEMENTED;
++}
++
++NS_IMETHODIMP
++IncrementalVacuumConnection::ExecuteSimpleSQLAsync(const nsACString&,
++                                                   mozIStorageStatementCallback*,
++                                                   mozIStoragePendingStatement**)
++{
++  // async methods are not supported.
++  return NS_ERROR_NOT_IMPLEMENTED;
++}
++
++NS_IMETHODIMP
++IncrementalVacuumConnection::CreateFunction(const nsACString& aFunctionName,
++                                            int32_t aNumArguments,
++                                            mozIStorageFunction* aFunction)
++{
++  // async methods are not supported.
++  return NS_ERROR_NOT_IMPLEMENTED;
++}
++
++NS_IMETHODIMP
++IncrementalVacuumConnection::CreateAggregateFunction(const nsACString& aFunctionName,
++                                                     int32_t aNumArguments,
++                                                     mozIStorageAggregateFunction* aFunction)
++{
++  return mBase->CreateAggregateFunction(aFunctionName, aNumArguments,
++                                        aFunction);
++}
++
++NS_IMETHODIMP
++IncrementalVacuumConnection::RemoveFunction(
++    const nsACString& aFunctionName)
++{
++  return mBase->RemoveFunction(aFunctionName);
++}
++
++NS_IMETHODIMP
++IncrementalVacuumConnection::SetProgressHandler(int32_t aGranularity,
++                                                mozIStorageProgressHandler* aHandler,
++                                                mozIStorageProgressHandler** aHandlerOut)
++{
++  return mBase->SetProgressHandler(aGranularity, aHandler, aHandlerOut);
++}
++
++NS_IMETHODIMP
++IncrementalVacuumConnection::RemoveProgressHandler(
++    mozIStorageProgressHandler** aHandlerOut)
++{
++  return mBase->RemoveProgressHandler(aHandlerOut);
++}
++
++// mozIStorageConnection methods
++
++NS_IMETHODIMP
++IncrementalVacuumConnection::Clone(bool aReadOnly,
++                                   mozIStorageConnection** aConnectionOut)
++{
++  nsCOMPtr<mozIStorageConnection> conn;
++  nsresult rv = mBase->Clone(aReadOnly, getter_AddRefs(conn));
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  nsCOMPtr<mozIStorageConnection> wrapped =
++    new IncrementalVacuumConnection(conn);
++  wrapped.forget(aConnectionOut);
++
++  return rv;
++}
++
++NS_IMETHODIMP
++IncrementalVacuumConnection::GetDefaultPageSize(int32_t* aSizeOut)
++{
++  return mBase->GetDefaultPageSize(aSizeOut);
++}
++
++NS_IMETHODIMP
++IncrementalVacuumConnection::GetConnectionReady(bool* aReadyOut)
++{
++  return mBase->GetConnectionReady(aReadyOut);
++}
++
++NS_IMETHODIMP
++IncrementalVacuumConnection::GetLastInsertRowID(int64_t* aRowIdOut)
++{
++  return mBase->GetLastInsertRowID(aRowIdOut);
++}
++
++NS_IMETHODIMP
++IncrementalVacuumConnection::GetAffectedRows(int32_t* aCountOut)
++{
++  return mBase->GetAffectedRows(aCountOut);
++}
++
++NS_IMETHODIMP
++IncrementalVacuumConnection::GetLastError(int32_t* aErrorOut)
++{
++  return mBase->GetLastError(aErrorOut);
++}
++
++NS_IMETHODIMP
++IncrementalVacuumConnection::GetLastErrorString(nsACString& aErrorOut)
++{
++  return mBase->GetLastErrorString(aErrorOut);
++}
++
++NS_IMETHODIMP
++IncrementalVacuumConnection::GetSchemaVersion(int32_t* aVersionOut)
++{
++  return mBase->GetSchemaVersion(aVersionOut);
++}
++
++NS_IMETHODIMP
++IncrementalVacuumConnection::SetSchemaVersion(int32_t aVersion)
++{
++  return mBase->SetSchemaVersion(aVersion);
++}
++
++NS_IMETHODIMP
++IncrementalVacuumConnection::CreateStatement(const nsACString& aQuery,
++                                             mozIStorageStatement** aStatementOut)
++{
++  return mBase->CreateStatement(aQuery, aStatementOut);
++}
++
++NS_IMETHODIMP
++IncrementalVacuumConnection::ExecuteSimpleSQL(const nsACString& aQuery)
++{
++  return mBase->ExecuteSimpleSQL(aQuery);
++}
++
++NS_IMETHODIMP
++IncrementalVacuumConnection::TableExists(const nsACString& aTableName,
++                                         bool* aExistsOut)
++{
++  return mBase->TableExists(aTableName, aExistsOut);
++}
++
++NS_IMETHODIMP
++IncrementalVacuumConnection::IndexExists(const nsACString& aIndexName,
++                                         bool* aExistsOut)
++{
++  return mBase->IndexExists(aIndexName, aExistsOut);
++}
++
++NS_IMETHODIMP
++IncrementalVacuumConnection::GetTransactionInProgress(bool* aResultOut)
++{
++  return mBase->GetTransactionInProgress(aResultOut);
++}
++
++NS_IMETHODIMP
++IncrementalVacuumConnection::BeginTransaction()
++{
++  return mBase->BeginTransaction();
++}
++
++NS_IMETHODIMP
++IncrementalVacuumConnection::BeginTransactionAs(int32_t aType)
++{
++  return mBase->BeginTransactionAs(aType);
++}
++
++NS_IMETHODIMP
++IncrementalVacuumConnection::CommitTransaction()
++{
++  return mBase->CommitTransaction();
++}
++
++NS_IMETHODIMP
++IncrementalVacuumConnection::RollbackTransaction()
++{
++  return mBase->RollbackTransaction();
++}
++
++NS_IMETHODIMP
++IncrementalVacuumConnection::CreateTable(const char* aTable,
++                                         const char* aSchema)
++{
++  return mBase->CreateTable(aTable, aSchema);
++}
++
++NS_IMETHODIMP
++IncrementalVacuumConnection::SetGrowthIncrement(int32_t aIncrement,
++                                                const nsACString& aDatabase)
++{
++  return mBase->SetGrowthIncrement(aIncrement, aDatabase);
++}
++
++NS_IMETHODIMP
++IncrementalVacuumConnection::EnableModule(const nsACString& aModule)
++{
++  return mBase->EnableModule(aModule);
++}
++
++NS_IMETHODIMP
++IncrementalVacuumConnection::GetQuotaObjects(QuotaObject** aDatabaseQuotaObject,
++                                             QuotaObject** aJournalQuotaObject)
++{
++  return mBase->GetQuotaObjects(aDatabaseQuotaObject, aJournalQuotaObject);
++}
++
++namespace {
++
++nsresult
++IncrementalVacuum(mozIStorageConnection* aConn)
++{
++  // Determine how much free space is in the database.
++  nsCOMPtr<mozIStorageStatement> state;
++  nsresult rv = aConn->CreateStatement(NS_LITERAL_CSTRING(
++    "PRAGMA freelist_count;"
++  ), getter_AddRefs(state));
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  bool hasMoreData = false;
++  rv = state->ExecuteStep(&hasMoreData);
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  int32_t freePages = 0;
++  rv = state->GetInt32(0, &freePages);
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  // We have a relatively small page size, so we want to be careful to avoid
++  // fragmentation.  We already use a growth incremental which will cause
++  // sqlite to allocate and release multiple pages at the same time.  We can
++  // further reduce fragmentation by making our allocated chunks a bit
++  // "sticky".  This is done by creating some hysteresis where we allocate
++  // pages/chunks as soon as we need them, but we only release pages/chunks
++  // when we have a large amount of free space.  This helps with the case
++  // where a page is adding and remove resources causing it to dip back and
++  // forth across a chunk boundary.
++  //
++  // So only proceed with releasing pages if we have more than our constant
++  // threshold.
++  if (freePages <= kMaxFreePages) {
++    return NS_OK;
++  }
++
++  // Release the excess pages back to the sqlite VFS.  This may also release
++  // chunks of multiple pages back to the OS.
++  int32_t pagesToRelease = freePages - kMaxFreePages;
++
++  rv = aConn->ExecuteSimpleSQL(nsPrintfCString(
++    "PRAGMA incremental_vacuum(%d);", pagesToRelease
++  ));
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  // Verify that our incremental vacuum actually did something
++#ifdef DEBUG
++  rv = aConn->CreateStatement(NS_LITERAL_CSTRING(
++    "PRAGMA freelist_count;"
++  ), getter_AddRefs(state));
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  hasMoreData = false;
++  rv = state->ExecuteStep(&hasMoreData);
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  freePages = 0;
++  rv = state->GetInt32(0, &freePages);
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  MOZ_ASSERT(freePages <= kMaxFreePages);
++#endif
++
++  return NS_OK;
++}
++
++} //anonymous namespace
++
++} // namespace storage
++} // namespace mozilla
+diff --git a/storage/IncrementalVacuumConnection.h b/storage/IncrementalVacuumConnection.h
+new file mode 100644
+--- /dev/null
++++ b/storage/IncrementalVacuumConnection.h
+@@ -0,0 +1,34 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#ifndef mozilla_dom_Connection_h
++#define mozilla_dom_Connection_h
++
++#include "mozIStorageConnection.h"
++
++namespace mozilla {
++namespace storage {
++
++class IncrementalVacuumConnection final : public mozIStorageConnection
++{
++public:
++  explicit IncrementalVacuumConnection(mozIStorageConnection* aBase);
++
++private:
++  ~IncrementalVacuumConnection();
++
++  nsCOMPtr<mozIStorageConnection> mBase;
++  bool mClosed;
++
++  NS_DECL_ISUPPORTS
++  NS_DECL_MOZISTORAGEASYNCCONNECTION
++  NS_DECL_MOZISTORAGECONNECTION
++};
++
++} // namespace storage
++} // namespace mozilla
++
++#endif // mozilla_dom_Connection_h
+diff --git a/storage/moz.build b/storage/moz.build
+--- a/storage/moz.build
++++ b/storage/moz.build
+@@ -48,16 +48,17 @@ EXPORTS.mozilla.storage += [
+     'StatementCache.h',
+     'Variant.h',
+     'Variant_inl.h',
+ ]
+ # SEE ABOVE NOTE!
+ 
+ UNIFIED_SOURCES += [
+     'FileSystemModule.cpp',
++    'IncrementalVacuumConnection.cpp',
+     'mozStorageArgValueArray.cpp',
+     'mozStorageAsyncStatement.cpp',
+     'mozStorageAsyncStatementExecution.cpp',
+     'mozStorageAsyncStatementJSHelper.cpp',
+     'mozStorageAsyncStatementParams.cpp',
+     'mozStorageBindingParamsArray.cpp',
+     'mozStorageError.cpp',
+     'mozStoragePrivateHelpers.cpp',
+diff --git a/storage/storage.h b/storage/storage.h
+--- a/storage/storage.h
++++ b/storage/storage.h
+@@ -28,12 +28,13 @@
+ #include "mozIStorageCompletionCallback.h"
+ #include "mozIStorageAsyncStatement.h"
+ #include "mozIStorageAsyncConnection.h"
+ 
+ ////////////////////////////////////////////////////////////////////////////////
+ //// Native Language Helpers
+ 
+ #include "mozStorageHelper.h"
++#include "mozilla/storage/IncrementalVaccumConnection.h"
+ #include "mozilla/storage/StatementCache.h"
+ #include "mozilla/storage/Variant.h"
+ 
+ #endif // mozilla_storage_h_
