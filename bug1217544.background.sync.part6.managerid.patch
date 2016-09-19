@@ -762,7 +762,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
 -    {
 -      MOZ_CRASH("Unknown BackgroundSync request");
 -    }
-+  // XXX
++  // XXX Progress request to BackgroundSyncService.
 +}
 +
 +bool
@@ -873,7 +873,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/Back
  
  private:
 -  BackgroundSyncParent();
-+  BackgroundSyncParent(const PrincipalInfo& aPrincipalInfo);
++  explicit BackgroundSyncParent(const PrincipalInfo& aPrincipalInfo);
    ~BackgroundSyncParent();
  
    virtual void ActorDestroy(ActorDestroyReason aWhy) override;
@@ -902,7 +902,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncTypes.h b/dom/backgroundsync/Backg
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncTypes.h
-@@ -0,0 +1,31 @@
+@@ -0,0 +1,32 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -923,10 +923,11 @@ new file mode 100644
 +
 +enum RegistrationState
 +{
-+  PENDING = 1,
-+  WAITING,
-+  FIRING,
-+  REREGISTERING_WHILE_FIRING
++  ePending = 1,
++  eWaiting,
++  eFiring,
++  eReregisteringWhileFiring,
++  eNumberOfRegistrationStates
 +};
 +
 +} // namespace backgroundsync
@@ -2383,7 +2384,7 @@ new file mode 100644
 +                              aArgs.mOriginSuffix(),
 +                              aArgs.mScope(),
 +                              aArgs.mTag(),
-+                              RegistrationState::PENDING,
++                              RegistrationState::ePending,
 +                              false);
 +    aRegistration = registration;
 +
@@ -2408,7 +2409,7 @@ new file mode 100644
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +    rv = state->BindInt32ByName(NS_LITERAL_CSTRING("state"),
-+                                RegistrationState::PENDING);
++                                RegistrationState::ePending);
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +    // By default new registrations are not flagged as last chance.
