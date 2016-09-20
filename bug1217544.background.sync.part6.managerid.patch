@@ -3702,7 +3702,7 @@ new file mode 100644
 +  {
 +    nsresult rv = db::Register(aConn, mArgs, mFirstRegistration,
 +                               mRegistration);
-+    NS_WARN_IF(NS_FAILED(rv));
++    NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "db::Register failed");
 +    return rv;
 +  }
 +
@@ -4276,7 +4276,7 @@ diff --git a/dom/backgroundsync/StorageManagerId.cpp b/dom/backgroundsync/Storag
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/StorageManagerId.cpp
-@@ -0,0 +1,176 @@
+@@ -0,0 +1,167 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -4306,7 +4306,8 @@ new file mode 100644
 +  RefPtr<StorageManagerIdFactory> factory =
 +    new StorageManagerIdFactory(aListener, aPrincipalInfo);
 +
-+  MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(factory));
++  MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(NewRunnableMethod(factory,
++                                              &StorageManagerIdFactory::Run)));
 +
 +  return factory.forget();
 +}
@@ -4332,10 +4333,10 @@ new file mode 100644
 +  MOZ_ASSERT(mListenerList.IsEmpty());
 +}
 +
-+NS_IMETHODIMP
++void
 +StorageManagerIdFactory::Run()
 +{
-+  // Execute twice. First on the main thread and the back on the originating
++  // Execute twice. First on the main thread and then back on the originating
 +  // thread.
 +
 +  if (mManagerId) {
@@ -4350,7 +4351,7 @@ new file mode 100644
 +    // OnStorageManagerIdCreated().
 +    MOZ_ASSERT(mListenerList.IsEmpty());
 +
-+    return NS_OK;
++    return;
 +  }
 +
 +  AssertIsOnMainThread();
@@ -4359,27 +4360,17 @@ new file mode 100644
 +  RefPtr<nsIPrincipal> principal =
 +    PrincipalInfoToPrincipal(mPrincipalInfo, &rv);
 +  if (NS_WARN_IF(NS_FAILED(rv))) {
-+    return rv;
++    return;
 +  }
 +
 +  rv = StorageManagerId::Create(principal, getter_AddRefs(mManagerId));
 +  if (NS_WARN_IF(NS_FAILED(rv))) {
-+    return rv;
++    return;
 +  }
 +
-+  MOZ_ALWAYS_SUCCEEDS(mInitiatingThread->Dispatch(this, NS_DISPATCH_NORMAL));
-+
-+  return NS_OK;
-+}
-+
-+void
-+StorageManagerIdFactory::AddListener(Listener* aListener)
-+{
-+  AssertIsOnBackgroundThread();
-+  MOZ_ASSERT(aListener);
-+  MOZ_ASSERT(!mListenerList.Contains(aListener));
-+
-+  mListenerList.AppendElement(aListener);
++  MOZ_ALWAYS_SUCCEEDS(mInitiatingThread->Dispatch(
++        NewRunnableMethod(this, &StorageManagerIdFactory::Run),
++        NS_DISPATCH_NORMAL));
 +}
 +
 +void
@@ -4457,7 +4448,7 @@ diff --git a/dom/backgroundsync/StorageManagerId.h b/dom/backgroundsync/StorageM
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/StorageManagerId.h
-@@ -0,0 +1,94 @@
+@@ -0,0 +1,95 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -4507,7 +4498,7 @@ new file mode 100644
 +  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(StorageManagerId)
 +};
 +
-+class StorageManagerIdFactory : public Runnable
++class StorageManagerIdFactory
 +{
 +public:
 +  // An interface to be implemented by code wishing to use the
@@ -4524,11 +4515,12 @@ new file mode 100644
 +  static already_AddRefed<StorageManagerIdFactory>
 +  Create(Listener* aListener, const PrincipalInfo& aPrincipalInfo);
 +
-+  void AddListener(Listener* aListener);
 +  // The Listener must call RemoveListener() when
 +  // OnStorageManagerIdCreated is called or when
 +  // the Listener is destroyed.
 +  void RemoveListener(Listener* aListener);
++
++  void Run();
 +
 +private:
 +  StorageManagerIdFactory(Listener* aListener,
@@ -4544,7 +4536,7 @@ new file mode 100644
 +  RefPtr<StorageManagerId> mManagerId;
 +
 +public:
-+  NS_DECL_NSIRUNNABLE
++  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(StorageManagerIdFactory)
 +};
 +
 +} // namespace backgroundsync
