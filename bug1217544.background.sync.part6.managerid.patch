@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  dc6d3470b4c9f9183bce1608ba1338044b50d6ff
+# Parent  ddf3899fa7ec883527007191cf7471ee4e2ff500
 Bug 1217544 - Implement one-off BackgroundSync API. Part 5: Storage. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
@@ -24,7 +24,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
  #include "mozilla/Preferences.h"
  #include "nsISupportsPrimitives.h"
  #include "nsIGlobalObject.h"
-@@ -48,44 +47,250 @@ public:
+@@ -48,44 +47,241 @@ public:
  
    void SetActor(BackgroundSyncChild* aActor)
    {
@@ -171,15 +171,8 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
 +        return;
 +      }
 +
-+      rv = principal->GetOriginSuffix(mOriginSuffix);
-+      if (NS_WARN_IF(NS_FAILED(rv))) {
-+        MaybeReject(rv);
-+        return;
-+      }
-+
 +      if (mPromise) {
 +        const SyncRegisterArgs args(NS_ConvertUTF8toUTF16(mOrigin),
-+                                    NS_ConvertUTF8toUTF16(mOriginSuffix),
 +                                    mScope, (nsString(mTag)));
 +        mTarget->ExecuteOp(SyncOpArgs(args), mPromise, mRv);
 +      } else {
@@ -202,9 +195,9 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
 +  /**
 +   * This method is called only when the RegisterHelper is created on a worker
 +   * thread. And in that case it is called twice. The first time in the main
-+   * thread, to get the origin and origin suffix values from the principal info
-+   * and the second time back on the worker thread to continue with the
-+   * execution of the sync operation.
++   * thread, to get the origin value from the principal info and the second time
++   * back on the worker thread to continue with the execution of the sync
++   * operation.
 +   */
 +  NS_IMETHOD
 +  Run() override
@@ -215,7 +208,6 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
 +      RefPtr<Promise> promise = mPromiseProxy->WorkerPromise();
 +      MOZ_ASSERT(promise);
 +      const SyncRegisterArgs args(NS_ConvertUTF8toUTF16(mOrigin),
-+                                  NS_ConvertUTF8toUTF16(mOriginSuffix),
 +                                  mScope, (nsString(mTag)));
 +      mTarget->ExecuteOp(SyncOpArgs(args), promise, mRv);
 +    }
@@ -262,7 +254,6 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
 +  nsString mScope;
 +  nsString mTag;
 +  nsAutoCString mOrigin;
-+  nsAutoCString mOriginSuffix;
 +  ErrorResult& mRv;
 +  nsCOMPtr<nsIThread> mWorkerThread;
 +};
@@ -277,7 +268,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
  
    explicit TeardownRunnable(BackgroundSyncChild* aActor)
      : mActor(aActor)
-@@ -335,17 +540,18 @@ BackgroundSync::ActorCreated(PBackground
+@@ -335,17 +531,18 @@ BackgroundSync::ActorCreated(PBackground
    MOZ_ASSERT(IsBackgroundSyncThread());
    MOZ_ASSERT(aActor);
    MOZ_ASSERT(!mActor);
@@ -297,7 +288,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
      RefPtr<SyncOpRunnable> runnable = mPendingOperations[i];
      MOZ_ASSERT(runnable);
      runnable->SetActor(mActor);
-@@ -383,65 +589,112 @@ BackgroundSync::Observe(nsISupports* aSu
+@@ -383,65 +580,112 @@ BackgroundSync::Observe(nsISupports* aSu
      }
    }
  
@@ -533,7 +524,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncChild.h b/dom/backgroundsync/Backg
 diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh
 --- a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh
 +++ b/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh
-@@ -1,55 +1,138 @@
+@@ -1,55 +1,136 @@
  /* This Source Code Form is subject to the terms of the Mozilla Public
   * License, v. 2.0. If a copy of the MPL was not distributed with this
   * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -550,7 +541,6 @@ diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsyn
  struct SyncRegisterArgs
  {
 +  nsString mOrigin;
-+  nsString mOriginSuffix;
    nsString mScope;
    nsString mTag;
  };
@@ -576,7 +566,6 @@ diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsyn
 +{
 +  nsString mId;
 +  nsString mOrigin;
-+  nsString mOriginSuffix;
 +  nsString mScope;
 +  nsString mTag;
 +  RegistrationState mState;
@@ -2270,7 +2259,7 @@ diff --git a/dom/backgroundsync/DBSchema.cpp b/dom/backgroundsync/DBSchema.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/DBSchema.cpp
-@@ -0,0 +1,359 @@
+@@ -0,0 +1,355 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -2378,7 +2367,6 @@ new file mode 100644
 +    GetId(aArgs.mScope(), aArgs.mTag(), id);
 +
 +    Registration registration(id, aArgs.mOrigin(),
-+                              aArgs.mOriginSuffix(),
 +                              aArgs.mScope(),
 +                              aArgs.mTag(),
 +                              RegistrationState::ePending,
@@ -2602,23 +2590,20 @@ new file mode 100644
 +    rv = state->GetString(1, aRegistrationOut.mOrigin());
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
-+    rv = state->GetString(2, aRegistrationOut.mOriginSuffix());
++    rv = state->GetString(2, aRegistrationOut.mScope());
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
-+    rv = state->GetString(3, aRegistrationOut.mScope());
-+    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
-+
-+    rv = state->GetString(4, aRegistrationOut.mTag());
++    rv = state->GetString(3, aRegistrationOut.mTag());
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +    int32_t registrationState;
-+    rv = state->GetInt32(5, &registrationState);
++    rv = state->GetInt32(4, &registrationState);
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +    aRegistrationOut.mState() =
 +      RegistrationState(registrationState);
 +
 +    int32_t lastChance;
-+    rv = state->GetInt32(6, &lastChance);
++    rv = state->GetInt32(5, &lastChance);
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +    aRegistrationOut.mLastChance() = bool(lastChance);
 +  }
