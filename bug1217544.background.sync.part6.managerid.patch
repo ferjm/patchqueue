@@ -2259,7 +2259,7 @@ diff --git a/dom/backgroundsync/DBSchema.cpp b/dom/backgroundsync/DBSchema.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/DBSchema.cpp
-@@ -0,0 +1,355 @@
+@@ -0,0 +1,358 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -2289,12 +2289,15 @@ new file mode 100644
 +const int32_t kLatestSchemaVersion = 1;
 +
 +// ---------
++// tag allows NULL below since that is how "" is represented in a
++// BLOB column. We use BLOB to avoid encoding issues with storing
++// DOMStrings.
 +const char* const kTableRegistrations =
 +  "CREATE TABLE registrations ("
 +    "id TEXT NOT NULL PRIMARY KEY, " // Concatenation of scope + tag
 +    "origin TEXT NOT NULL, "
 +    "scope TEXT NOT NULL, "
-+    "tag TEXT NOT NULL, "
++    "tag BLOB NULL, "
 +    "state INTEGER NOT NULL, "
 +    "lastChance INTEGER NOT NULL"
 +  ")";
@@ -2385,8 +2388,8 @@ new file mode 100644
 +                                 registration.mScope());
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
-+    rv = state->BindStringByName(NS_LITERAL_CSTRING("tag"),
-+                                 registration.mTag());
++    rv = state->BindStringAsBlobByName(NS_LITERAL_CSTRING("tag"),
++                                       registration.mTag());
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +    rv = state->BindInt32ByName(NS_LITERAL_CSTRING("state"),
@@ -2439,8 +2442,8 @@ new file mode 100644
 +
 +  bool hasMoreData = false;
 +  while (NS_SUCCEEDED(state->ExecuteStep(&hasMoreData)) && hasMoreData) {
-+    nsString tag;
-+    rv = state->GetString(0, tag);
++    nsAutoString tag;
++    rv = state->GetBlobAsString(0, tag);
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +    aTags.AppendElement(tag);
 +  }
@@ -2475,8 +2478,8 @@ new file mode 100644
 +    rv = state->GetString(3, scope);
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
-+    nsString tag;
-+    rv = state->GetString(4, tag);
++    nsAutoString tag;
++    rv = state->GetBlobAsString(4, tag);
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +    int32_t registrationState;
