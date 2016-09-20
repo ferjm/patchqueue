@@ -2271,7 +2271,7 @@ diff --git a/dom/backgroundsync/DBSchema.cpp b/dom/backgroundsync/DBSchema.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/DBSchema.cpp
-@@ -0,0 +1,364 @@
+@@ -0,0 +1,390 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -2285,6 +2285,8 @@ new file mode 100644
 +#include "mozIStorageConnection.h"
 +#include "mozIStorageStatement.h"
 +#include "mozStorageHelper.h"
++#include "nsICryptoHash.h"
++#include "nsNetCID.h"
 +
 +namespace mozilla {
 +namespace dom {
@@ -2301,12 +2303,17 @@ new file mode 100644
 +const int32_t kLatestSchemaVersion = 1;
 +
 +// ---------
++// We want to use the concatenation of scope and tag as the primary key, but
++// since scope is a URL, it can be quite long and so quite expensive to index,
++// so we create a hash of this concatenation taking the first 8 bytes of its
++// SHA1.
++//
 +// tag allows NULL below since that is how "" is represented in a
 +// BLOB column. We use BLOB to avoid encoding issues with storing
 +// DOMStrings.
 +const char* const kTableRegistrations =
 +  "CREATE TABLE registrations ("
-+    "id TEXT NOT NULL PRIMARY KEY, " // Concatenation of scope + tag
++    "id TEXT NOT NULL PRIMARY KEY, "
 +    "origin TEXT NOT NULL, "
 +    "scope TEXT NOT NULL, "
 +    "tag BLOB NULL, "
@@ -2340,10 +2347,29 @@ new file mode 100644
 +  return dbutils::IncrementalVacuum(aConn);
 +}
 +
-+void
++nsresult
 +GetId(const nsAString& aScope, const nsAString& aTag, nsAString& aId)
 +{
-+  aId = aScope + NS_LITERAL_STRING("@") + aTag;
++  nsresult rv;
++
++  nsCOMPtr<nsICryptoHash> crypto =
++    do_CreateInstance(NS_CRYPTO_HASH_CONTRACTID, &rv);
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  rv = crypto->Init(nsICryptoHash::SHA1);
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  nsAString concat(aScope + NS_LITERAL_STRING("@") + aTag);
++  rv = crypto->Update(reinterpret_cast<const uint8_t*>(concat.BeginReading()),
++                      concat.Length());
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  nsAutoCString fullHash;
++  rv = crypto->Finish(false /* based64 result */, fullHash);
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  aId = NS_ConvertUTF8toUTF16(Substring(fullHash, 0, 8));
++  return rv;
 +}
 +
 +nsresult
