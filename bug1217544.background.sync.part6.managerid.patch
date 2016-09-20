@@ -531,7 +531,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsyn
  
  include PBackgroundSharedTypes;
  
-+using RegistrationState from "ipc/IPCMessageUtils.h";
++using RegistrationState from "mozilla/dom/backgroundsync/BackgroundSyncTypes.h";
 +using mozilla::void_t from "ipc/IPCMessageUtils.h";
 +
  namespace mozilla {
@@ -891,7 +891,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncTypes.h b/dom/backgroundsync/Backg
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncTypes.h
-@@ -0,0 +1,32 @@
+@@ -0,0 +1,44 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -923,6 +923,18 @@ new file mode 100644
 +} // namespace dom
 +} // namespace mozilla
 +
++namespace IPC {
++
++using mozilla::dom::backgroundsync::RegistrationState;
++
++template <>
++struct ParamTraits<RegistrationState>
++  : public ContiguousEnumSerializer<RegistrationState,
++                                    RegistrationState::ePending,
++                                    RegistrationState::eNumberOfRegistrationStates>
++{ };
++
++} // namespace IPC
 +#endif // mozilla_dom_BackgroundSyncTypes_h
 diff --git a/dom/backgroundsync/ChromeDBSchema.cpp b/dom/backgroundsync/ChromeDBSchema.cpp
 new file mode 100644
@@ -4715,7 +4727,7 @@ diff --git a/dom/quota/Client.h b/dom/quota/Client.h
 diff --git a/ipc/glue/BackgroundChildImpl.cpp b/ipc/glue/BackgroundChildImpl.cpp
 --- a/ipc/glue/BackgroundChildImpl.cpp
 +++ b/ipc/glue/BackgroundChildImpl.cpp
-@@ -508,18 +508,19 @@ BackgroundChildImpl::DeallocPGamepadTest
+@@ -508,18 +508,18 @@ BackgroundChildImpl::DeallocPGamepadTest
  #endif
    return true;
  }
@@ -4727,8 +4739,7 @@ diff --git a/ipc/glue/BackgroundChildImpl.cpp b/ipc/glue/BackgroundChildImpl.cpp
 -dom::PBackgroundSyncChild*
 -BackgroundChildImpl::AllocPBackgroundSyncChild()
 +dom::backgroundsync::PBackgroundSyncChild*
-+BackgroundChildImpl::AllocPBackgroundSyncChild(
-+    const PrincipalInfo& aPrincipalInfo)
++BackgroundChildImpl::AllocPBackgroundSyncChild(const PrincipalInfo&)
  {
    RefPtr<BackgroundSyncChild> agent = new BackgroundSyncChild();
    return agent.forget().take();
@@ -4828,48 +4839,6 @@ diff --git a/ipc/glue/BackgroundParentImpl.h b/ipc/glue/BackgroundParentImpl.h
  } // namespace ipc
  } // namespace mozilla
  
-diff --git a/ipc/glue/IPCMessageUtils.h b/ipc/glue/IPCMessageUtils.h
---- a/ipc/glue/IPCMessageUtils.h
-+++ b/ipc/glue/IPCMessageUtils.h
-@@ -8,16 +8,17 @@
- #define __IPC_GLUE_IPCMESSAGEUTILS_H__
- 
- #include "base/process_util.h"
- #include "chrome/common/ipc_message_utils.h"
- 
- #include "mozilla/ArrayUtils.h"
- #include "mozilla/Attributes.h"
- #include "mozilla/DebugOnly.h"
-+#include "mozilla/dom/backgroundsync/BackgroundSyncTypes.h"
- #include "mozilla/dom/ipc/StructuredCloneData.h"
- #include "mozilla/Maybe.h"
- #include "mozilla/net/WebSocketFrame.h"
- #include "mozilla/TimeStamp.h"
- #ifdef XP_WIN
- #include "mozilla/TimeStamp_windows.h"
- #endif
- #include "mozilla/TypeTraits.h"
-@@ -820,11 +821,20 @@ struct ParamTraits<mozilla::Maybe<T>>
-       *result = mozilla::Some(mozilla::Move(tmp));
-     } else {
-       *result = mozilla::Nothing();
-     }
-     return true;
-   }
- };
- 
-+using namespace mozilla::dom::backgroundsync;
-+
-+template <>
-+struct ParamTraits<RegistrationState>
-+  : public ContiguousEnumSerializer<RegistrationState,
-+                                    RegistrationState::ePending,
-+                                    RegistrationState::eNumberOfRegistrationStates>
-+{ };
-+
- } /* namespace IPC */
- 
- #endif /* __IPC_GLUE_IPCMESSAGEUTILS_H__ */
 diff --git a/ipc/glue/PBackground.ipdl b/ipc/glue/PBackground.ipdl
 --- a/ipc/glue/PBackground.ipdl
 +++ b/ipc/glue/PBackground.ipdl
