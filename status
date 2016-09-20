@@ -3,3 +3,4 @@
 dcd0c80b983ef2b022bdfced8f3d38ef6735c7e0:bug1217544.background.sync.part3.ipc.patch
 620051824c1aea485515a6efef04e8e11c92856a:bug1217544.background.sync.part4.syncevent.patch
 dc6d3470b4c9f9183bce1608ba1338044b50d6ff:bug1217544.background.sync.part5.quotaclienthelpers.patch
+f76ae28a02e7655760a67c6bb0490dc4c5782492:bug1217544.background.sync.part6.managerid.patch

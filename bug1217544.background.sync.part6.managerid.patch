@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  2265a4551db45779deba50e0a2c867d09b8fe82d
+# Parent  dc6d3470b4c9f9183bce1608ba1338044b50d6ff
 Bug 1217544 - Implement one-off BackgroundSync API. Part 5: Storage. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
@@ -2270,7 +2270,7 @@ diff --git a/dom/backgroundsync/DBSchema.cpp b/dom/backgroundsync/DBSchema.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/DBSchema.cpp
-@@ -0,0 +1,371 @@
+@@ -0,0 +1,359 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -2304,7 +2304,6 @@ new file mode 100644
 +  "CREATE TABLE registrations ("
 +    "id TEXT NOT NULL PRIMARY KEY, " // Concatenation of scope + tag
 +    "origin TEXT NOT NULL, "
-+    "originSuffix TEXT NOT NULL, "
 +    "scope TEXT NOT NULL, "
 +    "tag TEXT NOT NULL, "
 +    "state INTEGER NOT NULL, "
@@ -2360,7 +2359,6 @@ new file mode 100644
 +      "INSERT INTO registrations ("
 +        "id, "
 +        "origin, "
-+        "originSuffix, "
 +        "scope, "
 +        "tag, "
 +        "state, "
@@ -2368,7 +2366,6 @@ new file mode 100644
 +      ") VALUES ("
 +        ":id, "
 +        ":origin, "
-+        ":originSuffix, "
 +        ":scope, "
 +        ":tag, "
 +        ":state, "
@@ -2394,10 +2391,6 @@ new file mode 100644
 +
 +    rv = state->BindStringByName(NS_LITERAL_CSTRING("origin"),
 +                                 registration.mOrigin());
-+    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
-+
-+    rv = state->BindStringByName(NS_LITERAL_CSTRING("originSuffix"),
-+                                 registration.mOriginSuffix());
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +    rv = state->BindStringByName(NS_LITERAL_CSTRING("scope"),
@@ -2490,10 +2483,6 @@ new file mode 100644
 +    rv = state->GetString(1, origin);
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
-+    nsString originSuffix;
-+    rv = state->GetString(2, originSuffix);
-+    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
-+
 +    nsString scope;
 +    rv = state->GetString(3, scope);
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
@@ -2510,9 +2499,8 @@ new file mode 100644
 +    rv = state->GetInt32(6, &lastChance);
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
-+    Registration registration(id, origin, originSuffix,
-+      scope, tag, RegistrationState(registrationState),
-+      bool(lastChance));
++    Registration registration(id, origin, scope, tag,
++      RegistrationState(registrationState), bool(lastChance));
 +    aRegistrations.AppendElement(registration);
 +  }
 +
@@ -4889,8 +4877,8 @@ diff --git a/ipc/glue/IPCMessageUtils.h b/ipc/glue/IPCMessageUtils.h
 +template <>
 +struct ParamTraits<RegistrationState>
 +  : public ContiguousEnumSerializer<RegistrationState,
-+                                    RegistrationState::PENDING,
-+                                    RegistrationState::REREGISTERING_WHILE_FIRING>
++                                    RegistrationState::ePending,
++                                    RegistrationState::eNumberOfRegistrationStates>
 +{ };
 +
  } /* namespace IPC */
