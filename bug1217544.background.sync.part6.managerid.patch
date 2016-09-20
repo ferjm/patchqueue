@@ -2259,7 +2259,7 @@ diff --git a/dom/backgroundsync/DBSchema.cpp b/dom/backgroundsync/DBSchema.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/DBSchema.cpp
-@@ -0,0 +1,358 @@
+@@ -0,0 +1,364 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -2460,7 +2460,13 @@ new file mode 100644
 +
 +  nsCOMPtr<mozIStorageStatement> state;
 +  nsresult rv = aConn->CreateStatement(NS_LITERAL_CSTRING(
-+    "SELECT * FROM registrations;"
++    "SELECT "
++    "id, "
++    "origin, "
++    "scope, "
++    "tag, "
++    "state, "
++    "lastChance FROM registrations;"
 +  ), getter_AddRefs(state));
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
@@ -2522,7 +2528,7 @@ new file mode 100644
 +  bool hasMoreData = false;
 +  while (NS_SUCCEEDED(getOriginState->ExecuteStep(&hasMoreData))
 +         && hasMoreData) {
-+    // We only set the origin if there's one registration.
++    // We only set the origin on the first registration.
 +    if (count == 0) {
 +      rv = getOriginState->GetString(0, aOrigin);
 +      if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
