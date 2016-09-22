@@ -7,7 +7,7 @@ diff --git a/storage/IncrementalVacuumConnection.cpp b/storage/IncrementalVacuum
 new file mode 100644
 --- /dev/null
 +++ b/storage/IncrementalVacuumConnection.cpp
-@@ -0,0 +1,568 @@
+@@ -0,0 +1,591 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -354,7 +354,7 @@ new file mode 100644
 +}
 +
 +nsresult
-+IncrementalVacuumConnection::Validate()
++IncrementalVacuumConnection::Validate(const int32_t aLatestSchemaVersion)
 +{
 +  return NS_OK;
 +}
@@ -365,10 +365,33 @@ new file mode 100644
 +  return NS_OK;
 +}
 +
++struct IncrementalVacuumConnection::Expect
++{
++  // Expect exact SQL
++  Expect(const char* aName, const char* aType, const char* aSql)
++    : mName(aName)
++    , mType(aType)
++    , mSql(aSql)
++    , mIgnoreSql(false)
++  { }
++
++  // Ignore SQL
++  Expect(const char* aName, const char* aType)
++    : mName(aName)
++    , mType(aType)
++    , mIgnoreSql(true)
++  { }
++
++  const nsCString mName;
++  const nsCString mType;
++  const nsCString mSql;
++  const bool mIgnoreSql;
++};
++
 +nsresult
 +IncrementalVacuumConnection::CreateOrMigrateSchema(const int32_t aLatestSchemaVersion,
 +                                                   const nsTArray<nsCString>& aTablesSql,
-+                                                   const nsTArray<nsCString>& aExpectedTableNames)
++                                                   const nsTArray<Expect>& aExpectedSchema)
 +{
 +  MOZ_ASSERT(!NS_IsMainThread());
 +  MOZ_ASSERT(mBase);
@@ -380,7 +403,7 @@ new file mode 100644
 +  if (schemaVersion == aLatestSchemaVersion) {
 +    // We already have the correct schema version.  Validate it matches
 +    // our expected schema and then proceed.
-+    rv = Validate();
++    rv = Validate(aLatestSchemaVersion);
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +    return rv;
@@ -417,7 +440,7 @@ new file mode 100644
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +  }
 +
-+  rv = Validate();
++  rv = Validate(aLatestSchemaVersion);
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +  rv = trans.Commit();
@@ -580,7 +603,7 @@ diff --git a/storage/IncrementalVacuumConnection.h b/storage/IncrementalVacuumCo
 new file mode 100644
 --- /dev/null
 +++ b/storage/IncrementalVacuumConnection.h
-@@ -0,0 +1,57 @@
+@@ -0,0 +1,58 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -602,10 +625,11 @@ new file mode 100644
 +  IncrementalVacuumConnection(mozIStorageConnection* aBase,
 +                              const int32_t aMaxFreePages);
 +
++  struct Expect;
 +  nsresult
 +  CreateOrMigrateSchema(const int32_t aLatestSchemaVersion,
 +                        const nsTArray<nsCString>& aTablesSql,
-+                        const nsTArray<nsCString>& aExpectedTableNames);
++                        const nsTArray<Expect>& aExpectedSchema);
 +
 +  nsresult
 +  InitializeConnection(const uint32_t aPageSize,
@@ -617,7 +641,7 @@ new file mode 100644
 +  ~IncrementalVacuumConnection();
 +
 +  nsresult
-+  Validate();
++  Validate(const int32_t aLatestSchemaVersion);
 +
 +  nsresult
 +  Migrate();
