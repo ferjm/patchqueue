@@ -7,7 +7,7 @@ diff --git a/storage/IncrementalVacuumConnection.cpp b/storage/IncrementalVacuum
 new file mode 100644
 --- /dev/null
 +++ b/storage/IncrementalVacuumConnection.cpp
-@@ -0,0 +1,591 @@
+@@ -0,0 +1,650 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -353,18 +353,6 @@ new file mode 100644
 +  return mBase->GetQuotaObjects(aDatabaseQuotaObject, aJournalQuotaObject);
 +}
 +
-+nsresult
-+IncrementalVacuumConnection::Validate(const int32_t aLatestSchemaVersion)
-+{
-+  return NS_OK;
-+}
-+
-+nsresult
-+IncrementalVacuumConnection::Migrate()
-+{
-+  return NS_OK;
-+}
-+
 +struct IncrementalVacuumConnection::Expect
 +{
 +  // Expect exact SQL
@@ -389,6 +377,77 @@ new file mode 100644
 +};
 +
 +nsresult
++IncrementalVacuumConnection::Validate(const int32_t aLatestSchemaVersion,
++                                      const nsTArray<Expect>& aExpectedSchema)
++{
++  int32_t schemaVersion;
++  nsresult rv = mBase->GetSchemaVersion(&schemaVersion);
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  if (NS_WARN_IF(schemaVersion != aLatestSchemaVersion)) {
++    return NS_ERROR_FAILURE;
++  }
++
++#ifdef DEBUG
++  // Read the schema from the sqlite_master table and compare.
++  nsCOMPtr<mozIStorageStatement> state;
++  rv = mBase->CreateStatement(NS_LITERAL_CSTRING(
++    "SELECT name, type, sql FROM sqlite_master;"
++  ), getter_AddRefs(state));
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  bool hasMoreData = false;
++  while (NS_SUCCEEDED(state->ExecuteStep(&hasMoreData)) && hasMoreData) {
++    nsAutoCString name;
++    rv = state->GetUTF8String(0, name);
++    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++    nsAutoCString type;
++    rv = state->GetUTF8String(1, type);
++    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++    nsAutoCString sql;
++    rv = state->GetUTF8String(2, sql);
++    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++    bool foundMatch = false;
++    for (uint32_t i = 0; i < aExpectedSchema.Length(); ++i) {
++      if (name == aExpectedSchema[i].mName) {
++        if (type != aExpectedSchema[i].mType) {
++          NS_WARNING(nsPrintfCString("Unexpected type for Cache schema entry %s",
++                     name.get()).get());
++          return NS_ERROR_FAILURE;
++        }
++
++        if (!aExpectedSchema[i].mIgnoreSql && sql != aExpectedSchema[i].mSql) {
++          NS_WARNING(nsPrintfCString("Unexpected SQL for Cache schema entry %s",
++                     name.get()).get());
++          return NS_ERROR_FAILURE;
++        }
++
++        foundMatch = true;
++        break;
++      }
++    }
++
++    if (NS_WARN_IF(!foundMatch)) {
++      NS_WARNING(nsPrintfCString("Unexpected schema entry %s in Cache database",
++                 name.get()).get());
++      return NS_ERROR_FAILURE;
++    }
++  }
++#endif
++
++  return rv;
++}
++
++nsresult
++IncrementalVacuumConnection::Migrate()
++{
++  return NS_OK;
++}
++
++nsresult
 +IncrementalVacuumConnection::CreateOrMigrateSchema(const int32_t aLatestSchemaVersion,
 +                                                   const nsTArray<nsCString>& aTablesSql,
 +                                                   const nsTArray<Expect>& aExpectedSchema)
@@ -403,7 +462,7 @@ new file mode 100644
 +  if (schemaVersion == aLatestSchemaVersion) {
 +    // We already have the correct schema version.  Validate it matches
 +    // our expected schema and then proceed.
-+    rv = Validate(aLatestSchemaVersion);
++    rv = Validate(aLatestSchemaVersion, aExpectedSchema);
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +    return rv;
@@ -440,7 +499,7 @@ new file mode 100644
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +  }
 +
-+  rv = Validate(aLatestSchemaVersion);
++  rv = Validate(aLatestSchemaVersion, aExpectedSchema);
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +  rv = trans.Commit();
@@ -603,7 +662,7 @@ diff --git a/storage/IncrementalVacuumConnection.h b/storage/IncrementalVacuumCo
 new file mode 100644
 --- /dev/null
 +++ b/storage/IncrementalVacuumConnection.h
-@@ -0,0 +1,58 @@
+@@ -0,0 +1,59 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -641,7 +700,8 @@ new file mode 100644
 +  ~IncrementalVacuumConnection();
 +
 +  nsresult
-+  Validate(const int32_t aLatestSchemaVersion);
++  Validate(const int32_t aLatestSchemaVersion,
++           const nsTArray<Expect>& aExpectedSchema);
 +
 +  nsresult
 +  Migrate();
