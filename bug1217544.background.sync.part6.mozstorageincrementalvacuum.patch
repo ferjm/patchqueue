@@ -7,7 +7,7 @@ diff --git a/storage/IncrementalVacuumConnection.cpp b/storage/IncrementalVacuum
 new file mode 100644
 --- /dev/null
 +++ b/storage/IncrementalVacuumConnection.cpp
-@@ -0,0 +1,662 @@
+@@ -0,0 +1,708 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -442,7 +442,7 @@ new file mode 100644
 +}
 +
 +typedef nsresult (*MigrationFunc)(mozIStorageConnection*, bool&);
-+struct Migration
++struct IncrementalVacuumConnection::Migration
 +{
 +  constexpr Migration(int32_t aFromVersion, MigrationFunc aFunc)
 +    : mFromVersion(aFromVersion)
@@ -453,13 +453,58 @@ new file mode 100644
 +};
 +
 +nsresult
-+IncrementalVacuumConnection::Migrate()
++IncrementalVacuumConnection::Migrate(const int32_t aLatestSchemaVersion,
++                                     const int32_t aFirstShippedSchemaVersion,
++                                     const nsTArray<Migration>& aMigrationList)
 +{
-+  return NS_OK;
++  MOZ_ASSERT(!NS_IsMainThread());
++  MOZ_ASSERT(mBase);
++
++  int32_t currentVersion = 0;
++  nsresult rv = mBase->GetSchemaVersion(&currentVersion);
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  bool rewriteSchema = false;
++
++  while (currentVersion < aLatestSchemaVersion) {
++    // Wiping old database should be handled elsewhere because it requires
++    // making a whole new mozIStorageConnection.  Make sure we don't
++    // accidentally get here for one of those old databases.
++    MOZ_ASSERT(currentVersion >= aFirstShippedSchemaVersion);
++
++    for (uint32_t i = 0; i < aMigrationList.Length(); ++i) {
++      if (aMigrationList[i].mFromVersion == currentVersion) {
++        bool shouldRewrite = false;
++        rv = aMigrationList[i].mFunc(mBase, shouldRewrite);
++        if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++        if (shouldRewrite) {
++          rewriteSchema = true;
++        }
++        break;
++      }
++    }
++
++    DebugOnly<int32_t> lastVersion = currentVersion;
++    rv = mBase->GetSchemaVersion(&currentVersion);
++    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++    MOZ_ASSERT(currentVersion > lastVersion);
++  }
++
++  MOZ_ASSERT(currentVersion == aLatestSchemaVersion);
++
++  if (rewriteSchema) {
++    // Now overwrite the master SQL for the entries table to remove the column
++    // default value.  This is also necessary for our Validate() method to
++    // pass on this database.
++    // XXX rv = RewriteEntriesSchema();
++  }
++
++  return rv;
 +}
 +
 +nsresult
-+IncrementalVacuumConnection::CreateOrMigrateSchema(const int32_t aLatestSchemaVersion,
++IncrementalVacuumConnection::CreateOrMigrateSchema(const int32_t aFirstShippedSchemaVersion,
++                                                   const int32_t aLatestSchemaVersion,
 +                                                   const nsTArray<nsCString>& aTablesSql,
 +                                                   const nsTArray<Expect>& aExpectedSchema,
 +                                                   const nsTArray<Migration>& aMigrationList)
@@ -490,7 +535,8 @@ new file mode 100644
 +  if (schemaVersion) {
 +    // A schema exists, but its not the current version.  Attempt to
 +    // migrate it to our new schema.
-+    rv = Migrate();
++    rv = Migrate(aFirstShippedSchemaVersion, aLatestSchemaVersion,
++                 aMigrationList);
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +    // Migrations happen infrequently and reflect a chance in DB structure.
@@ -674,7 +720,7 @@ diff --git a/storage/IncrementalVacuumConnection.h b/storage/IncrementalVacuumCo
 new file mode 100644
 --- /dev/null
 +++ b/storage/IncrementalVacuumConnection.h
-@@ -0,0 +1,63 @@
+@@ -0,0 +1,66 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -700,7 +746,8 @@ new file mode 100644
 +  struct Expect;
 +
 +  nsresult
-+  CreateOrMigrateSchema(const int32_t aLatestSchemaVersion,
++  CreateOrMigrateSchema(const int32_t aFirstShippedSchemaVersion,
++                        const int32_t aLatestSchemaVersion,
 +                        const nsTArray<nsCString>& aTablesSql,
 +                        const nsTArray<Expect>& aExpectedSchema,
 +                        const nsTArray<Migration>& aMigrationList);
@@ -720,7 +767,9 @@ new file mode 100644
 +           const nsTArray<Expect>& aExpectedSchema);
 +
 +  nsresult
-+  Migrate();
++  Migrate(const int32_t aFirstShippedSchemaVersion,
++          const int32_t aLatestSchemaVersion,
++          const nsTArray<Migration>& aMigrationList);
 +
 +  nsresult
 +  IncrementalVacuum();
