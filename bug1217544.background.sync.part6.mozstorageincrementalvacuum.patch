@@ -7,7 +7,7 @@ diff --git a/storage/IncrementalVacuumConnection.cpp b/storage/IncrementalVacuum
 new file mode 100644
 --- /dev/null
 +++ b/storage/IncrementalVacuumConnection.cpp
-@@ -0,0 +1,650 @@
+@@ -0,0 +1,662 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -441,6 +441,17 @@ new file mode 100644
 +  return rv;
 +}
 +
++typedef nsresult (*MigrationFunc)(mozIStorageConnection*, bool&);
++struct Migration
++{
++  constexpr Migration(int32_t aFromVersion, MigrationFunc aFunc)
++    : mFromVersion(aFromVersion)
++    , mFunc(aFunc)
++  { }
++  int32_t mFromVersion;
++  MigrationFunc mFunc;
++};
++
 +nsresult
 +IncrementalVacuumConnection::Migrate()
 +{
@@ -450,7 +461,8 @@ new file mode 100644
 +nsresult
 +IncrementalVacuumConnection::CreateOrMigrateSchema(const int32_t aLatestSchemaVersion,
 +                                                   const nsTArray<nsCString>& aTablesSql,
-+                                                   const nsTArray<Expect>& aExpectedSchema)
++                                                   const nsTArray<Expect>& aExpectedSchema,
++                                                   const nsTArray<Migration>& aMigrationList)
 +{
 +  MOZ_ASSERT(!NS_IsMainThread());
 +  MOZ_ASSERT(mBase);
@@ -662,7 +674,7 @@ diff --git a/storage/IncrementalVacuumConnection.h b/storage/IncrementalVacuumCo
 new file mode 100644
 --- /dev/null
 +++ b/storage/IncrementalVacuumConnection.h
-@@ -0,0 +1,59 @@
+@@ -0,0 +1,63 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -684,17 +696,21 @@ new file mode 100644
 +  IncrementalVacuumConnection(mozIStorageConnection* aBase,
 +                              const int32_t aMaxFreePages);
 +
++  struct Migration;
 +  struct Expect;
++
 +  nsresult
 +  CreateOrMigrateSchema(const int32_t aLatestSchemaVersion,
 +                        const nsTArray<nsCString>& aTablesSql,
-+                        const nsTArray<Expect>& aExpectedSchema);
++                        const nsTArray<Expect>& aExpectedSchema,
++                        const nsTArray<Migration>& aMigrationList);
 +
 +  nsresult
 +  InitializeConnection(const uint32_t aPageSize,
 +                       const uint32_t aGrowthSize,
 +                       const uint32_t aWalAutoCheckpointPages,
 +                       const uint32_t aWalAutoCheckpointSize);
++
 +
 +private:
 +  ~IncrementalVacuumConnection();
