@@ -3,4 +3,4 @@
 dcd0c80b983ef2b022bdfced8f3d38ef6735c7e0:bug1217544.background.sync.part3.ipc.patch
 45fc7953e0f1d389c4191c253fdb814cba6f237f:bug1217544.background.sync.part4.syncevent.patch
 ddf3899fa7ec883527007191cf7471ee4e2ff500:bug1217544.background.sync.part5.quotaclienthelpers.patch
-25d47c70f0ee7d9b664134ba067a0e08b2e0ea26:bug1217544.background.sync.part6.mozstorageincrementalvacuum.patch
+2c22ae7c9626294111e1d2f4dfc3e2e589ab6ce6:bug1217544.background.sync.part6.mozstorageincrementalvacuum.patch
