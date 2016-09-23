@@ -1,8 +1,111 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  163df56e617fe897305b28f31756966f2b8433e3
+# Parent  879ddec0323dc1bf4e1739e8a706c0702315de5d
 Bug 1217544 - Implement one-off BackgroundSync API. Tests. r=baku
 
+diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/BackgroundSyncService.cpp
+--- a/dom/backgroundsync/BackgroundSyncService.cpp
++++ b/dom/backgroundsync/BackgroundSyncService.cpp
+@@ -491,33 +491,33 @@ BackgroundSyncService::OnRequestComplete
+             aResponse.get_SyncGetAllResponse().mRegistrations());
+         for (uint32_t i = 0; i < registrations.Length(); i++) {
+           MaybeTriggerSyncEvent(registrations[i]);
+         }
+       }
+       break;
+     case SyncOpResponse::TSyncChangeStateResponse:
+       {
+-        // For now we only care about a change of state to FIRING.
++        // For now we only care about a change of state to eFiring.
+         Registration registration =
+           aResponse.get_SyncChangeStateResponse().mRegistration();
+-        if (registration.mState() != RegistrationState::FIRING) {
++        if (registration.mState() != RegistrationState::eFiring) {
+           return;
+         }
+ 
+-        // If we changed the state to FIRING, that means that we are trying to
++        // If we changed the state to eFiring, that means that we are trying to
+         // trigger a sync event for a specific registration.
+         // In that case, we need to check if we still are online and so we can
+         // continue with the process of firing the sync event. Otherwise, we
+-        // need to get back to the PENDING state and bail out here.
++        // need to get back to the ePending state and bail out here.
+         if (mOnlineState != OnlineStateObserver::eOnline) {
+           RefPtr<GetStorageManagerRunnable> runnable =
+             new GetStorageManagerRunnable(this, registration.mOrigin(),
+                 SyncInternalOp(SyncChangeStateArgs(registration.mId(),
+-                               RegistrationState::PENDING)));
++                               RegistrationState::ePending)));
+           MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(runnable));
+           return;
+         }
+ 
+         ContinueTriggeringSyncEvent(registration);
+       }
+       break;
+     default:
+@@ -543,53 +543,53 @@ BackgroundSyncService::MaybeTriggerSyncE
+ {
+   AssertIsOnBackgroundThread();
+ 
+   if (mOnlineState !=  OnlineStateObserver::eOnline) {
+     return;
+   }
+ 
+   // First thing we need to do is to change the state of the registration to
+-  // FIRING.
++  // eFiring.
+ 
+-  // We only can do that if the registration is in PENDING state though.
+-  if (NS_WARN_IF(aRegistration.mState() != RegistrationState::PENDING)) {
++  // We only can do that if the registration is in ePending state though.
++  if (NS_WARN_IF(aRegistration.mState() != RegistrationState::ePending)) {
+     return;
+   }
+ 
+   // We need to get the appropriate StorageManager for the registration origin,
+   // so we need to jump to the main thread for that.
+   RefPtr<GetStorageManagerRunnable> runnable =
+     new GetStorageManagerRunnable(this, aRegistration.mOrigin(), SyncInternalOp(
+-      SyncChangeStateArgs(aRegistration.mId(),RegistrationState::FIRING)
++      SyncChangeStateArgs(aRegistration.mId(),RegistrationState::eFiring)
+     ));
+   MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(runnable));
+ }
+ 
+ void
+ BackgroundSyncService::ContinueTriggeringSyncEvent(
+     const Registration& aRegistration)
+ {
+   AssertIsOnBackgroundThread();
+ 
+   if (mOnlineState != OnlineStateObserver::eOnline) {
+-    if (aRegistration.mState() == RegistrationState::FIRING) {
++    if (aRegistration.mState() == RegistrationState::eFiring) {
+       RefPtr<GetStorageManagerRunnable> runnable =
+         new GetStorageManagerRunnable(this, aRegistration.mOrigin(), SyncInternalOp(
+-          SyncChangeStateArgs(aRegistration.mId(),RegistrationState::FIRING)
++          SyncChangeStateArgs(aRegistration.mId(),RegistrationState::eFiring)
+         ));
+       MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(runnable));
+     }
+     return;
+   }
+ 
+   for (uint32_t i = 0, len = mServiceWorkerManagerActors.Length(); i < len; ++i) {
+     RefPtr<ServiceWorkerManagerParent> parent = mServiceWorkerManagerActors[i];
+     MOZ_ASSERT(parent);
+-    Unused << parent->SendNotifyBackgroundSyncEvent(aRegistration.mOriginSuffix(),
++    Unused << parent->SendNotifyBackgroundSyncEvent(aRegistration.mOrigin(),
+                                                     aRegistration.mScope(),
+                                                     aRegistration.mTag(),
+                                                     aRegistration.mLastChance());
+   }
+ 
+   // XXX Bug 1260141. For now we simply remove the sync registration, but
+   // we need to implement the sync event handling logic.
+   //
 diff --git a/dom/backgroundsync/moz.build b/dom/backgroundsync/moz.build
 --- a/dom/backgroundsync/moz.build
 +++ b/dom/backgroundsync/moz.build
