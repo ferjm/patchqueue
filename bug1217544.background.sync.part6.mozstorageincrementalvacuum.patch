@@ -7,7 +7,7 @@ diff --git a/storage/IncrementalVacuumConnection.cpp b/storage/IncrementalVacuum
 new file mode 100644
 --- /dev/null
 +++ b/storage/IncrementalVacuumConnection.cpp
-@@ -0,0 +1,708 @@
+@@ -0,0 +1,748 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -17,6 +17,7 @@ new file mode 100644
 +#include "IncrementalVacuumConnection.h"
 +
 +#include "mozStorageHelper.h"
++#include "nsClassHashtable.h"
 +#include "nsPrintfCString.h"
 +#include "nsTArray.h"
 +#include "nsThreadUtils.h"
@@ -441,7 +442,9 @@ new file mode 100644
 +  return rv;
 +}
 +
-+typedef nsresult (*MigrationFunc)(mozIStorageConnection*, bool&);
++typedef nsresult (*MigrationFunc)(mozIStorageConnection*,
++                                  IncrementalVacuumConnection::SchemaRewrite&);
++
 +struct IncrementalVacuumConnection::Migration
 +{
 +  constexpr Migration(int32_t aFromVersion, MigrationFunc aFunc)
@@ -451,6 +454,39 @@ new file mode 100644
 +  int32_t mFromVersion;
 +  MigrationFunc mFunc;
 +};
++
++nsresult
++IncrementalVacuumConnection::RewriteSchema(const SchemaRewrite& aSchemaRewrite)
++{
++  nsresult rv = mBase->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
++    "PRAGMA writable_schema = ON"
++  ));
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  nsCOMPtr<mozIStorageStatement> state;
++  rv = mBase->CreateStatement(NS_LITERAL_CSTRING(
++    "UPDATE sqlite_master SET sql=:sql WHERE name=:name"
++  ), getter_AddRefs(state));
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  rv = state->BindUTF8StringByName(NS_LITERAL_CSTRING("sql"),
++                                   aSchemaRewrite.mTableSql);
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  rv = state->BindUTF8StringByName(NS_LITERAL_CSTRING("name"),
++                                   aSchemaRewrite.mTableName);
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  rv = state->Execute();
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  rv = mBase->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
++    "PRAGMA writable_schema = OFF"
++  ));
++  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++  return rv;
++}
 +
 +nsresult
 +IncrementalVacuumConnection::Migrate(const int32_t aLatestSchemaVersion,
@@ -464,7 +500,7 @@ new file mode 100644
 +  nsresult rv = mBase->GetSchemaVersion(&currentVersion);
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
-+  bool rewriteSchema = false;
++  nsClassHashtable<nsCStringHashKey, nsCString> schemaRewrites;
 +
 +  while (currentVersion < aLatestSchemaVersion) {
 +    // Wiping old database should be handled elsewhere because it requires
@@ -474,11 +510,13 @@ new file mode 100644
 +
 +    for (uint32_t i = 0; i < aMigrationList.Length(); ++i) {
 +      if (aMigrationList[i].mFromVersion == currentVersion) {
-+        bool shouldRewrite = false;
-+        rv = aMigrationList[i].mFunc(mBase, shouldRewrite);
++        SchemaRewrite schemaRewrite;
++        rv = aMigrationList[i].mFunc(mBase, schemaRewrite);
 +        if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
-+        if (shouldRewrite) {
-+          rewriteSchema = true;
++        if (!schemaRewrite.mTableName.IsEmpty() &&
++            !schemaRewrite.mTableSql.IsEmpty() &&
++            !schemaRewrites.Contains(schemaRewrite.mTableName)) {
++          schemaRewrites.Put(schemaRewrite.mTableName, &schemaRewrite.mTableSql);
 +        }
 +        break;
 +      }
@@ -492,11 +530,13 @@ new file mode 100644
 +
 +  MOZ_ASSERT(currentVersion == aLatestSchemaVersion);
 +
-+  if (rewriteSchema) {
-+    // Now overwrite the master SQL for the entries table to remove the column
-+    // default value.  This is also necessary for our Validate() method to
-+    // pass on this database.
-+    // XXX rv = RewriteEntriesSchema();
++  // Now overwrite the master SQL for each table that requires so.
++  for (auto iter = schemaRewrites.Iter(); !iter.Done(); iter.Next()) {
++    SchemaRewrite rewrite;
++    rewrite.mTableName = iter.Key();
++    rewrite.mTableSql = *schemaRewrites.Get(iter.Key());
++    rv = RewriteSchema(rewrite);
++    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +  }
 +
 +  return rv;
@@ -720,7 +760,7 @@ diff --git a/storage/IncrementalVacuumConnection.h b/storage/IncrementalVacuumCo
 new file mode 100644
 --- /dev/null
 +++ b/storage/IncrementalVacuumConnection.h
-@@ -0,0 +1,66 @@
+@@ -0,0 +1,74 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -758,6 +798,11 @@ new file mode 100644
 +                       const uint32_t aWalAutoCheckpointPages,
 +                       const uint32_t aWalAutoCheckpointSize);
 +
++  struct SchemaRewrite
++  {
++    nsCString mTableName;
++    nsCString mTableSql;
++  };
 +
 +private:
 +  ~IncrementalVacuumConnection();
@@ -765,6 +810,9 @@ new file mode 100644
 +  nsresult
 +  Validate(const int32_t aLatestSchemaVersion,
 +           const nsTArray<Expect>& aExpectedSchema);
++
++  nsresult
++  RewriteSchema(const SchemaRewrite& aSchemaRewrite);
 +
 +  nsresult
 +  Migrate(const int32_t aFirstShippedSchemaVersion,
