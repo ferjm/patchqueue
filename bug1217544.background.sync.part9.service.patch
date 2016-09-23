@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  27fb179a80f8fe0bd64a9f39620394969842fc97
+# Parent  e320a86bf6d1d82f643ed005c8e917b04e27b108
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: BackgroundSyncService. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSyncChild.cpp b/dom/backgroundsync/BackgroundSyncChild.cpp
@@ -63,8 +63,8 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
  private:
    ~PendingRequest() {}
  
-   nsID mRequestId;
-   SyncOp mOp;
+   const nsID mRequestId;
+   const SyncOp mOp;
  };
  
  BackgroundSyncParent::BackgroundSyncParent(const PrincipalInfo& aPrincipalInfo)
@@ -114,7 +114,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
    AssertIsOnBackgroundThread();
 +  MOZ_ASSERT(mService);
  
--  // XXX
+-  // XXX Progress request to BackgroundSyncService.
 +  return mService->Request(mId, mStorageManagerId, aRequestId, aOp);
  }
  
@@ -229,7 +229,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/Back
 +  }
 +
  private:
-   BackgroundSyncParent(const PrincipalInfo& aPrincipalInfo);
+   explicit BackgroundSyncParent(const PrincipalInfo& aPrincipalInfo);
    ~BackgroundSyncParent();
  
    virtual void ActorDestroy(ActorDestroyReason aWhy) override;
@@ -1515,7 +1515,7 @@ diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageMan
 diff --git a/dom/backgroundsync/StorageManagerId.cpp b/dom/backgroundsync/StorageManagerId.cpp
 --- a/dom/backgroundsync/StorageManagerId.cpp
 +++ b/dom/backgroundsync/StorageManagerId.cpp
-@@ -17,30 +17,43 @@ namespace backgroundsync {
+@@ -17,31 +17,43 @@ namespace backgroundsync {
   * StorageManagerIdFactory
   */
  
@@ -1540,12 +1540,12 @@ diff --git a/dom/backgroundsync/StorageManagerId.cpp b/dom/backgroundsync/Storag
 -    new StorageManagerIdFactory(aListener, aPrincipalInfo);
 +    new StorageManagerIdFactory(aListener, aPrincipalInfo, aOp);
  
-   MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(factory));
+   MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(NewRunnableMethod(factory,
+                                               &StorageManagerIdFactory::Run)));
  
    return factory.forget();
  }
  
-+
  StorageManagerIdFactory::StorageManagerIdFactory(
 -    Listener* aListener, const PrincipalInfo& aPrincipalInfo)
 +    Listener* aListener, const PrincipalInfo& aPrincipalInfo,
@@ -1561,8 +1561,8 @@ diff --git a/dom/backgroundsync/StorageManagerId.cpp b/dom/backgroundsync/Storag
    mListenerList.AppendElement(aListener);
  }
  
-@@ -59,17 +72,17 @@ StorageManagerIdFactory::Run()
-   // Execute twice. First on the main thread and the back on the originating
+@@ -60,17 +72,17 @@ StorageManagerIdFactory::Run()
+   // Execute twice. First on the main thread and then back on the originating
    // thread.
  
    if (mManagerId) {
@@ -1578,7 +1578,7 @@ diff --git a/dom/backgroundsync/StorageManagerId.cpp b/dom/backgroundsync/Storag
      // OnStorageManagerIdCreated().
      MOZ_ASSERT(mListenerList.IsEmpty());
  
-     return NS_OK;
+     return;
    }
 diff --git a/dom/backgroundsync/StorageManagerId.h b/dom/backgroundsync/StorageManagerId.h
 --- a/dom/backgroundsync/StorageManagerId.h
@@ -1603,7 +1603,7 @@ diff --git a/dom/backgroundsync/StorageManagerId.h b/dom/backgroundsync/StorageM
  
  class StorageManagerId final
  {
-@@ -53,40 +56,48 @@ public:
+@@ -53,41 +56,49 @@ public:
    // An interface to be implemented by code wishing to use the
    // StorageManagerIdFactory.
    // Note, the Listener implementation is responsible for calling
@@ -1625,11 +1625,12 @@ diff --git a/dom/backgroundsync/StorageManagerId.h b/dom/backgroundsync/StorageM
 +  Create(Listener* aListener, const PrincipalInfo& aPrincipalInfo,
 +         const SyncInternalOp& aOp);
 +
-   void AddListener(Listener* aListener);
    // The Listener must call RemoveListener() when
    // OnStorageManagerIdCreated is called or when
    // the Listener is destroyed.
    void RemoveListener(Listener* aListener);
+ 
+   void Run();
  
  private:
    StorageManagerIdFactory(Listener* aListener,
@@ -1648,7 +1649,7 @@ diff --git a/dom/backgroundsync/StorageManagerId.h b/dom/backgroundsync/StorageM
 +  const SyncInternalOp mOp;
  
  public:
-   NS_DECL_NSIRUNNABLE
+   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(StorageManagerIdFactory)
  };
  
  } // namespace backgroundsync
