@@ -7,7 +7,7 @@ diff --git a/storage/IncrementalVacuumConnection.cpp b/storage/IncrementalVacuum
 new file mode 100644
 --- /dev/null
 +++ b/storage/IncrementalVacuumConnection.cpp
-@@ -0,0 +1,750 @@
+@@ -0,0 +1,298 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -16,6 +16,7 @@ new file mode 100644
 +
 +#include "IncrementalVacuumConnection.h"
 +
++#include "mozStorageConnectionUtils.h"
 +#include "mozStorageHelper.h"
 +#include "nsClassHashtable.h"
 +#include "nsPrintfCString.h"
@@ -31,57 +32,8 @@ new file mode 100644
 +                  mozIStorageAsyncConnection,
 +                  mozIStorageConnection);
 +
-+namespace {
-+
-+class MOZ_RAII AutoDisableForeignKeyChecking
-+{
-+public:
-+  explicit AutoDisableForeignKeyChecking(mozIStorageConnection* aConn)
-+    : mConn(aConn)
-+    , mForeignKeyCheckingDisabled(false)
-+  {
-+    nsCOMPtr<mozIStorageStatement> state;
-+    nsresult rv = mConn->CreateStatement(NS_LITERAL_CSTRING(
-+      "PRAGMA foreign_keys;"
-+    ), getter_AddRefs(state));
-+    if (NS_WARN_IF(NS_FAILED(rv))) { return; }
-+
-+    bool hasMoreData = false;
-+    rv = state->ExecuteStep(&hasMoreData);
-+    if (NS_WARN_IF(NS_FAILED(rv))) { return; }
-+
-+    int32_t mode;
-+    rv = state->GetInt32(0, &mode);
-+    if (NS_WARN_IF(NS_FAILED(rv))) { return; }
-+
-+    if (mode) {
-+      nsresult rv = mConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
-+        "PRAGMA foreign_keys = OFF;"
-+      ));
-+      if (NS_WARN_IF(NS_FAILED(rv))) { return; }
-+      mForeignKeyCheckingDisabled = true;
-+    }
-+  }
-+
-+  ~AutoDisableForeignKeyChecking()
-+  {
-+    if (mForeignKeyCheckingDisabled) {
-+      nsresult rv = mConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
-+        "PRAGMA foreign_keys = ON;"
-+      ));
-+      if (NS_WARN_IF(NS_FAILED(rv))) { return; }
-+    }
-+  }
-+
-+private:
-+  nsCOMPtr<mozIStorageConnection> mConn;
-+  bool mForeignKeyCheckingDisabled;
-+};
-+
-+} // anonymous namespace
-+
 +IncrementalVacuumConnection::IncrementalVacuumConnection(
-+  mozIStorageConnection* aBase, const int32_t aMaxFreePages)
++    mozIStorageConnection* aBase, const int32_t aMaxFreePages)
 +  : mBase(aBase)
 +  , mMaxFreePages(aMaxFreePages)
 +  , mClosed(false)
@@ -107,7 +59,7 @@ new file mode 100644
 +
 +  // If we are closing here, then we must not have a transaction
 +  // open anywhere else. This should be guaranteed to succeed.
-+  MOZ_ALWAYS_SUCCEEDS(IncrementalVacuum());
++  MOZ_ALWAYS_SUCCEEDS(IncrementalVacuum(mBase, mMaxFreePages));
 +
 +  return mBase->Close();
 +}
@@ -140,8 +92,8 @@ new file mode 100644
 +}
 +
 +NS_IMETHODIMP
-+IncrementalVacuumConnection::CreateAsyncStatement(
-+    const nsACString&, mozIStorageAsyncStatement**)
++IncrementalVacuumConnection::CreateAsyncStatement(const nsACString&,
++                                                  mozIStorageAsyncStatement**)
 +{
 +  // async methods are not supported.
 +  return NS_ERROR_NOT_IMPLEMENTED;
@@ -158,8 +110,7 @@ new file mode 100644
 +
 +NS_IMETHODIMP
 +IncrementalVacuumConnection::ExecuteSimpleSQLAsync(const nsACString&,
-+                                                   mozIStorageStatementCallback*,
-+                                                   mozIStoragePendingStatement**)
++    mozIStorageStatementCallback*, mozIStoragePendingStatement**)
 +{
 +  // async methods are not supported.
 +  return NS_ERROR_NOT_IMPLEMENTED;
@@ -175,25 +126,24 @@ new file mode 100644
 +}
 +
 +NS_IMETHODIMP
-+IncrementalVacuumConnection::CreateAggregateFunction(const nsACString& aFunctionName,
-+                                                     int32_t aNumArguments,
-+                                                     mozIStorageAggregateFunction* aFunction)
++IncrementalVacuumConnection::CreateAggregateFunction(
++    const nsACString& aFunctionName, int32_t aNumArguments,
++    mozIStorageAggregateFunction* aFunction)
 +{
 +  return mBase->CreateAggregateFunction(aFunctionName, aNumArguments,
 +                                        aFunction);
 +}
 +
 +NS_IMETHODIMP
-+IncrementalVacuumConnection::RemoveFunction(
-+    const nsACString& aFunctionName)
++IncrementalVacuumConnection::RemoveFunction(const nsACString& aFunctionName)
 +{
 +  return mBase->RemoveFunction(aFunctionName);
 +}
 +
 +NS_IMETHODIMP
-+IncrementalVacuumConnection::SetProgressHandler(int32_t aGranularity,
-+                                                mozIStorageProgressHandler* aHandler,
-+                                                mozIStorageProgressHandler** aHandlerOut)
++IncrementalVacuumConnection::SetProgressHandler(
++    int32_t aGranularity, mozIStorageProgressHandler* aHandler,
++    mozIStorageProgressHandler** aHandlerOut)
 +{
 +  return mBase->SetProgressHandler(aGranularity, aHandler, aHandlerOut);
 +}
@@ -354,7 +304,154 @@ new file mode 100644
 +  return mBase->GetQuotaObjects(aDatabaseQuotaObject, aJournalQuotaObject);
 +}
 +
-+struct IncrementalVacuumConnection::Expect
++} // namespace storage
++} // namespace mozilla
+diff --git a/storage/IncrementalVacuumConnection.h b/storage/IncrementalVacuumConnection.h
+new file mode 100644
+--- /dev/null
++++ b/storage/IncrementalVacuumConnection.h
+@@ -0,0 +1,37 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#ifndef mozilla_storage_IncrementalVacuumConnection_h
++#define mozilla_storage_IncrementalVacuumConnection_h
++
++#include "mozIStorageConnection.h"
++#include "nsCOMPtr.h"
++
++namespace mozilla {
++namespace storage {
++
++class IncrementalVacuumConnection final : public mozIStorageConnection
++{
++public:
++  IncrementalVacuumConnection(mozIStorageConnection* aBase,
++                              const int32_t aMaxFreePages);
++
++private:
++  ~IncrementalVacuumConnection();
++
++  nsCOMPtr<mozIStorageConnection> mBase;
++  int32_t mMaxFreePages;
++  bool mClosed;
++
++  NS_DECL_ISUPPORTS
++  NS_DECL_MOZISTORAGEASYNCCONNECTION
++  NS_DECL_MOZISTORAGECONNECTION
++};
++
++} // namespace storage
++} // namespace mozilla
++
++#endif // mozilla_storage_IncrementalVacuumConnection_h
+diff --git a/storage/moz.build b/storage/moz.build
+--- a/storage/moz.build
++++ b/storage/moz.build
+@@ -40,30 +40,34 @@ EXPORTS += [
+ 
+ EXPORTS.mozilla += [
+     'storage.h',
+ ]
+ 
+ # NOTE When adding something to this list, you probably need to add it to the
+ #      storage.h file too.
+ EXPORTS.mozilla.storage += [
++    'IncrementalVacuumConnection.h',
++    'mozStorageConnectionUtils.h',
+     'StatementCache.h',
+     'Variant.h',
+     'Variant_inl.h',
+ ]
+ # SEE ABOVE NOTE!
+ 
+ UNIFIED_SOURCES += [
+     'FileSystemModule.cpp',
++    'IncrementalVacuumConnection.cpp',
+     'mozStorageArgValueArray.cpp',
+     'mozStorageAsyncStatement.cpp',
+     'mozStorageAsyncStatementExecution.cpp',
+     'mozStorageAsyncStatementJSHelper.cpp',
+     'mozStorageAsyncStatementParams.cpp',
+     'mozStorageBindingParamsArray.cpp',
++    'mozStorageConnectionUtils.cpp',
+     'mozStorageError.cpp',
+     'mozStoragePrivateHelpers.cpp',
+     'mozStorageResultSet.cpp',
+     'mozStorageRow.cpp',
+     'mozStorageService.cpp',
+     'mozStorageSQLFunctions.cpp',
+     'mozStorageStatement.cpp',
+     'mozStorageStatementJSHelper.cpp',
+diff --git a/storage/mozStorageConnectionUtils.cpp b/storage/mozStorageConnectionUtils.cpp
+new file mode 100644
+--- /dev/null
++++ b/storage/mozStorageConnectionUtils.cpp
+@@ -0,0 +1,469 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#include "mozStorageConnectionUtils.h"
++
++namespace mozilla {
++namespace storage {
++
++namespace {
++
++class MOZ_RAII AutoDisableForeignKeyChecking
++{
++public:
++  explicit AutoDisableForeignKeyChecking(mozIStorageConnection* aConn)
++    : mConn(aConn)
++    , mForeignKeyCheckingDisabled(false)
++  {
++    nsCOMPtr<mozIStorageStatement> state;
++    nsresult rv = mConn->CreateStatement(NS_LITERAL_CSTRING(
++      "PRAGMA foreign_keys;"
++    ), getter_AddRefs(state));
++    if (NS_WARN_IF(NS_FAILED(rv))) { return; }
++
++    bool hasMoreData = false;
++    rv = state->ExecuteStep(&hasMoreData);
++    if (NS_WARN_IF(NS_FAILED(rv))) { return; }
++
++    int32_t mode;
++    rv = state->GetInt32(0, &mode);
++    if (NS_WARN_IF(NS_FAILED(rv))) { return; }
++
++    if (mode) {
++      nsresult rv = mConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
++        "PRAGMA foreign_keys = OFF;"
++      ));
++      if (NS_WARN_IF(NS_FAILED(rv))) { return; }
++      mForeignKeyCheckingDisabled = true;
++    }
++  }
++
++  ~AutoDisableForeignKeyChecking()
++  {
++    if (mForeignKeyCheckingDisabled) {
++      nsresult rv = mConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
++        "PRAGMA foreign_keys = ON;"
++      ));
++      if (NS_WARN_IF(NS_FAILED(rv))) { return; }
++    }
++  }
++
++private:
++  nsCOMPtr<mozIStorageConnection> mConn;
++  bool mForeignKeyCheckingDisabled;
++};
++
++} // anonymous namespace
++
++struct Expect
 +{
 +  // Expect exact SQL
 +  Expect(const char* aName, const char* aType, const char* aSql)
@@ -378,11 +475,12 @@ new file mode 100644
 +};
 +
 +nsresult
-+IncrementalVacuumConnection::Validate(const int32_t aLatestSchemaVersion,
-+                                      const nsTArray<Expect>& aExpectedSchema)
++Validate(mozIStorageConnection* aConn,
++         const int32_t aLatestSchemaVersion,
++         const nsTArray<Expect>& aExpectedSchema)
 +{
 +  int32_t schemaVersion;
-+  nsresult rv = mBase->GetSchemaVersion(&schemaVersion);
++  nsresult rv = aConn->GetSchemaVersion(&schemaVersion);
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +  if (NS_WARN_IF(schemaVersion != aLatestSchemaVersion)) {
@@ -392,7 +490,7 @@ new file mode 100644
 +#ifdef DEBUG
 +  // Read the schema from the sqlite_master table and compare.
 +  nsCOMPtr<mozIStorageStatement> state;
-+  rv = mBase->CreateStatement(NS_LITERAL_CSTRING(
++  rv = aConn->CreateStatement(NS_LITERAL_CSTRING(
 +    "SELECT name, type, sql FROM sqlite_master;"
 +  ), getter_AddRefs(state));
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
@@ -442,10 +540,9 @@ new file mode 100644
 +  return rv;
 +}
 +
-+typedef nsresult (*MigrationFunc)(mozIStorageConnection*,
-+                                  IncrementalVacuumConnection::SchemaRewrite&);
++typedef nsresult (*MigrationFunc)(mozIStorageConnection*, SchemaRewrite&);
 +
-+struct IncrementalVacuumConnection::Migration
++struct Migration
 +{
 +  constexpr Migration(int32_t aFromVersion, MigrationFunc aFunc)
 +    : mFromVersion(aFromVersion)
@@ -456,15 +553,16 @@ new file mode 100644
 +};
 +
 +nsresult
-+IncrementalVacuumConnection::RewriteSchema(const SchemaRewrite& aSchemaRewrite)
++RewriteSchema(mozIStorageConnection* aConn,
++              const SchemaRewrite& aSchemaRewrite)
 +{
-+  nsresult rv = mBase->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
++  nsresult rv = aConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
 +    "PRAGMA writable_schema = ON"
 +  ));
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +  nsCOMPtr<mozIStorageStatement> state;
-+  rv = mBase->CreateStatement(NS_LITERAL_CSTRING(
++  rv = aConn->CreateStatement(NS_LITERAL_CSTRING(
 +    "UPDATE sqlite_master SET sql=:sql WHERE name=:name"
 +  ), getter_AddRefs(state));
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
@@ -480,7 +578,7 @@ new file mode 100644
 +  rv = state->Execute();
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
-+  rv = mBase->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
++  rv = aConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
 +    "PRAGMA writable_schema = OFF"
 +  ));
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
@@ -489,15 +587,16 @@ new file mode 100644
 +}
 +
 +nsresult
-+IncrementalVacuumConnection::Migrate(const int32_t aLatestSchemaVersion,
-+                                     const int32_t aFirstShippedSchemaVersion,
-+                                     const nsTArray<Migration>& aMigrationList)
++Migrate(mozIStorageConnection* aConn,
++        const int32_t aLatestSchemaVersion,
++        const int32_t aFirstShippedSchemaVersion,
++        const nsTArray<Migration>& aMigrationList)
 +{
 +  MOZ_ASSERT(!NS_IsMainThread());
-+  MOZ_ASSERT(mBase);
++  MOZ_ASSERT(aConn);
 +
 +  int32_t currentVersion = 0;
-+  nsresult rv = mBase->GetSchemaVersion(&currentVersion);
++  nsresult rv = aConn->GetSchemaVersion(&currentVersion);
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +  nsClassHashtable<nsCStringHashKey, nsCString> schemaRewrites;
@@ -511,7 +610,7 @@ new file mode 100644
 +    for (uint32_t i = 0; i < aMigrationList.Length(); ++i) {
 +      if (aMigrationList[i].mFromVersion == currentVersion) {
 +        SchemaRewrite schemaRewrite;
-+        rv = aMigrationList[i].mFunc(mBase, schemaRewrite);
++        rv = aMigrationList[i].mFunc(aConn, schemaRewrite);
 +        if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +        if (!schemaRewrite.mTableName.IsEmpty() &&
 +            !schemaRewrite.mTableSql.IsEmpty() &&
@@ -523,7 +622,7 @@ new file mode 100644
 +    }
 +
 +    DebugOnly<int32_t> lastVersion = currentVersion;
-+    rv = mBase->GetSchemaVersion(&currentVersion);
++    rv = aConn->GetSchemaVersion(&currentVersion);
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +    MOZ_ASSERT(currentVersion > lastVersion);
 +  }
@@ -535,7 +634,7 @@ new file mode 100644
 +    SchemaRewrite rewrite;
 +    rewrite.mTableName = iter.Key();
 +    rewrite.mTableSql = *schemaRewrites.Get(iter.Key());
-+    rv = RewriteSchema(rewrite);
++    rv = RewriteSchema(aConn, rewrite);
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +  }
 +
@@ -545,23 +644,24 @@ new file mode 100644
 +}
 +
 +nsresult
-+IncrementalVacuumConnection::CreateOrMigrateSchema(const int32_t aFirstShippedSchemaVersion,
-+                                                   const int32_t aLatestSchemaVersion,
-+                                                   const nsTArray<nsCString>& aTablesSql,
-+                                                   const nsTArray<Expect>& aExpectedSchema,
-+                                                   const nsTArray<Migration>& aMigrationList)
++CreateOrMigrateSchema(mozIStorageConnection* aConn,
++                      const int32_t aFirstShippedSchemaVersion,
++                      const int32_t aLatestSchemaVersion,
++                      const nsTArray<nsCString>& aTablesSql,
++                      const nsTArray<Expect>& aExpectedSchema,
++                      const nsTArray<Migration>& aMigrationList)
 +{
 +  MOZ_ASSERT(!NS_IsMainThread());
-+  MOZ_ASSERT(mBase);
++  MOZ_ASSERT(aConn);
 +
 +  int32_t schemaVersion;
-+  nsresult rv = mBase->GetSchemaVersion(&schemaVersion);
++  nsresult rv = aConn->GetSchemaVersion(&schemaVersion);
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +  if (schemaVersion == aLatestSchemaVersion) {
 +    // We already have the correct schema version.  Validate it matches
 +    // our expected schema and then proceed.
-+    rv = Validate(aLatestSchemaVersion, aExpectedSchema);
++    rv = Validate(aConn, aLatestSchemaVersion, aExpectedSchema);
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +    return rv;
@@ -569,15 +669,15 @@ new file mode 100644
 +
 +  // Turn off checking foreign keys before starting a transaction, and restore
 +  // it once we're done.
-+  AutoDisableForeignKeyChecking restoreForeignKeyChecking(mBase);
-+  mozStorageTransaction trans(mBase, false,
++  AutoDisableForeignKeyChecking restoreForeignKeyChecking(aConn);
++  mozStorageTransaction trans(aConn, false,
 +                              mozIStorageConnection::TRANSACTION_IMMEDIATE);
 +  bool needVacuum = false;
 +
 +  if (schemaVersion) {
 +    // A schema exists, but its not the current version.  Attempt to
 +    // migrate it to our new schema.
-+    rv = Migrate(aFirstShippedSchemaVersion, aLatestSchemaVersion,
++    rv = Migrate(aConn, aFirstShippedSchemaVersion, aLatestSchemaVersion,
 +                 aMigrationList);
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
@@ -588,18 +688,18 @@ new file mode 100644
 +  } else {
 +    // There is no schema installed.  Create the database from scratch.
 +    for (uint32_t i = 0; aTablesSql.Length(); i++) {
-+      rv = mBase->ExecuteSimpleSQL(aTablesSql[i]);
++      rv = aConn->ExecuteSimpleSQL(aTablesSql[i]);
 +      if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +    }
 +
-+    rv = mBase->SetSchemaVersion(aLatestSchemaVersion);
++    rv = aConn->SetSchemaVersion(aLatestSchemaVersion);
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
-+    rv = mBase->GetSchemaVersion(&schemaVersion);
++    rv = aConn->GetSchemaVersion(&schemaVersion);
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +  }
 +
-+  rv = Validate(aLatestSchemaVersion, aExpectedSchema);
++  rv = Validate(aConn, aLatestSchemaVersion, aExpectedSchema);
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +  rv = trans.Commit();
@@ -607,7 +707,7 @@ new file mode 100644
 +
 +  if (needVacuum) {
 +    // Unfortunately, this must be performed outside of the transaction.
-+    mBase->ExecuteSimpleSQL(NS_LITERAL_CSTRING("VACUUM"));
++    aConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING("VACUUM"));
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +  }
 +
@@ -615,13 +715,14 @@ new file mode 100644
 +}
 +
 +nsresult
-+IncrementalVacuumConnection::InitializeConnection(const uint32_t aPageSize,
-+                                                  const uint32_t aGrowthSize,
-+                                                  const uint32_t aWalAutoCheckpointPages,
-+                                                  const uint32_t aWalAutoCheckpointSize)
++InitializeConnection(mozIStorageConnection* aConn,
++                     const uint32_t aPageSize,
++                     const uint32_t aGrowthSize,
++                     const uint32_t aWalAutoCheckpointPages,
++                     const uint32_t aWalAutoCheckpointSize)
 +{
 +  MOZ_ASSERT(!NS_IsMainThread());
-+  MOZ_ASSERT(mBase);
++  MOZ_ASSERT(aConn);
 +
 +  // This function needs to perform per-connection initialization tasks that
 +  // need to happen regardless of the schema.
@@ -640,11 +741,11 @@ new file mode 100644
 +  // need ordering and the binary equality operations are correct.  So, do
 +  // NOT set PRAGMA encoding to UTF-16.
 +
-+  nsresult rv = mBase->ExecuteSimpleSQL(pragmas);
++  nsresult rv = aConn->ExecuteSimpleSQL(pragmas);
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +  // Limit fragmentation by growing the database by many pages at once.
-+  rv = mBase->SetGrowthIncrement(aGrowthSize, EmptyCString());
++  rv = aConn->SetGrowthIncrement(aGrowthSize, EmptyCString());
 +  if (rv == NS_ERROR_FILE_TOO_BIG) {
 +    NS_WARNING("Not enough disk space to set sqlite growth increment.");
 +    rv = NS_OK;
@@ -664,7 +765,7 @@ new file mode 100644
 +    aWalAutoCheckpointSize
 +  );
 +
-+  rv = mBase->ExecuteSimpleSQL(wal);
++  rv = aConn->ExecuteSimpleSQL(wal);
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +  // Verify that we successfully set the vacuum mode to incremental.  It
@@ -672,7 +773,7 @@ new file mode 100644
 +  // pragma above fails silently.
 +#ifdef DEBUG
 +  nsCOMPtr<mozIStorageStatement> state;
-+  rv = mBase->CreateStatement(NS_LITERAL_CSTRING(
++  rv = aConn->CreateStatement(NS_LITERAL_CSTRING(
 +    "PRAGMA auto_vacuum;"
 +  ), getter_AddRefs(state));
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
@@ -693,11 +794,12 @@ new file mode 100644
 +}
 +
 +nsresult
-+IncrementalVacuumConnection::IncrementalVacuum()
++IncrementalVacuum(mozIStorageConnection* aConn,
++                  const int32_t aMaxFreePages)
 +{
 +  // Determine how much free space is in the database.
 +  nsCOMPtr<mozIStorageStatement> state;
-+  nsresult rv = mBase->CreateStatement(NS_LITERAL_CSTRING(
++  nsresult rv = aConn->CreateStatement(NS_LITERAL_CSTRING(
 +    "PRAGMA freelist_count;"
 +  ), getter_AddRefs(state));
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
@@ -722,22 +824,22 @@ new file mode 100644
 +  //
 +  // So only proceed with releasing pages if we have more than our constant
 +  // threshold.
-+  if (freePages <= mMaxFreePages) {
++  if (freePages <= aMaxFreePages) {
 +    return NS_OK;
 +  }
 +
 +  // Release the excess pages back to the sqlite VFS.  This may also release
 +  // chunks of multiple pages back to the OS.
-+  int32_t pagesToRelease = freePages - mMaxFreePages;
++  int32_t pagesToRelease = freePages - aMaxFreePages;
 +
-+  rv = mBase->ExecuteSimpleSQL(nsPrintfCString(
++  rv = aConn->ExecuteSimpleSQL(nsPrintfCString(
 +    "PRAGMA incremental_vacuum(%d);", pagesToRelease
 +  ));
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +  // Verify that our incremental vacuum actually did something
 +#ifdef DEBUG
-+  rv = mBase->CreateStatement(NS_LITERAL_CSTRING(
++  rv = aConn->CreateStatement(NS_LITERAL_CSTRING(
 +    "PRAGMA freelist_count;"
 +  ), getter_AddRefs(state));
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
@@ -750,7 +852,7 @@ new file mode 100644
 +  rv = state->GetInt32(0, &freePages);
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
-+  MOZ_ASSERT(freePages <= mMaxFreePages);
++  MOZ_ASSERT(freePages <= aMaxFreePages);
 +#endif
 +
 +  return NS_OK;
@@ -758,19 +860,19 @@ new file mode 100644
 +
 +} // namespace storage
 +} // namespace mozilla
-diff --git a/storage/IncrementalVacuumConnection.h b/storage/IncrementalVacuumConnection.h
+diff --git a/storage/mozStorageConnectionUtils.h b/storage/mozStorageConnectionUtils.h
 new file mode 100644
 --- /dev/null
-+++ b/storage/IncrementalVacuumConnection.h
-@@ -0,0 +1,74 @@
++++ b/storage/mozStorageConnectionUtils.h
+@@ -0,0 +1,47 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 +
-+#ifndef mozilla_dom_Connection_h
-+#define mozilla_dom_Connection_h
++#ifndef mozilla_storage_mozStorageConnectionUtils_h
++#define mozilla_storage_mozStorageConnectionUtils_h
 +
 +#include "mozIStorageConnection.h"
 +#include "nsCOMPtr.h"
@@ -778,95 +880,38 @@ new file mode 100644
 +namespace mozilla {
 +namespace storage {
 +
-+class IncrementalVacuumConnection final : public mozIStorageConnection
++struct Migration;
++struct Expect;
++
++struct SchemaRewrite
 +{
-+public:
-+  IncrementalVacuumConnection(mozIStorageConnection* aBase,
-+                              const int32_t aMaxFreePages);
-+
-+  struct Migration;
-+  struct Expect;
-+
-+  nsresult
-+  CreateOrMigrateSchema(const int32_t aFirstShippedSchemaVersion,
-+                        const int32_t aLatestSchemaVersion,
-+                        const nsTArray<nsCString>& aTablesSql,
-+                        const nsTArray<Expect>& aExpectedSchema,
-+                        const nsTArray<Migration>& aMigrationList);
-+
-+  nsresult
-+  InitializeConnection(const uint32_t aPageSize,
-+                       const uint32_t aGrowthSize,
-+                       const uint32_t aWalAutoCheckpointPages,
-+                       const uint32_t aWalAutoCheckpointSize);
-+
-+  struct SchemaRewrite
-+  {
-+    nsCString mTableName;
-+    nsCString mTableSql;
-+  };
-+
-+private:
-+  ~IncrementalVacuumConnection();
-+
-+  nsresult
-+  Validate(const int32_t aLatestSchemaVersion,
-+           const nsTArray<Expect>& aExpectedSchema);
-+
-+  nsresult
-+  RewriteSchema(const SchemaRewrite& aSchemaRewrite);
-+
-+  nsresult
-+  Migrate(const int32_t aFirstShippedSchemaVersion,
-+          const int32_t aLatestSchemaVersion,
-+          const nsTArray<Migration>& aMigrationList);
-+
-+  nsresult
-+  IncrementalVacuum();
-+
-+  nsCOMPtr<mozIStorageConnection> mBase;
-+  int32_t mMaxFreePages;
-+  bool mClosed;
-+
-+  NS_DECL_ISUPPORTS
-+  NS_DECL_MOZISTORAGEASYNCCONNECTION
-+  NS_DECL_MOZISTORAGECONNECTION
++  nsCString mTableName;
++  nsCString mTableSql;
 +};
++
++nsresult
++CreateOrMigrateSchema(mozIStorageConnection* aConn,
++                      const int32_t aFirstShippedSchemaVersion,
++                      const int32_t aLatestSchemaVersion,
++                      const nsTArray<nsCString>& aTablesSql,
++                      const nsTArray<Expect>& aExpectedSchema,
++                      const nsTArray<Migration>& aMigrationList);
++
++nsresult
++InitializeConnection(mozIStorageConnection* aConn,
++                     const uint32_t aPageSize,
++                     const uint32_t aGrowthSize,
++                     const uint32_t aWalAutoCheckpointPages,
++                     const uint32_t aWalAutoCheckpointSize);
++
++nsresult
++IncrementalVacuum(mozIStorageConnection* aConn,
++                  const int32_t aMaxFreePages);
 +
 +} // namespace storage
 +} // namespace mozilla
 +
-+#endif // mozilla_dom_Connection_h
-diff --git a/storage/moz.build b/storage/moz.build
---- a/storage/moz.build
-+++ b/storage/moz.build
-@@ -40,24 +40,26 @@ EXPORTS += [
- 
- EXPORTS.mozilla += [
-     'storage.h',
- ]
- 
- # NOTE When adding something to this list, you probably need to add it to the
- #      storage.h file too.
- EXPORTS.mozilla.storage += [
-+    'IncrementalVacuumConnection.h',
-     'StatementCache.h',
-     'Variant.h',
-     'Variant_inl.h',
- ]
- # SEE ABOVE NOTE!
- 
- UNIFIED_SOURCES += [
-     'FileSystemModule.cpp',
-+    'IncrementalVacuumConnection.cpp',
-     'mozStorageArgValueArray.cpp',
-     'mozStorageAsyncStatement.cpp',
-     'mozStorageAsyncStatementExecution.cpp',
-     'mozStorageAsyncStatementJSHelper.cpp',
-     'mozStorageAsyncStatementParams.cpp',
-     'mozStorageBindingParamsArray.cpp',
-     'mozStorageError.cpp',
-     'mozStoragePrivateHelpers.cpp',
++#endif // mozilla_storage_IncrementalVacuumConnection_h
 diff --git a/storage/mozStorageSQLFunctions.cpp b/storage/mozStorageSQLFunctions.cpp
 --- a/storage/mozStorageSQLFunctions.cpp
 +++ b/storage/mozStorageSQLFunctions.cpp
@@ -891,7 +936,7 @@ diff --git a/storage/mozStorageSQLFunctions.cpp b/storage/mozStorageSQLFunctions
 diff --git a/storage/storage.h b/storage/storage.h
 --- a/storage/storage.h
 +++ b/storage/storage.h
-@@ -28,12 +28,13 @@
+@@ -28,12 +28,14 @@
  #include "mozIStorageCompletionCallback.h"
  #include "mozIStorageAsyncStatement.h"
  #include "mozIStorageAsyncConnection.h"
@@ -901,6 +946,7 @@ diff --git a/storage/storage.h b/storage/storage.h
  
  #include "mozStorageHelper.h"
 +#include "mozilla/storage/IncrementalVacuumConnection.h"
++#include "mozilla/storage/mozStorageConnectionUtils.h"
  #include "mozilla/storage/StatementCache.h"
  #include "mozilla/storage/Variant.h"
  
