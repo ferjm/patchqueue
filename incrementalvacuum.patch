@@ -1,0 +1,432 @@
+# HG changeset patch
+# User Fernando Jimenez <ferjmoreno@gmail.com>
+# Parent  af55bb09408a1ce2410a6ffe1b3abf704d04407b
+
+diff --git a/dom/backgroundsync/DBAction.cpp b/dom/backgroundsync/DBAction.cpp
+--- a/dom/backgroundsync/DBAction.cpp
++++ b/dom/backgroundsync/DBAction.cpp
+@@ -1,20 +1,20 @@
+ /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+ /* vim: set ts=8 sts=2 et sw=2 tw=80: */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "DBAction.h"
+-#include "DBConnection.h"
+ #include "DBSchema.h"
+ 
+ #include "mozilla/dom/quota/PersistenceType.h"
+ #include "mozilla/net/nsFileProtocolHandler.h"
++#include "mozilla/storage.h"
+ #include "mozIStorageConnection.h"
+ #include "mozIStorageService.h"
+ #include "mozStorageCID.h"
+ #include "nsIFile.h"
+ #include "nsIURI.h"
+ #include "nsIFileURL.h"
+ #include "nsThreadUtils.h"
+ 
+@@ -79,17 +79,18 @@ DBAction::RunOnTarget(Resolver* aResolve
+     // Save this connection in the shared Data object so later ClientActions
+     // can use it.  This avoids opening a new connection for every
+     // ClientAction.
+     if (aOptionalData) {
+       // Since we know this connection will be around for as long as the
+       // storage is open, use our special wrapped connection class.  This
+       // will let us perform certain operations once the storage origin
+       // is closed.
+-      nsCOMPtr<mozIStorageConnection> wrapped = new DBConnection(conn);
++      nsCOMPtr<mozIStorageConnection> wrapped =
++        new storage::IncrementalVacuumConnection(conn, db::kMaxFreePages);
+       aOptionalData->SetConnection(wrapped);
+     }
+   }
+ 
+   RunWithDBOnTarget(aResolver, aQuotaInfo, dbDir, conn);
+ }
+ 
+ nsresult
+diff --git a/dom/backgroundsync/DBConnection.cpp b/dom/backgroundsync/DBConnection.cpp
+deleted file mode 100644
+--- a/dom/backgroundsync/DBConnection.cpp
++++ /dev/null
+@@ -1,287 +0,0 @@
+-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+-/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+-/* This Source Code Form is subject to the terms of the Mozilla Public
+- * License, v. 2.0. If a copy of the MPL was not distributed with this
+- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+-
+-#include "DBConnection.h"
+-#include "DBSchema.h"
+-
+-#include "mozStorageHelper.h"
+-
+-namespace mozilla {
+-namespace dom {
+-namespace backgroundsync {
+-
+-using quota::QuotaObject;
+-
+-NS_IMPL_ISUPPORTS(DBConnection, mozIStorageAsyncConnection,
+-                  mozIStorageConnection);
+-
+-DBConnection::DBConnection(mozIStorageConnection* aBase)
+-  : mBase(aBase)
+-  , mClosed(false)
+-{
+-  MOZ_ASSERT(mBase);
+-}
+-
+-DBConnection::~DBConnection()
+-{
+-  NS_ASSERT_OWNINGTHREAD(DBConnection);
+-  MOZ_ALWAYS_SUCCEEDS(Close());
+-}
+-
+-NS_IMETHODIMP
+-DBConnection::Close()
+-{
+-  NS_ASSERT_OWNINGTHREAD(DBConnection);
+-
+-  if (mClosed) {
+-    return NS_OK;
+-  }
+-  mClosed = true;
+-
+-  // If we are closing here, then we must not have a transaction
+-  // open anywhere else. This should be guaranteed to succeed.
+-  MOZ_ALWAYS_SUCCEEDS(dbutils::IncrementalVacuum(this));
+-
+-  return mBase->Close();
+-}
+-
+-// The following methods are all boilerplate that either forward to the
+-// base connection or block the method. All the async execution methods
+-// are blocked because we do not use them and they would require more
+-// work to wrap properly.
+-
+-// mozIStorageAsyncConnection methods
+-
+-NS_IMETHODIMP
+-DBConnection::AsyncClose(mozIStorageCompletionCallback*)
+-{
+-  // async methods are not supported.
+-  return NS_ERROR_NOT_IMPLEMENTED;
+-}
+-
+-NS_IMETHODIMP
+-DBConnection::AsyncClone(bool, mozIStorageCompletionCallback*)
+-{
+-  // async methods are not supported.
+-  return NS_ERROR_NOT_IMPLEMENTED;
+-}
+-
+-NS_IMETHODIMP
+-DBConnection::GetDatabaseFile(nsIFile** aFileOut)
+-{
+-  return mBase->GetDatabaseFile(aFileOut);
+-}
+-
+-NS_IMETHODIMP
+-DBConnection::CreateAsyncStatement(const nsACString&, mozIStorageAsyncStatement**)
+-{
+-  // async methods are not supported.
+-  return NS_ERROR_NOT_IMPLEMENTED;
+-}
+-
+-NS_IMETHODIMP
+-DBConnection::ExecuteAsync(mozIStorageBaseStatement**, uint32_t,
+-                           mozIStorageStatementCallback*,
+-                           mozIStoragePendingStatement**)
+-{
+-  // async methods are not supported.
+-  return NS_ERROR_NOT_IMPLEMENTED;
+-}
+-
+-NS_IMETHODIMP
+-DBConnection::ExecuteSimpleSQLAsync(const nsACString&,
+-                                    mozIStorageStatementCallback*,
+-                                    mozIStoragePendingStatement**)
+-{
+-  // async methods are not supported.
+-  return NS_ERROR_NOT_IMPLEMENTED;
+-}
+-
+-NS_IMETHODIMP
+-DBConnection::CreateFunction(const nsACString& aFunctionName,
+-                             int32_t aNumArguments,
+-                             mozIStorageFunction* aFunction)
+-{
+-  // async methods are not supported.
+-  return NS_ERROR_NOT_IMPLEMENTED;
+-}
+-
+-NS_IMETHODIMP
+-DBConnection::CreateAggregateFunction(const nsACString& aFunctionName,
+-                                      int32_t aNumArguments,
+-                                      mozIStorageAggregateFunction* aFunction)
+-{
+-  return mBase->CreateAggregateFunction(aFunctionName, aNumArguments,
+-                                        aFunction);
+-}
+-
+-NS_IMETHODIMP
+-DBConnection::RemoveFunction(const nsACString& aFunctionName)
+-{
+-  return mBase->RemoveFunction(aFunctionName);
+-}
+-
+-NS_IMETHODIMP
+-DBConnection::SetProgressHandler(int32_t aGranularity,
+-                                 mozIStorageProgressHandler* aHandler,
+-                                 mozIStorageProgressHandler** aHandlerOut)
+-{
+-  return mBase->SetProgressHandler(aGranularity, aHandler, aHandlerOut);
+-}
+-
+-NS_IMETHODIMP
+-DBConnection::RemoveProgressHandler(mozIStorageProgressHandler** aHandlerOut)
+-{
+-  return mBase->RemoveProgressHandler(aHandlerOut);
+-}
+-
+-// mozIStorageConnection methods
+-
+-NS_IMETHODIMP
+-DBConnection::Clone(bool aReadOnly, mozIStorageConnection** aConnectionOut)
+-{
+-  nsCOMPtr<mozIStorageConnection> conn;
+-  nsresult rv = mBase->Clone(aReadOnly, getter_AddRefs(conn));
+-  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-  nsCOMPtr<mozIStorageConnection> wrapped = new DBConnection(conn);
+-  wrapped.forget(aConnectionOut);
+-
+-  return rv;
+-}
+-
+-NS_IMETHODIMP
+-DBConnection::GetDefaultPageSize(int32_t* aSizeOut)
+-{
+-  return mBase->GetDefaultPageSize(aSizeOut);
+-}
+-
+-NS_IMETHODIMP
+-DBConnection::GetConnectionReady(bool* aReadyOut)
+-{
+-  return mBase->GetConnectionReady(aReadyOut);
+-}
+-
+-NS_IMETHODIMP
+-DBConnection::GetLastInsertRowID(int64_t* aRowIdOut)
+-{
+-  return mBase->GetLastInsertRowID(aRowIdOut);
+-}
+-
+-NS_IMETHODIMP
+-DBConnection::GetAffectedRows(int32_t* aCountOut)
+-{
+-  return mBase->GetAffectedRows(aCountOut);
+-}
+-
+-NS_IMETHODIMP
+-DBConnection::GetLastError(int32_t* aErrorOut)
+-{
+-  return mBase->GetLastError(aErrorOut);
+-}
+-
+-NS_IMETHODIMP
+-DBConnection::GetLastErrorString(nsACString& aErrorOut)
+-{
+-  return mBase->GetLastErrorString(aErrorOut);
+-}
+-
+-NS_IMETHODIMP
+-DBConnection::GetSchemaVersion(int32_t* aVersionOut)
+-{
+-  return mBase->GetSchemaVersion(aVersionOut);
+-}
+-
+-NS_IMETHODIMP
+-DBConnection::SetSchemaVersion(int32_t aVersion)
+-{
+-  return mBase->SetSchemaVersion(aVersion);
+-}
+-
+-NS_IMETHODIMP
+-DBConnection::CreateStatement(const nsACString& aQuery,
+-                              mozIStorageStatement** aStatementOut)
+-{
+-  return mBase->CreateStatement(aQuery, aStatementOut);
+-}
+-
+-NS_IMETHODIMP
+-DBConnection::ExecuteSimpleSQL(const nsACString& aQuery)
+-{
+-  return mBase->ExecuteSimpleSQL(aQuery);
+-}
+-
+-NS_IMETHODIMP
+-DBConnection::TableExists(const nsACString& aTableName, bool* aExistsOut)
+-{
+-  return mBase->TableExists(aTableName, aExistsOut);
+-}
+-
+-NS_IMETHODIMP
+-DBConnection::IndexExists(const nsACString& aIndexName, bool* aExistsOut)
+-{
+-  return mBase->IndexExists(aIndexName, aExistsOut);
+-}
+-
+-NS_IMETHODIMP
+-DBConnection::GetTransactionInProgress(bool* aResultOut)
+-{
+-  return mBase->GetTransactionInProgress(aResultOut);
+-}
+-
+-NS_IMETHODIMP
+-DBConnection::BeginTransaction()
+-{
+-  return mBase->BeginTransaction();
+-}
+-
+-NS_IMETHODIMP
+-DBConnection::BeginTransactionAs(int32_t aType)
+-{
+-  return mBase->BeginTransactionAs(aType);
+-}
+-
+-NS_IMETHODIMP
+-DBConnection::CommitTransaction()
+-{
+-  return mBase->CommitTransaction();
+-}
+-
+-NS_IMETHODIMP
+-DBConnection::RollbackTransaction()
+-{
+-  return mBase->RollbackTransaction();
+-}
+-
+-NS_IMETHODIMP
+-DBConnection::CreateTable(const char* aTable, const char* aSchema)
+-{
+-  return mBase->CreateTable(aTable, aSchema);
+-}
+-
+-NS_IMETHODIMP
+-DBConnection::SetGrowthIncrement(int32_t aIncrement,
+-                                 const nsACString& aDatabase)
+-{
+-  return mBase->SetGrowthIncrement(aIncrement, aDatabase);
+-}
+-
+-NS_IMETHODIMP
+-DBConnection::EnableModule(const nsACString& aModule)
+-{
+-  return mBase->EnableModule(aModule);
+-}
+-
+-NS_IMETHODIMP
+-DBConnection::GetQuotaObjects(QuotaObject** aDatabaseQuotaObject,
+-                              QuotaObject** aJournalQuotaObject)
+-{
+-  return mBase->GetQuotaObjects(aDatabaseQuotaObject, aJournalQuotaObject);
+-}
+-
+-} // namespace backgroundsync
+-} // namespace dom
+-} // namespace mozilla
+diff --git a/dom/backgroundsync/DBConnection.h b/dom/backgroundsync/DBConnection.h
+deleted file mode 100644
+--- a/dom/backgroundsync/DBConnection.h
++++ /dev/null
+@@ -1,36 +0,0 @@
+-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+-/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+-/* This Source Code Form is subject to the terms of the Mozilla Public
+- * License, v. 2.0. If a copy of the MPL was not distributed with this
+- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+-
+-#ifndef mozilla_dom_Connection_h
+-#define mozilla_dom_Connection_h
+-
+-#include "mozIStorageConnection.h"
+-
+-namespace mozilla {
+-namespace dom {
+-namespace backgroundsync {
+-
+-class DBConnection final : public mozIStorageConnection
+-{
+-public:
+-  explicit DBConnection(mozIStorageConnection* aBase);
+-
+-private:
+-  ~DBConnection();
+-
+-  nsCOMPtr<mozIStorageConnection> mBase;
+-  bool mClosed;
+-
+-  NS_DECL_ISUPPORTS
+-  NS_DECL_MOZISTORAGEASYNCCONNECTION
+-  NS_DECL_MOZISTORAGECONNECTION
+-};
+-
+-} // namespace backgroundsync
+-} // namespace dom
+-} // namespace mozilla
+-
+-#endif // mozilla_dom_Connection_h
+diff --git a/dom/backgroundsync/DBSchema.h b/dom/backgroundsync/DBSchema.h
+--- a/dom/backgroundsync/DBSchema.h
++++ b/dom/backgroundsync/DBSchema.h
+@@ -59,14 +59,25 @@ ChangeState(mozIStorageConnection* aConn
+ // Note, this works best when its NOT executed within a transaction.
+ nsresult
+ IncrementalVacuum(mozIStorageConnection* aConn);
+ 
+ // We will wipe out databases with schema versions less than this. Newer
+ // versions will be migrated on open to the latest schema version.
+ extern const int32_t kFirstShippedSchemaVersion;
+ 
++const uint32_t kPageSize = 4 * 1024;
++
++// Grow the database in chunks to reduce fragmentation
++const uint32_t kGrowthSize = 32 * 1024;
++const uint32_t kGrowthPages = kGrowthSize / kPageSize;
++static_assert(kGrowthSize % kPageSize == 0,
++              "Growth size must be multiple of page size");
++
++// Only release free pages when we have more than this limit
++extern const int32_t kMaxFreePages = kGrowthPages;
++
+ } // namespace db
+ } // namespace backgroundsync
+ } // namespace dom
+ } // namespace mozilla
+ 
+ #endif // mozilla_dom_DBSchema_h
+diff --git a/dom/backgroundsync/moz.build b/dom/backgroundsync/moz.build
+--- a/dom/backgroundsync/moz.build
++++ b/dom/backgroundsync/moz.build
+@@ -11,17 +11,16 @@ EXPORTS.mozilla.dom.backgroundsync += [
+ 
+ UNIFIED_SOURCES += [
+     'BackgroundSync.cpp',
+     'BackgroundSyncChild.cpp',
+     'BackgroundSyncParent.cpp',
+     'ChromeDBSchema.cpp',
+     'ChromeStorageManager.cpp',
+     'DBAction.cpp',
+-    'DBConnection.cpp',
+     'DBSchema.cpp',
+     'DBSchemaUtils.cpp',
+     'QuotaClient.cpp',
+     'StorageManager.cpp',
+     'StorageManagerId.cpp'
+ ]
+ 
+ IPDL_SOURCES += [
