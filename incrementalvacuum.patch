@@ -1,7 +1,68 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  af55bb09408a1ce2410a6ffe1b3abf704d04407b
+# Parent  2800ee93ea77a9c804cf50c65756e774cea427c3
 
+diff --git a/dom/backgroundsync/ChromeDBSchema.cpp b/dom/backgroundsync/ChromeDBSchema.cpp
+--- a/dom/backgroundsync/ChromeDBSchema.cpp
++++ b/dom/backgroundsync/ChromeDBSchema.cpp
+@@ -3,27 +3,26 @@
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "ChromeDBSchema.h"
+ #include "DBSchemaUtils.h"
+ 
+ #include "ipc/IPCMessageUtils.h"
++#include "mozilla/storage.h"
+ #include "mozIStorageConnection.h"
+ #include "mozIStorageStatement.h"
+ #include "mozStorageHelper.h"
+ 
+ namespace mozilla {
+ namespace dom {
+ namespace backgroundsync {
+ namespace chromedb {
+ 
+-const int32_t kFirstShippedSchemaVersion = 1;
+-
+ namespace {
+ 
+ // Update this whenever the DB schema is changed.
+ const int32_t kLatestSchemaVersion = 1;
+ 
+ // ---------
+ const char* const kTableRegistrations =
+   "CREATE TABLE origins ("
+@@ -33,19 +32,25 @@ const char* const kTableRegistrations =
+ // End schema definition
+ // ---------
+ 
+ } // namespace
+ 
+ nsresult
+ CreateOrMigrateSchema(mozIStorageConnection* aConn)
+ {
+-  return dbutils::CreateOrMigrateSchema(aConn, kLatestSchemaVersion,
+-                                        kTableRegistrations,
+-                                        "origins");
++  nsTArray<nsCString> tablesSql;
++  tablesSql.AppendElement(NS_LITERAL_STRING(kTableRegistrations));
++
++  nsTArray<storage::Expect> expect;
++  nsTArray<storage::Migration> migrationList;
++
++  return storage::CreateOrMigrateSchema(aConn, kFirstShippedSchemaVersion,
++                                        kLatestSchemaVersion, tablesSql, expect,
++                                        migrationList);
+ }
+ 
+ nsresult
+ InitializeConnection(mozIStorageConnection* aConn)
+ {
+   return dbutils::InitializeConnection(aConn);
+ }
+ 
 diff --git a/dom/backgroundsync/DBAction.cpp b/dom/backgroundsync/DBAction.cpp
 --- a/dom/backgroundsync/DBAction.cpp
 +++ b/dom/backgroundsync/DBAction.cpp
@@ -409,6 +470,365 @@ diff --git a/dom/backgroundsync/DBSchema.h b/dom/backgroundsync/DBSchema.h
  } // namespace mozilla
  
  #endif // mozilla_dom_DBSchema_h
+diff --git a/dom/backgroundsync/DBSchemaUtils.cpp b/dom/backgroundsync/DBSchemaUtils.cpp
+--- a/dom/backgroundsync/DBSchemaUtils.cpp
++++ b/dom/backgroundsync/DBSchemaUtils.cpp
+@@ -2,16 +2,17 @@
+ /* vim: set ts=8 sts=2 et sw=2 tw=80: */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "DBSchemaUtils.h"
+ 
+ #include "ipc/IPCMessageUtils.h"
++#include "mozilla/storage.h"
+ #include "mozIStorageConnection.h"
+ #include "mozIStorageStatement.h"
+ #include "mozStorageHelper.h"
+ #include "nsPrintfCString.h"
+ 
+ namespace mozilla {
+ namespace dom {
+ namespace backgroundsync {
+@@ -32,337 +33,32 @@ static_assert(kGrowthSize % kPageSize ==
+ // Only release free pages when we have more than this limit
+ const int32_t kMaxFreePages = kGrowthPages;
+ 
+ // Limit WAL journal to a reasonable size
+ const uint32_t kWalAutoCheckpointSize = 512 * 1024;
+ const uint32_t kWalAutoCheckpointPages = kWalAutoCheckpointSize / kPageSize;
+ static_assert(kWalAutoCheckpointSize % kPageSize == 0,
+               "WAL checkpoint size must be multiple of page size");
+-
+-nsresult Validate(mozIStorageConnection* aConn,
+-                  int32_t aLatestSchemaVersion,
+-                  const char* aTableSql,
+-                  const char* aExpectedTableName);
+-nsresult Migrate(mozIStorageConnection* aConn);
+-
+ } // namespace
+ 
+ nsresult
+ CreateOrMigrateSchema(mozIStorageConnection* aConn,
+                       int32_t aLatestSchemaVersion,
+                       const char* aTableSql,
+                       const char* aExpectedTableName)
+ {
+-  MOZ_ASSERT(!NS_IsMainThread());
+-  MOZ_ASSERT(aConn);
+-
+-  int32_t schemaVersion;
+-  nsresult rv = aConn->GetSchemaVersion(&schemaVersion);
+-  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-  if (schemaVersion == aLatestSchemaVersion) {
+-    // We already have the correct schema version. Validate it matches
+-    // our expected schema and then proceed.
+-    rv = Validate(aConn, aLatestSchemaVersion, aTableSql, aExpectedTableName);
+-    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-    return rv;
+-  }
+-
+-  mozStorageTransaction trans(aConn, false,
+-                              mozIStorageConnection::TRANSACTION_IMMEDIATE);
+-  bool needVacuum = false;
+-
+-  if (schemaVersion) {
+-    // A schema exists, but its not the current version. Attempt to
+-    // migrate it to our new schema.
+-    rv = Migrate(aConn);
+-    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-    // Migrations happen infrequently and reflect a change in DB structure.
+-    // This is a good time to rebuild the database.  It also helps catch
+-    // if a new migration is incorrect by fast failing on the corruption.
+-    needVacuum = true;
+-  } else {
+-    // There is no schema installed.  Create the database from scratch.
+-    rv = aConn->ExecuteSimpleSQL(nsDependentCString(aTableSql));
+-    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-    rv = aConn->SetSchemaVersion(aLatestSchemaVersion);
+-    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-    rv = aConn->GetSchemaVersion(&schemaVersion);
+-    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-  }
+-
+-  rv = Validate(aConn, aLatestSchemaVersion, aTableSql, aExpectedTableName);
+-  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-  rv = trans.Commit();
+-  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-  if (needVacuum) {
+-    // Unfortunately, this must be performed outside of the transaction.
+-    aConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING("VACUUM"));
+-    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-  }
+-
+-  return rv;
+ }
+ 
+ nsresult
+ InitializeConnection(mozIStorageConnection* aConn)
+ {
+-  MOZ_ASSERT(!NS_IsMainThread());
+-  MOZ_ASSERT(aConn);
+-
+-  // This function needs to perform per-connection initialization tasks that
+-  // need to happen regardless of the schema.
+-
+-  nsPrintfCString pragmas(
+-    // Use a smaller page size to improve perf/footprint; default is too large
+-    "PRAGMA page_size = %u; "
+-    // Enable auto_vacuum; this must happen after page_size and before WAL
+-    "PRAGMA auto_vacuum = INCREMENTAL; "
+-    "PRAGMA foreign_keys = ON; ",
+-    kPageSize
+-  );
+-
+-  // Note, the default encoding of UTF-8 is preferred.  mozStorage does all
+-  // the work necessary to convert UTF-16 nsString values for us.  We don't
+-  // need ordering and the binary equality operations are correct.  So, do
+-  // NOT set PRAGMA encoding to UTF-16.
+-
+-  nsresult rv = aConn->ExecuteSimpleSQL(pragmas);
+-  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-  // Limit fragmentation by growing the database by many pages at once.
+-  rv = aConn->SetGrowthIncrement(kGrowthSize, EmptyCString());
+-  if (rv == NS_ERROR_FILE_TOO_BIG) {
+-    NS_WARNING("Not enough disk space to set sqlite growth increment.");
+-    rv = NS_OK;
+-  }
+-  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-  // Enable WAL journaling. This must be performed in a separate transaction
+-  // after changing the page_size and enabling auto_vacuum.
+-  nsPrintfCString wal(
+-    // WAL journal can grow to given number of *pages*
+-    "PRAGMA wal_autocheckpoint = %u; "
+-    // Always truncate the journal back to given number of *bytes*
+-    "PRAGMA journal_size_limit = %u; "
+-    // WAL must be enabled at the end to allow page size to be changed, etc.
+-    "PRAGMA journal_mode = WAL; ",
+-    kWalAutoCheckpointPages,
+-    kWalAutoCheckpointSize
+-  );
+-
+-  rv = aConn->ExecuteSimpleSQL(wal);
+-  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-  // Verify that we successfully set the vacuum mode to incremental.  It
+-  // is very easy to put the database in a state where the auto_vacuum
+-  // pragma above fails silently.
+-#ifdef DEBUG
+-  nsCOMPtr<mozIStorageStatement> state;
+-  rv = aConn->CreateStatement(NS_LITERAL_CSTRING(
+-    "PRAGMA auto_vacuum;"
+-  ), getter_AddRefs(state));
+-  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-  bool hasMoreData = false;
+-  rv = state->ExecuteStep(&hasMoreData);
+-  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-  int32_t mode;
+-  rv = state->GetInt32(0, &mode);
+-  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-  // integer value 2 is incremental mode
+-  if (NS_WARN_IF(mode != 2)) { return NS_ERROR_UNEXPECTED; }
+-#endif
+-
+-  return NS_OK;
+ }
+ 
+ nsresult
+ IncrementalVacuum(mozIStorageConnection* aConn)
+ {
+-  // Determine how much free space is in the database.
+-  nsCOMPtr<mozIStorageStatement> state;
+-  nsresult rv = aConn->CreateStatement(NS_LITERAL_CSTRING(
+-    "PRAGMA freelist_count;"
+-  ), getter_AddRefs(state));
+-  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-  bool hasMoreData = false;
+-  rv = state->ExecuteStep(&hasMoreData);
+-  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-  int32_t freePages = 0;
+-  rv = state->GetInt32(0, &freePages);
+-  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-  // We have a relatively small page size, so we want to be careful to avoid
+-  // fragmentation.  We already use a growth incremental which will cause
+-  // sqlite to allocate and release multiple pages at the same time.  We can
+-  // further reduce fragmentation by making our allocated chunks a bit
+-  // "sticky".  This is done by creating some hysteresis where we allocate
+-  // pages/chunks as soon as we need them, but we only release pages/chunks
+-  // when we have a large amount of free space.  This helps with the case
+-  // where a page is adding and remove resources causing it to dip back and
+-  // forth across a chunk boundary.
+-  //
+-  // So only proceed with releasing pages if we have more than our constant
+-  // threshold.
+-  if (freePages <= kMaxFreePages) {
+-    return NS_OK;
+-  }
+-
+-  // Release the excess pages back to the sqlite VFS.  This may also release
+-  // chunks of multiple pages back to the OS.
+-  int32_t pagesToRelease = freePages - kMaxFreePages;
+-
+-  rv = aConn->ExecuteSimpleSQL(nsPrintfCString(
+-    "PRAGMA incremental_vacuum(%d);", pagesToRelease
+-  ));
+-  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-  // Verify that our incremental vacuum actually did something
+-#ifdef DEBUG
+-  rv = aConn->CreateStatement(NS_LITERAL_CSTRING(
+-    "PRAGMA freelist_count;"
+-  ), getter_AddRefs(state));
+-  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-  hasMoreData = false;
+-  rv = state->ExecuteStep(&hasMoreData);
+-  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-  freePages = 0;
+-  rv = state->GetInt32(0, &freePages);
+-  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-  MOZ_ASSERT(freePages <= kMaxFreePages);
+-#endif
+-
+-  return NS_OK;
+ }
+ 
+-namespace {
+-
+-#ifdef DEBUG
+-struct Expect
+-{
+-  // Expect exact SQL
+-  Expect(const char* aName, const char* aType, const char* aSql)
+-    : mName(aName)
+-    , mType(aType)
+-    , mSql(aSql)
+-    , mIgnoreSql(false)
+-  { }
+-
+-  // Ignore SQL
+-  Expect(const char* aName, const char* aType)
+-    : mName(aName)
+-    , mType(aType)
+-    , mIgnoreSql(true)
+-  { }
+-
+-  const nsCString mName;
+-  const nsCString mType;
+-  const nsCString mSql;
+-  const bool mIgnoreSql;
+-};
+-#endif
+-
+-nsresult
+-Validate(mozIStorageConnection* aConn,
+-         int32_t aLatestSchemaVersion,
+-         const char* aExpectedTableSql,
+-         const char* aExpectedTableName)
+-{
+-  int32_t schemaVersion;
+-  nsresult rv = aConn->GetSchemaVersion(&schemaVersion);
+-  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-  if (NS_WARN_IF(schemaVersion != aLatestSchemaVersion)) {
+-    return NS_ERROR_FAILURE;
+-  }
+-
+-#ifdef DEBUG
+-  nsPrintfCString autoindex("sqlite_autoindex_%s_1", aExpectedTableName);
+-
+-  Expect expect[] = {
+-    Expect(aExpectedTableName, "table", aExpectedTableSql),
+-    // auto-gen by sqlite.
+-    Expect("sqlite_sequence", "table"),
+-    // auto-gen by sqlite.
+-    Expect(autoindex.get(), "index")
+-  };
+-
+-  const uint32_t expectLength = sizeof(expect) / sizeof(Expect);
+-
+-  // Read the schema from the sqlite_master table and compare.
+-  nsCOMPtr<mozIStorageStatement> state;
+-  rv = aConn->CreateStatement(NS_LITERAL_CSTRING(
+-    "SELECT name, type, sql FROM sqlite_master;"
+-  ), getter_AddRefs(state));
+-  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-  bool hasMoreData = false;
+-  while (NS_SUCCEEDED(state->ExecuteStep(&hasMoreData)) && hasMoreData) {
+-    nsAutoCString name;
+-    rv = state->GetUTF8String(0, name);
+-    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-    nsAutoCString type;
+-    rv = state->GetUTF8String(1, type);
+-    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-    nsAutoCString sql;
+-    rv = state->GetUTF8String(2, sql);
+-    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-    bool foundMatch = false;
+-    for (uint32_t i = 0; i < expectLength; ++i) {
+-      if (name == expect[i].mName) {
+-        if (type != expect[i].mType) {
+-          NS_WARNING(nsPrintfCString("Unexpected type for schema entry %s",
+-                     name.get()).get());
+-          return NS_ERROR_FAILURE;
+-        }
+-
+-        if (!expect[i].mIgnoreSql && sql != expect[i].mSql) {
+-          NS_WARNING(nsPrintfCString("Unexpected SQL for schema entry %s",
+-                     name.get()).get());
+-          return NS_ERROR_FAILURE;
+-        }
+-
+-        foundMatch = true;
+-        break;
+-      }
+-    }
+-
+-    if (NS_WARN_IF(!foundMatch)) {
+-      NS_WARNING(nsPrintfCString("Unexpected schema entry %s in BSync database",
+-                 name.get()).get());
+-      return NS_ERROR_FAILURE;
+-    }
+-  }
+-#endif
+-
+-  return rv;
+-}
+-
+-nsresult
+-Migrate(mozIStorageConnection* aConn)
+-{
+-  return NS_ERROR_NOT_IMPLEMENTED;
+-}
+-
+-} // anonymous namespace
+-
+ } // namespace dbutils
+ } // namespace backgroundsync
+ } // namespace dom
+ } // namespace mozilla
 diff --git a/dom/backgroundsync/moz.build b/dom/backgroundsync/moz.build
 --- a/dom/backgroundsync/moz.build
 +++ b/dom/backgroundsync/moz.build
