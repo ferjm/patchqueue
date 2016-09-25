@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  2800ee93ea77a9c804cf50c65756e774cea427c3
+# Parent  b08f24174d0f68bc577df7a692f1ac84e348a4e4
 
 diff --git a/dom/backgroundsync/ChromeDBSchema.cpp b/dom/backgroundsync/ChromeDBSchema.cpp
 --- a/dom/backgroundsync/ChromeDBSchema.cpp
@@ -47,7 +47,7 @@ diff --git a/dom/backgroundsync/ChromeDBSchema.cpp b/dom/backgroundsync/ChromeDB
 -                                        kTableRegistrations,
 -                                        "origins");
 +  nsTArray<nsCString> tablesSql;
-+  tablesSql.AppendElement(NS_LITERAL_STRING(kTableRegistrations));
++  tablesSql.AppendElement(nsCString(kTableRegistrations));
 +
 +  nsTArray<storage::Expect> expect;
 +  nsTArray<storage::Migration> migrationList;
