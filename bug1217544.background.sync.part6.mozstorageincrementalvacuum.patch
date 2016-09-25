@@ -59,7 +59,7 @@ new file mode 100644
 +
 +  // If we are closing here, then we must not have a transaction
 +  // open anywhere else. This should be guaranteed to succeed.
-+  MOZ_ALWAYS_SUCCEEDS(IncrementalVacuum(mBase, mMaxFreePages));
++  MOZ_ALWAYS_SUCCEEDS(utils::IncrementalVacuum(mBase, mMaxFreePages));
 +
 +  return mBase->Close();
 +}
@@ -390,7 +390,7 @@ diff --git a/storage/mozStorageConnectionUtils.cpp b/storage/mozStorageConnectio
 new file mode 100644
 --- /dev/null
 +++ b/storage/mozStorageConnectionUtils.cpp
-@@ -0,0 +1,469 @@
+@@ -0,0 +1,436 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -401,6 +401,7 @@ new file mode 100644
 +
 +namespace mozilla {
 +namespace storage {
++namespace utils {
 +
 +namespace {
 +
@@ -450,29 +451,6 @@ new file mode 100644
 +};
 +
 +} // anonymous namespace
-+
-+struct Expect
-+{
-+  // Expect exact SQL
-+  Expect(const char* aName, const char* aType, const char* aSql)
-+    : mName(aName)
-+    , mType(aType)
-+    , mSql(aSql)
-+    , mIgnoreSql(false)
-+  { }
-+
-+  // Ignore SQL
-+  Expect(const char* aName, const char* aType)
-+    : mName(aName)
-+    , mType(aType)
-+    , mIgnoreSql(true)
-+  { }
-+
-+  const nsCString mName;
-+  const nsCString mType;
-+  const nsCString mSql;
-+  const bool mIgnoreSql;
-+};
 +
 +nsresult
 +Validate(mozIStorageConnection* aConn,
@@ -539,18 +517,6 @@ new file mode 100644
 +
 +  return rv;
 +}
-+
-+typedef nsresult (*MigrationFunc)(mozIStorageConnection*, SchemaRewrite&);
-+
-+struct Migration
-+{
-+  constexpr Migration(int32_t aFromVersion, MigrationFunc aFunc)
-+    : mFromVersion(aFromVersion)
-+    , mFunc(aFunc)
-+  { }
-+  int32_t mFromVersion;
-+  MigrationFunc mFunc;
-+};
 +
 +nsresult
 +RewriteSchema(mozIStorageConnection* aConn,
@@ -858,13 +824,14 @@ new file mode 100644
 +  return NS_OK;
 +}
 +
++} // namespace utils
 +} // namespace storage
 +} // namespace mozilla
 diff --git a/storage/mozStorageConnectionUtils.h b/storage/mozStorageConnectionUtils.h
 new file mode 100644
 --- /dev/null
 +++ b/storage/mozStorageConnectionUtils.h
-@@ -0,0 +1,47 @@
+@@ -0,0 +1,83 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -879,14 +846,49 @@ new file mode 100644
 +
 +namespace mozilla {
 +namespace storage {
++namespace utils {
 +
 +struct Migration;
-+struct Expect;
++
++struct Expect
++{
++  // Expect exact SQL
++  Expect(const char* aName, const char* aType, const char* aSql)
++    : mName(aName)
++    , mType(aType)
++    , mSql(aSql)
++    , mIgnoreSql(false)
++  { }
++
++  // Ignore SQL
++  Expect(const char* aName, const char* aType)
++    : mName(aName)
++    , mType(aType)
++    , mIgnoreSql(true)
++  { }
++
++  const nsCString mName;
++  const nsCString mType;
++  const nsCString mSql;
++  const bool mIgnoreSql;
++};
 +
 +struct SchemaRewrite
 +{
 +  nsCString mTableName;
 +  nsCString mTableSql;
++};
++
++typedef nsresult (*MigrationFunc)(mozIStorageConnection*, SchemaRewrite&);
++
++struct Migration
++{
++  constexpr Migration(int32_t aFromVersion, MigrationFunc aFunc)
++    : mFromVersion(aFromVersion)
++    , mFunc(aFunc)
++  { }
++  int32_t mFromVersion;
++  MigrationFunc mFunc;
 +};
 +
 +nsresult
@@ -908,6 +910,7 @@ new file mode 100644
 +IncrementalVacuum(mozIStorageConnection* aConn,
 +                  const int32_t aMaxFreePages);
 +
++} // namespace utils
 +} // namespace storage
 +} // namespace mozilla
 +
