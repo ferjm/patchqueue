@@ -1,11 +1,11 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  b08f24174d0f68bc577df7a692f1ac84e348a4e4
+# Parent  bfa434ff727050225eccb562e4eef3a1e51acc45
 
 diff --git a/dom/backgroundsync/ChromeDBSchema.cpp b/dom/backgroundsync/ChromeDBSchema.cpp
 --- a/dom/backgroundsync/ChromeDBSchema.cpp
 +++ b/dom/backgroundsync/ChromeDBSchema.cpp
-@@ -3,27 +3,26 @@
+@@ -3,26 +3,27 @@
  /* This Source Code Form is subject to the terms of the Mozilla Public
   * License, v. 2.0. If a copy of the MPL was not distributed with this
   * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -25,7 +25,8 @@ diff --git a/dom/backgroundsync/ChromeDBSchema.cpp b/dom/backgroundsync/ChromeDB
  namespace chromedb {
  
 -const int32_t kFirstShippedSchemaVersion = 1;
--
++using namespace storage::utils;
+ 
  namespace {
  
  // Update this whenever the DB schema is changed.
@@ -33,8 +34,7 @@ diff --git a/dom/backgroundsync/ChromeDBSchema.cpp b/dom/backgroundsync/ChromeDB
  
  // ---------
  const char* const kTableRegistrations =
-   "CREATE TABLE origins ("
-@@ -33,19 +32,25 @@ const char* const kTableRegistrations =
+@@ -33,19 +34,25 @@ const char* const kTableRegistrations =
  // End schema definition
  // ---------
  
@@ -49,12 +49,12 @@ diff --git a/dom/backgroundsync/ChromeDBSchema.cpp b/dom/backgroundsync/ChromeDB
 +  nsTArray<nsCString> tablesSql;
 +  tablesSql.AppendElement(nsCString(kTableRegistrations));
 +
-+  nsTArray<storage::Expect> expect;
-+  nsTArray<storage::Migration> migrationList;
++  nsTArray<Expect> expect;
++  nsTArray<Migration> migrationList;
 +
-+  return storage::CreateOrMigrateSchema(aConn, kFirstShippedSchemaVersion,
-+                                        kLatestSchemaVersion, tablesSql, expect,
-+                                        migrationList);
++  return CreateOrMigrateSchema(aConn, kFirstShippedSchemaVersion,
++                               kLatestSchemaVersion, tablesSql, expect,
++                               migrationList);
  }
  
  nsresult
