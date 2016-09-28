@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  e320a86bf6d1d82f643ed005c8e917b04e27b108
+# Parent  293e56557a90c600a8ee733014e8194d14b5b631
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: BackgroundSyncService. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSyncChild.cpp b/dom/backgroundsync/BackgroundSyncChild.cpp
@@ -765,23 +765,23 @@ new file mode 100644
 +      break;
 +    case SyncOpResponse::TSyncChangeStateResponse:
 +      {
-+        // For now we only care about a change of state to FIRING.
++        // For now we only care about a change of state to eFiring.
 +        Registration registration =
 +          aResponse.get_SyncChangeStateResponse().mRegistration();
-+        if (registration.mState() != RegistrationState::FIRING) {
++        if (registration.mState() != RegistrationState::eFiring) {
 +          return;
 +        }
 +
-+        // If we changed the state to FIRING, that means that we are trying to
++        // If we changed the state to eFiring, that means that we are trying to
 +        // trigger a sync event for a specific registration.
 +        // In that case, we need to check if we still are online and so we can
 +        // continue with the process of firing the sync event. Otherwise, we
-+        // need to get back to the PENDING state and bail out here.
++        // need to get back to the ePending state and bail out here.
 +        if (mOnlineState != OnlineStateObserver::eOnline) {
 +          RefPtr<GetStorageManagerRunnable> runnable =
 +            new GetStorageManagerRunnable(this, registration.mOrigin(),
 +                SyncInternalOp(SyncChangeStateArgs(registration.mId(),
-+                               RegistrationState::PENDING)));
++                               RegistrationState::ePending)));
 +          MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(runnable));
 +          return;
 +        }
@@ -817,10 +817,10 @@ new file mode 100644
 +  }
 +
 +  // First thing we need to do is to change the state of the registration to
-+  // FIRING.
++  // eFiring.
 +
-+  // We only can do that if the registration is in PENDING state though.
-+  if (NS_WARN_IF(aRegistration.mState() != RegistrationState::PENDING)) {
++  // We only can do that if the registration is in ePending state though.
++  if (NS_WARN_IF(aRegistration.mState() != RegistrationState::ePending)) {
 +    return;
 +  }
 +
@@ -828,7 +828,7 @@ new file mode 100644
 +  // so we need to jump to the main thread for that.
 +  RefPtr<GetStorageManagerRunnable> runnable =
 +    new GetStorageManagerRunnable(this, aRegistration.mOrigin(), SyncInternalOp(
-+      SyncChangeStateArgs(aRegistration.mId(),RegistrationState::FIRING)
++      SyncChangeStateArgs(aRegistration.mId(),RegistrationState::eFiring)
 +    ));
 +  MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(runnable));
 +}
@@ -840,10 +840,10 @@ new file mode 100644
 +  AssertIsOnBackgroundThread();
 +
 +  if (mOnlineState != OnlineStateObserver::eOnline) {
-+    if (aRegistration.mState() == RegistrationState::FIRING) {
++    if (aRegistration.mState() == RegistrationState::eFiring) {
 +      RefPtr<GetStorageManagerRunnable> runnable =
 +        new GetStorageManagerRunnable(this, aRegistration.mOrigin(), SyncInternalOp(
-+          SyncChangeStateArgs(aRegistration.mId(),RegistrationState::FIRING)
++          SyncChangeStateArgs(aRegistration.mId(),RegistrationState::eFiring)
 +        ));
 +      MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(runnable));
 +    }
@@ -853,7 +853,7 @@ new file mode 100644
 +  for (uint32_t i = 0, len = mServiceWorkerManagerActors.Length(); i < len; ++i) {
 +    RefPtr<ServiceWorkerManagerParent> parent = mServiceWorkerManagerActors[i];
 +    MOZ_ASSERT(parent);
-+    Unused << parent->SendNotifyBackgroundSyncEvent(aRegistration.mOriginSuffix(),
++    Unused << parent->SendNotifyBackgroundSyncEvent(aRegistration.mOrigin(),
 +                                                    aRegistration.mScope(),
 +                                                    aRegistration.mTag(),
 +                                                    aRegistration.mLastChance());
@@ -1679,11 +1679,11 @@ diff --git a/dom/backgroundsync/moz.build b/dom/backgroundsync/moz.build
      'ChromeDBSchema.cpp',
      'ChromeStorageManager.cpp',
      'DBAction.cpp',
-     'DBConnection.cpp',
      'DBSchema.cpp',
-     'DBSchemaUtils.cpp',
      'OnlineStateObserver.cpp',
      'QuotaClient.cpp',
+     'StorageManager.cpp',
+     'StorageManagerId.cpp'
 diff --git a/dom/workers/PServiceWorkerManager.ipdl b/dom/workers/PServiceWorkerManager.ipdl
 --- a/dom/workers/PServiceWorkerManager.ipdl
 +++ b/dom/workers/PServiceWorkerManager.ipdl

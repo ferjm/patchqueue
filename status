@@ -7,3 +7,4 @@ ddf3899fa7ec883527007191cf7471ee4e2ff500:bug1217544.background.sync.part5.quotac
 bfa434ff727050225eccb562e4eef3a1e51acc45:bug1217544.background.sync.part7.managerid.patch
 5ff42284f71753527157731b1d7b4200301210c1:incrementalvacuum.patch
 293e56557a90c600a8ee733014e8194d14b5b631:bug1217544.background.sync.part8.onlineobserver.patch
+2b99771c7d90e3f26fe32428cc3b3fc474dd1725:bug1217544.background.sync.part9.service.patch
