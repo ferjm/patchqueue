@@ -488,7 +488,7 @@ new file mode 100644
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +    bool foundMatch = false;
-+    for (uint32_t i = 0; i < aExpectedSchema.Length(); ++i) {
++    for (uint32_t i = 0; i < aExpectedSchema.Length() - 1; ++i) {
 +      if (name == aExpectedSchema[i].mName) {
 +        if (type != aExpectedSchema[i].mType) {
 +          NS_WARNING(nsPrintfCString("Unexpected type for Cache schema entry %s",
@@ -573,7 +573,7 @@ new file mode 100644
 +    // accidentally get here for one of those old databases.
 +    MOZ_ASSERT(currentVersion >= aFirstShippedSchemaVersion);
 +
-+    for (uint32_t i = 0; i < aMigrationList.Length(); ++i) {
++    for (uint32_t i = 0; i < aMigrationList.Length() - 1; ++i) {
 +      if (aMigrationList[i].mFromVersion == currentVersion) {
 +        SchemaRewrite schemaRewrite;
 +        rv = aMigrationList[i].mFunc(aConn, schemaRewrite);
@@ -653,7 +653,7 @@ new file mode 100644
 +    needVacuum = true;
 +  } else {
 +    // There is no schema installed.  Create the database from scratch.
-+    for (uint32_t i = 0; aTablesSql.Length(); i++) {
++    for (uint32_t i = 0; aTablesSql.Length() - 1; i++) {
 +      rv = aConn->ExecuteSimpleSQL(aTablesSql[i]);
 +      if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +    }
