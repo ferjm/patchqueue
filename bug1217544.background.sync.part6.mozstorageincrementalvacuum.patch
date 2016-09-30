@@ -491,13 +491,13 @@ new file mode 100644
 +    for (uint32_t i = 0; i < aExpectedSchema.Length(); ++i) {
 +      if (name == aExpectedSchema[i].mName) {
 +        if (type != aExpectedSchema[i].mType) {
-+          NS_WARNING(nsPrintfCString("Unexpected type for Cache schema entry %s",
++          NS_WARNING(nsPrintfCString("Unexpected type for schema entry %s",
 +                     name.get()).get());
 +          return NS_ERROR_FAILURE;
 +        }
 +
 +        if (!aExpectedSchema[i].mIgnoreSql && sql != aExpectedSchema[i].mSql) {
-+          NS_WARNING(nsPrintfCString("Unexpected SQL for Cache schema entry %s",
++          NS_WARNING(nsPrintfCString("Unexpected SQL for schema entry %s",
 +                     name.get()).get());
 +          return NS_ERROR_FAILURE;
 +        }
@@ -508,7 +508,7 @@ new file mode 100644
 +    }
 +
 +    if (NS_WARN_IF(!foundMatch)) {
-+      NS_WARNING(nsPrintfCString("Unexpected schema entry %s in Cache database",
++      NS_WARNING(nsPrintfCString("Unexpected schema entry %s in database",
 +                 name.get()).get());
 +      return NS_ERROR_FAILURE;
 +    }
