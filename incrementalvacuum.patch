@@ -1,11 +1,11 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  9787cd35851cf0d10edee751f93ac9072da10aa8
+# Parent  01782c62ad21050a8e6acd295909696f64298558
 
 diff --git a/dom/backgroundsync/ChromeDBSchema.cpp b/dom/backgroundsync/ChromeDBSchema.cpp
 --- a/dom/backgroundsync/ChromeDBSchema.cpp
 +++ b/dom/backgroundsync/ChromeDBSchema.cpp
-@@ -1,57 +1,80 @@
+@@ -1,57 +1,83 @@
  /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
  /* vim: set ts=8 sts=2 et sw=2 tw=80: */
  /* This Source Code Form is subject to the terms of the Mozilla Public
@@ -29,6 +29,9 @@ diff --git a/dom/backgroundsync/ChromeDBSchema.cpp b/dom/backgroundsync/ChromeDB
  
 -const int32_t kFirstShippedSchemaVersion = 1;
 +using namespace mozilla::dom::backgroundsync::dbcommon;
++
++using storage::utils::Expect;
++using storage::utils::Migration;
  
  namespace {
  
@@ -61,10 +64,10 @@ diff --git a/dom/backgroundsync/ChromeDBSchema.cpp b/dom/backgroundsync/ChromeDB
 +  tablesSql.AppendElement(nsCString(kTableOrigins));
 +
 +  // XXX
-+  nsTArray<storage::utils::Expect> expect;
++  nsTArray<Expect> expect;
 +  expect.AppendElement(Expect("origins", "table", kTableOrigins));
 +
-+  nsTArray<storage::utils::Migration> migrationList;
++  nsTArray<Migration> migrationList;
 +
 +  return storage::utils::CreateOrMigrateSchema(aConn,
 +                                               kFirstShippedSchemaVersion,
@@ -93,7 +96,7 @@ diff --git a/dom/backgroundsync/ChromeDBSchema.cpp b/dom/backgroundsync/ChromeDB
  {
    MOZ_ASSERT(!NS_IsMainThread());
    MOZ_ASSERT(aConn);
-@@ -119,18 +142,12 @@ GetAll(mozIStorageConnection* aConn,
+@@ -119,18 +145,12 @@ GetAll(mozIStorageConnection* aConn,
      if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
  
      aOrigins.AppendElement(origin);
