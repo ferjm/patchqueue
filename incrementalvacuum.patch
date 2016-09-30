@@ -557,7 +557,7 @@ deleted file mode 100644
 diff --git a/dom/backgroundsync/DBSchema.cpp b/dom/backgroundsync/DBSchema.cpp
 --- a/dom/backgroundsync/DBSchema.cpp
 +++ b/dom/backgroundsync/DBSchema.cpp
-@@ -1,30 +1,32 @@
+@@ -1,30 +1,35 @@
  /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
  /* vim: set ts=8 sts=2 et sw=2 tw=80: */
  /* This Source Code Form is subject to the terms of the Mozilla Public
@@ -580,8 +580,11 @@ diff --git a/dom/backgroundsync/DBSchema.cpp b/dom/backgroundsync/DBSchema.cpp
  namespace backgroundsync {
  namespace db {
  
- using mozilla::dom::backgroundsync::Registration;
 +using namespace mozilla::dom::backgroundsync::dbcommon;
++
+ using mozilla::dom::backgroundsync::Registration;
++using storage::utils::Expect;
++using storage::utils::Migration;
  
  const int32_t kFirstShippedSchemaVersion = 1;
  
@@ -590,7 +593,7 @@ diff --git a/dom/backgroundsync/DBSchema.cpp b/dom/backgroundsync/DBSchema.cpp
  // Update this whenever the DB schema is changed.
  const int32_t kLatestSchemaVersion = 1;
  
-@@ -51,31 +53,41 @@ const char* const kTableRegistrations =
+@@ -51,31 +56,41 @@ const char* const kTableRegistrations =
  // ---------
  
  } // namespace
@@ -605,14 +608,14 @@ diff --git a/dom/backgroundsync/DBSchema.cpp b/dom/backgroundsync/DBSchema.cpp
 +  nsTArray<nsCString> tablesSql;
 +  tablesSql.AppendElement(nsCString(kTableRegistrations));
 +
-+  // XXX
-+  nsTArray<storage::utils::Expect> expect;
-+  nsTArray<storage::utils::Migration> migrationList;
++  nsTArray<Expect> expect;
++  expect.AppendElement(Expect("registrations", "table", kTableRegistrations));
++  expect.AppendElement(Expect("sqlite_autoindex_registrations_1", "index"));
 +
 +  return storage::utils::CreateOrMigrateSchema(aConn,
 +                                               kFirstShippedSchemaVersion,
 +                                               kLatestSchemaVersion, tablesSql,
-+                                               expect, migrationList);
++                                               expect, nsTArray<Migration>());
  }
  
  nsresult
