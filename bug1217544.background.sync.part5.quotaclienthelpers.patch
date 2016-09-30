@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  620051824c1aea485515a6efef04e8e11c92856a
+# Parent  4f91b67bd24afe1ec8d00c20299cec64c13dac62
 Bug 1217544 - Implement one-off BackgroundSync API. Part 5: QuotaClient helpers. r=bkelly
 
 diff --git a/dom/quota/ClientAction.cpp b/dom/quota/ClientAction.cpp
@@ -1696,11 +1696,11 @@ new file mode 100644
 diff --git a/dom/quota/moz.build b/dom/quota/moz.build
 --- a/dom/quota/moz.build
 +++ b/dom/quota/moz.build
-@@ -10,30 +10,35 @@ XPIDL_SOURCES += [
-     'nsIQuotaRequests.idl',
- ]
+@@ -14,30 +14,35 @@ XPIDL_MODULE = 'dom_quota'
  
- XPIDL_MODULE = 'dom_quota'
+ EXPORTS.mozilla.dom += [
+   'StorageManager.h',
+ ]
  
  EXPORTS.mozilla.dom.quota += [
      'ActorsParent.h',
@@ -1727,8 +1727,8 @@ diff --git a/dom/quota/moz.build b/dom/quota/moz.build
      'FileStreams.cpp',
      'QuotaManagerService.cpp',
      'QuotaRequests.cpp',
+     'StorageManager.cpp',
  ]
  
  IPDL_SOURCES += [
      'PQuota.ipdl',
-     'PQuotaRequest.ipdl',

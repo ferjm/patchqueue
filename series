@@ -5,7 +5,6 @@ bug1217544.background.sync.part4.syncevent.patch
 bug1217544.background.sync.part5.quotaclienthelpers.patch
 bug1217544.background.sync.part6.mozstorageincrementalvacuum.patch
 bug1217544.background.sync.part7.managerid.patch
-incrementalvacuum.patch
 bug1217544.background.sync.part8.onlineobserver.patch
 bug1217544.background.sync.part9.service.patch
 bug1217544.background.sync.tests.patch
