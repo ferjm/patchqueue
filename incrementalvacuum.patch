@@ -5,7 +5,7 @@
 diff --git a/dom/backgroundsync/ChromeDBSchema.cpp b/dom/backgroundsync/ChromeDBSchema.cpp
 --- a/dom/backgroundsync/ChromeDBSchema.cpp
 +++ b/dom/backgroundsync/ChromeDBSchema.cpp
-@@ -1,57 +1,83 @@
+@@ -1,57 +1,81 @@
  /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
  /* vim: set ts=8 sts=2 et sw=2 tw=80: */
  /* This Source Code Form is subject to the terms of the Mozilla Public
@@ -63,16 +63,14 @@ diff --git a/dom/backgroundsync/ChromeDBSchema.cpp b/dom/backgroundsync/ChromeDB
 +  nsTArray<nsCString> tablesSql;
 +  tablesSql.AppendElement(nsCString(kTableOrigins));
 +
-+  // XXX
 +  nsTArray<Expect> expect;
 +  expect.AppendElement(Expect("origins", "table", kTableOrigins));
-+
-+  nsTArray<Migration> migrationList;
++  expect.AppendElement(Expect("sqlite_autoindex_origins_1", "index"));
 +
 +  return storage::utils::CreateOrMigrateSchema(aConn,
 +                                               kFirstShippedSchemaVersion,
 +                                               kLatestSchemaVersion, tablesSql,
-+                                               expect, migrationList);
++                                               expect, nsTArray<Migration>());
  }
  
  nsresult
@@ -96,7 +94,7 @@ diff --git a/dom/backgroundsync/ChromeDBSchema.cpp b/dom/backgroundsync/ChromeDB
  {
    MOZ_ASSERT(!NS_IsMainThread());
    MOZ_ASSERT(aConn);
-@@ -119,18 +145,12 @@ GetAll(mozIStorageConnection* aConn,
+@@ -119,18 +143,12 @@ GetAll(mozIStorageConnection* aConn,
      if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
  
      aOrigins.AppendElement(origin);
