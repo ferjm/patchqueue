@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  ef17f9cdc47864248e271e13ce302deca87b764d
+# Parent  901e546ca5c88a6d67504c595dcd03a203b0f8a1
 Bug 1217544 - Implement one-off BackgroundSync API. Tests. r=baku
 
 diff --git a/dom/backgroundsync/moz.build b/dom/backgroundsync/moz.build
