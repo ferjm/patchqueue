@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  d2a1212959e71fca700789881583adb822f8e580
+# Parent  fcb64befcf099e4132e74f66e0fb1e6169f2eaf9
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: Storage. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
@@ -2215,19 +2215,19 @@ new file mode 100644
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +    nsString scope;
-+    rv = state->GetString(3, scope);
++    rv = state->GetString(2, scope);
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +    nsAutoString tag;
-+    rv = state->GetBlobAsString(4, tag);
++    rv = state->GetBlobAsString(3, tag);
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +    int32_t registrationState;
-+    rv = state->GetInt32(5, &registrationState);
++    rv = state->GetInt32(4, &registrationState);
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +    int32_t lastChance;
-+    rv = state->GetInt32(6, &lastChance);
++    rv = state->GetInt32(5, &lastChance);
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +    Registration registration(id, origin, scope, tag,
