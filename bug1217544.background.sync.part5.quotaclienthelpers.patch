@@ -1,13 +1,40 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  4f91b67bd24afe1ec8d00c20299cec64c13dac62
+# Parent  3b1d2dd6e5c4fa4de2aaf9b3c388bf5f74c89e2d
 Bug 1217544 - Implement one-off BackgroundSync API. Part 5: QuotaClient helpers. r=bkelly
 
-diff --git a/dom/quota/ClientAction.cpp b/dom/quota/ClientAction.cpp
+diff --git a/dom/quota/moz.build b/dom/quota/moz.build
+--- a/dom/quota/moz.build
++++ b/dom/quota/moz.build
+@@ -7,18 +7,22 @@
+ XPIDL_SOURCES += [
+     'nsIQuotaCallbacks.idl',
+     'nsIQuotaManagerService.idl',
+     'nsIQuotaRequests.idl',
+ ]
+ 
+ XPIDL_MODULE = 'dom_quota'
+ 
++DIRS + [
++    'shared'
++]
++
+ EXPORTS.mozilla.dom += [
+-  'StorageManager.h',
++    'StorageManager.h',
+ ]
+ 
+ EXPORTS.mozilla.dom.quota += [
+     'ActorsParent.h',
+     'Client.h',
+     'FileStreams.h',
+     'OriginScope.h',
+     'PersistenceType.h',
+diff --git a/dom/quota/shared/ClientAction.cpp b/dom/quota/shared/ClientAction.cpp
 new file mode 100644
 --- /dev/null
-+++ b/dom/quota/ClientAction.cpp
-@@ -0,0 +1,40 @@
++++ b/dom/quota/shared/ClientAction.cpp
+@@ -0,0 +1,42 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -19,6 +46,7 @@ new file mode 100644
 +namespace mozilla {
 +namespace dom {
 +namespace quota {
++namespace shared {
 +
 +void
 +ClientAction::CancelOnInitiatingThread()
@@ -45,14 +73,15 @@ new file mode 100644
 +  return mCanceled;
 +}
 +
++} // namespace shared
 +} // namespace mozilla
 +} // namespace dom
 +} // namespace quota
-diff --git a/dom/quota/ClientAction.h b/dom/quota/ClientAction.h
+diff --git a/dom/quota/shared/ClientAction.h b/dom/quota/shared/ClientAction.h
 new file mode 100644
 --- /dev/null
-+++ b/dom/quota/ClientAction.h
-@@ -0,0 +1,103 @@
++++ b/dom/quota/shared/ClientAction.h
+@@ -0,0 +1,105 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -67,6 +96,7 @@ new file mode 100644
 +namespace mozilla {
 +namespace dom {
 +namespace quota {
++namespace shared {
 +
 +class ClientAction
 +{
@@ -151,16 +181,17 @@ new file mode 100644
 +  Atomic<bool> mCanceled;
 +};
 +
-+} // namespace mozilla
-+} // namespace dom
++} // namespace shared
 +} // namespace quota
++} // namespace dom
++} // namespace mozilla
 +
 +#endif // mozilla_dom_quota_ClientAction_h
-diff --git a/dom/quota/ClientContext.cpp b/dom/quota/ClientContext.cpp
+diff --git a/dom/quota/shared/ClientContext.cpp b/dom/quota/shared/ClientContext.cpp
 new file mode 100644
 --- /dev/null
-+++ b/dom/quota/ClientContext.cpp
-@@ -0,0 +1,1257 @@
++++ b/dom/quota/shared/ClientContext.cpp
+@@ -0,0 +1,1259 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -217,6 +248,7 @@ new file mode 100644
 +namespace mozilla {
 +namespace dom {
 +namespace quota {
++namespace shared {
 +
 +using mozilla::DebugOnly;
 +
@@ -1327,6 +1359,7 @@ new file mode 100644
 +  MOZ_ASSERT(!mData);
 +}
 +
++} // namespace shared
 +} // namespace quota
 +} // namespace dom
 +} // namespace mozilla
@@ -1418,11 +1451,11 @@ new file mode 100644
 +}
 +
 +} // anonymous namespace
-diff --git a/dom/quota/ClientContext.h b/dom/quota/ClientContext.h
+diff --git a/dom/quota/shared/ClientContext.h b/dom/quota/shared/ClientContext.h
 new file mode 100644
 --- /dev/null
-+++ b/dom/quota/ClientContext.h
-@@ -0,0 +1,237 @@
++++ b/dom/quota/shared/ClientContext.h
+@@ -0,0 +1,239 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -1439,6 +1472,7 @@ new file mode 100644
 +namespace mozilla {
 +namespace dom {
 +namespace quota {
++namespace shared {
 +
 +class DirectoryLock;
 +
@@ -1655,16 +1689,17 @@ new file mode 100644
 +  NS_INLINE_DECL_REFCOUNTING(ClientContext)
 +};
 +
++} // namespace shared
 +} // namespace quota
 +} // namespace dom
 +} // namespace mozilla
 +
 +#endif // mozilla_dom_quota_ClientContext_h
-diff --git a/dom/quota/QuotaInfo.h b/dom/quota/QuotaInfo.h
+diff --git a/dom/quota/shared/QuotaInfo.h b/dom/quota/shared/QuotaInfo.h
 new file mode 100644
 --- /dev/null
-+++ b/dom/quota/QuotaInfo.h
-@@ -0,0 +1,28 @@
++++ b/dom/quota/shared/QuotaInfo.h
+@@ -0,0 +1,30 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -1677,6 +1712,7 @@ new file mode 100644
 +namespace mozilla {
 +namespace dom {
 +namespace quota {
++namespace shared {
 +
 +struct QuotaInfo
 +{
@@ -1688,47 +1724,9 @@ new file mode 100644
 +  bool mIsApp;
 +};
 +
++} // namespace shared
 +} // namespace quota
 +} // namespace dom
 +} // namespace mozilla
 +
 +#endif // mozilla_dom_quota_QuotaInfo_h
-diff --git a/dom/quota/moz.build b/dom/quota/moz.build
---- a/dom/quota/moz.build
-+++ b/dom/quota/moz.build
-@@ -14,30 +14,35 @@ XPIDL_MODULE = 'dom_quota'
- 
- EXPORTS.mozilla.dom += [
-   'StorageManager.h',
- ]
- 
- EXPORTS.mozilla.dom.quota += [
-     'ActorsParent.h',
-     'Client.h',
-+    'ClientAction.h',
-+    'ClientContext.h',
-     'FileStreams.h',
-     'OriginScope.h',
-     'PersistenceType.h',
-     'QuotaCommon.h',
-+    'QuotaInfo.h',
-     'QuotaManager.h',
-     'QuotaManagerService.h',
-     'QuotaObject.h',
-     'SerializationHelpers.h',
-     'UsageInfo.h',
- ]
- 
- UNIFIED_SOURCES += [
-     'ActorsChild.cpp',
-     'ActorsParent.cpp',
-+    'ClientAction.cpp',
-+    'ClientContext.cpp',
-     'FileStreams.cpp',
-     'QuotaManagerService.cpp',
-     'QuotaRequests.cpp',
-     'StorageManager.cpp',
- ]
- 
- IPDL_SOURCES += [
-     'PQuota.ipdl',
