@@ -4,4 +4,4 @@
 3b1d2dd6e5c4fa4de2aaf9b3c388bf5f74c89e2d:bug1217544.background.sync.part4.syncevent.patch
 e106e397a9be0d880cf295343347399dbf6e30cc:bug1217544.background.sync.part5.quotaclienthelpers.patch
 e25919eb2e0af494fe0c86e6e15d2b0e81a3ba0e:bug1217544.background.sync.part6.mozstorageincrementalvacuum.patch
-bcf40382b1e967bdb3b1987710b2a76fd0303528:bug1217544.background.sync.part7.managerid.patch
+f6e8051a447bfaf0f37a76fcbd23dca279959d64:bug1217544.background.sync.part7.managerid.patch

@@ -2122,8 +2122,8 @@ new file mode 100644
 +                                 registration.mScope());
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
-+    rv = state->BindStringAsBlobByName(NS_LITERAL_CSTRING("tag"),
-+                                       registration.mTag());
++    rv = state->BindUTF8StringAsBlobByName(NS_LITERAL_CSTRING("tag"),
++                                           NS_ConvertUTF16toUTF8(registration.mTag()));
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +    rv = state->BindInt32ByName(NS_LITERAL_CSTRING("state"),
@@ -2176,10 +2176,10 @@ new file mode 100644
 +
 +  bool hasMoreData = false;
 +  while (NS_SUCCEEDED(state->ExecuteStep(&hasMoreData)) && hasMoreData) {
-+    nsAutoString tag;
-+    rv = state->GetBlobAsString(0, tag);
++    nsAutoCString tag;
++    rv = state->GetBlobAsUTF8String(0, tag);
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
-+    aTags.AppendElement(tag);
++    aTags.AppendElement(NS_ConvertUTF8toUTF16(tag));
 +  }
 +
 +  return rv;
@@ -2218,8 +2218,8 @@ new file mode 100644
 +    rv = state->GetString(2, scope);
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
-+    nsAutoString tag;
-+    rv = state->GetBlobAsString(3, tag);
++    nsAutoCString tag;
++    rv = state->GetBlobAsUTF8String(3, tag);
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +    int32_t registrationState;
@@ -2230,7 +2230,7 @@ new file mode 100644
 +    rv = state->GetInt32(5, &lastChance);
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
-+    Registration registration(id, origin, scope, tag,
++    Registration registration(id, origin, scope, NS_ConvertUTF8toUTF16(tag),
 +      RegistrationState(registrationState), bool(lastChance));
 +    aRegistrations.AppendElement(registration);
 +  }
