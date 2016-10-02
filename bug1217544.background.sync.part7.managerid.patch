@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  fcb64befcf099e4132e74f66e0fb1e6169f2eaf9
+# Parent  e25919eb2e0af494fe0c86e6e15d2b0e81a3ba0e
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: Storage. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
@@ -2061,7 +2061,7 @@ new file mode 100644
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +  nsAutoCString fullHash;
-+  rv = crypto->Finish(false /* based64 result */, fullHash);
++  rv = crypto->Finish(true /* based64 result */, fullHash);
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +  aId = NS_ConvertUTF8toUTF16(Substring(fullHash, 0, 8));
