@@ -15,7 +15,7 @@ diff --git a/dom/quota/moz.build b/dom/quota/moz.build
  
  XPIDL_MODULE = 'dom_quota'
  
-+DIRS + [
++DIRS += [
 +    'shared'
 +]
 +
