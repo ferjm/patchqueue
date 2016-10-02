@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  293e56557a90c600a8ee733014e8194d14b5b631
+# Parent  def5d20ad62de2feedf77870a93b70e718d248c2
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: BackgroundSyncService. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSyncChild.cpp b/dom/backgroundsync/BackgroundSyncChild.cpp
@@ -1709,17 +1709,17 @@ diff --git a/dom/workers/PServiceWorkerManager.ipdl b/dom/workers/PServiceWorker
 diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
 --- a/dom/workers/ServiceWorkerManager.cpp
 +++ b/dom/workers/ServiceWorkerManager.cpp
-@@ -1026,17 +1026,17 @@ ServiceWorkerManager::SendNotificationCl
- 
+@@ -1027,17 +1027,17 @@ ServiceWorkerManager::SendNotificationCl
  NS_IMETHODIMP
- ServiceWorkerManager::SendBackgroundSyncEvent(const nsACString& aOriginAttributes,
+ ServiceWorkerManager::SendBackgroundSyncEvent(const nsACString& aOrigin,
                                                const nsACString& aScope,
                                                const nsAString& aTag,
                                                const bool aLastChance)
  {
+   nsAutoCString originNoSuffix;
    PrincipalOriginAttributes attrs;
--  if (!attrs.PopulateFromSuffix(aOriginAttributes)) {
-+  if (NS_WARN_IF(!attrs.PopulateFromSuffix(aOriginAttributes))) {
+-  if (!attrs.PopulateFromOrigin(aOrigin, originNoSuffix)) {
++  if (NS_WARN_IF(!attrs.PopulateFromOrigin(aOrigin, originNoSuffix))) {
      return NS_ERROR_INVALID_ARG;
    }
  
