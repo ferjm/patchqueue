@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  e25919eb2e0af494fe0c86e6e15d2b0e81a3ba0e
+# Parent  260dbb49a17a8d3a6c6e13fe8b4c3618e6860e48
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: Storage. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
@@ -1875,8 +1875,8 @@ new file mode 100644
 +#ifndef mozilla_dom_DBAction_h
 +#define mozilla_dom_DBAction_h
 +
-+#include "mozilla/dom/quota/ClientAction.h"
-+#include "mozilla/dom/quota/QuotaInfo.h"
++#include "mozilla/dom/quota/shared/ClientAction.h"
++#include "mozilla/dom/quota/shared/QuotaInfo.h"
 +#include "mozilla/RefPtr.h"
 +#include "nsString.h"
 +
@@ -1887,8 +1887,8 @@ new file mode 100644
 +namespace dom {
 +namespace backgroundsync {
 +
-+using quota::ClientAction;
-+using quota::QuotaInfo;
++using quota::shared::ClientAction;
++using quota::shared::QuotaInfo;
 +
 +class DBAction : public ClientAction
 +{
@@ -3494,13 +3494,13 @@ new file mode 100644
 +#ifndef mozilla_dom_StorageManager_h
 +#define mozilla_dom_StorageManager_h
 +
-+#include "mozilla/dom/quota/ClientContext.h"
++#include "mozilla/dom/quota/shared/ClientContext.h"
 +
 +namespace mozilla {
 +namespace dom {
 +namespace backgroundsync {
 +
-+using quota::ClientContext;
++using quota::shared::ClientContext;
 +
 +/**
 + * The StorageManager class is responsible for managing the storage of sync
