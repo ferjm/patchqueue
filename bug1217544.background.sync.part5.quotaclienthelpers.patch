@@ -1540,7 +1540,7 @@ new file mode 100644
 +
 +    nsCOMPtr<nsIThread> mOwningThread;
 +
-+    NS_INLINE_DECL_THREADSAFE_REFCOUNTING(quota::ClientContext::ThreadsafeHandle)
++    NS_INLINE_DECL_THREADSAFE_REFCOUNTING(quota::shared::ClientContext::ThreadsafeHandle)
 +  };
 +
 +  // An interface to be implemented by code wishing to use the ClientContext.
