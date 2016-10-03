@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  260dbb49a17a8d3a6c6e13fe8b4c3618e6860e48
+# Parent  1b5a7f5fb6d9d8d5821e9e0e6b420373ddc351bb
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: Storage. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
@@ -3518,7 +3518,7 @@ new file mode 100644
 + * until that request is completed or the actor requesting it is destroyed.
 + */
 +
-+class StorageManager final : public quota::ClientContext::Listener
++class StorageManager final : public ClientContext::Listener
 +{
 +public:
 +  NS_INLINE_DECL_REFCOUNTING(StorageManager, override)
