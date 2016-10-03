@@ -41,7 +41,7 @@ new file mode 100644
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 +
-+#include "mozilla/dom/quota/ClientAction.h"
++#include "ClientAction.h"
 +
 +namespace mozilla {
 +namespace dom {
@@ -1465,7 +1465,7 @@ new file mode 100644
 +#ifndef mozilla_dom_quota_ClientContext_h
 +#define mozilla_dom_quota_ClientContext_h
 +
-+#include "Client.h"
++#include "mozilla/dom/quota/Client.h"
 +#include "ClientAction.h"
 +#include "nsTObserverArray.h"
 +
