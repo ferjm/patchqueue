@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  3b1d2dd6e5c4fa4de2aaf9b3c388bf5f74c89e2d
+# Parent  084b627bafcf74042d9ee83e73dbd0abb38fd7fd
 Bug 1217544 - Implement one-off BackgroundSync API. Part 5: QuotaClient helpers. r=bkelly
 
 diff --git a/dom/quota/moz.build b/dom/quota/moz.build
