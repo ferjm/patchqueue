@@ -2,4 +2,4 @@
 86ecbb0473a4b1c1bee4f2214072624a7efafe84:bug1217544.background.sync.part2.serviceworkerregistration.patch
 efa57d96c13572a26f9f50638c597da44b358740:bug1217544.background.sync.part3.ipc.patch
 084b627bafcf74042d9ee83e73dbd0abb38fd7fd:bug1217544.background.sync.part4.syncevent.patch
-59084c9cd70bbe19c43e5eb70d9578dab743dc7e:bug1217544.background.sync.part5.quotaclienthelpers.patch
+e72944c7835a7c4875c39d02637d05b63b69cde1:bug1217544.background.sync.part5.quotaclienthelpers.patch

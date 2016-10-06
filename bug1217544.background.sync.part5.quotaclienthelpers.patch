@@ -81,7 +81,7 @@ diff --git a/dom/quota/shared/ClientAction.h b/dom/quota/shared/ClientAction.h
 new file mode 100644
 --- /dev/null
 +++ b/dom/quota/shared/ClientAction.h
-@@ -0,0 +1,105 @@
+@@ -0,0 +1,106 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -91,6 +91,7 @@ new file mode 100644
 +#ifndef mozilla_dom_quota_ClientAction_h
 +#define mozilla_dom_quota_ClientAction_h
 +
++#include "mozIStorageConnection.h"
 +#include "QuotaInfo.h"
 +
 +namespace mozilla {
@@ -211,8 +212,8 @@ new file mode 100644
 +
 +namespace {
 +
-+using mozilla::dom::quota::ClientAction;
-+using mozilla::dom::quota::QuotaInfo;
++using mozilla::dom::quota::shared::ClientAction;
++using mozilla::dom::quota::shared::QuotaInfo;
 +
 +class NullClientAction final : public ClientAction
 +{
@@ -1455,7 +1456,7 @@ diff --git a/dom/quota/shared/ClientContext.h b/dom/quota/shared/ClientContext.h
 new file mode 100644
 --- /dev/null
 +++ b/dom/quota/shared/ClientContext.h
-@@ -0,0 +1,239 @@
+@@ -0,0 +1,240 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -1466,6 +1467,7 @@ new file mode 100644
 +#define mozilla_dom_quota_ClientContext_h
 +
 +#include "mozilla/dom/quota/Client.h"
++#include "mozilla/dom/quota/QuotaManager.h"
 +#include "ClientAction.h"
 +#include "nsTObserverArray.h"
 +
@@ -1474,7 +1476,7 @@ new file mode 100644
 +namespace quota {
 +namespace shared {
 +
-+class DirectoryLock;
++using namespace mozilla::dom::quota;
 +
 +// The ClientContext class is RAII-style class for managing IO operations done
 +// by quota clients.
@@ -1699,7 +1701,7 @@ diff --git a/dom/quota/shared/QuotaInfo.h b/dom/quota/shared/QuotaInfo.h
 new file mode 100644
 --- /dev/null
 +++ b/dom/quota/shared/QuotaInfo.h
-@@ -0,0 +1,30 @@
+@@ -0,0 +1,33 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -1708,6 +1710,9 @@ new file mode 100644
 +
 +#ifndef mozilla_dom_quota_QuotaInfo_h
 +#define mozilla_dom_quota_QuotaInfo_h
++
++#include "nsCOMPtr.h"
++#include "nsString.h"
 +
 +namespace mozilla {
 +namespace dom {
