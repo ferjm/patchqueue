@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  def5d20ad62de2feedf77870a93b70e718d248c2
+# Parent  4e3d159da136ce7796881b9afccb645fc48db3bd
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: BackgroundSyncService. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSyncChild.cpp b/dom/backgroundsync/BackgroundSyncChild.cpp
@@ -1413,14 +1413,14 @@ diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageMan
 +++ b/dom/backgroundsync/StorageManager.h
 @@ -9,16 +9,17 @@
  
- #include "mozilla/dom/quota/ClientContext.h"
+ #include "mozilla/dom/quota/shared/ClientContext.h"
  
  namespace mozilla {
  namespace dom {
  namespace backgroundsync {
  
- using quota::ClientContext;
-+using quota::ClientAction;
+ using quota::shared::ClientContext;
++using quota::shared::ClientAction;
  
  /**
   * The StorageManager class is responsible for managing the storage of sync
@@ -1429,14 +1429,14 @@ diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageMan
   * process.
   *
   * There should be exactly one StorageManager object for each origin or app
-@@ -28,20 +29,23 @@ using quota::ClientContext;
+@@ -28,20 +29,23 @@ using quota::shared::ClientContext;
   *
   * The StorageManager instances are kept alive by the BackgroundSyncService,
   * which keeps a reference to the StorageManager dealing with a storage request
   * until that request is completed or the actor requesting it is destroyed.
   */
  
- class StorageManager final : public quota::ClientContext::Listener
+ class StorageManager final : public ClientContext::Listener
  {
 +  friend class BackgroundSyncService;
 +
