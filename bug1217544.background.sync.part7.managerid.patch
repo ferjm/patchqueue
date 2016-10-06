@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  1b5a7f5fb6d9d8d5821e9e0e6b420373ddc351bb
+# Parent  f1b7fc4dc40be9d8e3e10c1841a1514c7daf7c89
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: Storage. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
@@ -1949,6 +1949,47 @@ new file mode 100644
 +} // namespace mozilla
 +
 +#endif // mozilla_dom_DBAction_h
+diff --git a/dom/backgroundsync/DBCommon.h b/dom/backgroundsync/DBCommon.h
+new file mode 100644
+--- /dev/null
++++ b/dom/backgroundsync/DBCommon.h
+@@ -0,0 +1,36 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#ifndef mozilla_dom_BackgroundSync_DBCommon_h
++#define mozilla_dom_BackgroundSync_DBCommon_h
++
++namespace mozilla {
++namespace dom {
++namespace backgroundsync {
++namespace dbcommon {
++
++const uint32_t kPageSize = 4 * 1024;
++
++// Grow the database in chunks to reduce fragmentation
++const uint32_t kGrowthSize = 32 * 1024;
++const uint32_t kGrowthPages = kGrowthSize / kPageSize;
++static_assert(kGrowthSize % kPageSize == 0,
++              "Growth size must be multiple of page size");
++
++// Only release free pages when we have more than this limit
++const int32_t kMaxFreePages = kGrowthPages;
++
++const uint32_t kWalAutoCheckpointSize = 512 * 1024;
++const uint32_t kWalAutoCheckpointPages = kWalAutoCheckpointSize / kPageSize;
++static_assert(kWalAutoCheckpointSize % kPageSize == 0,
++              "WAL checkpoint size must be multiple of page size");
++
++} // namespace dbcommon
++} // namespace backgroundsync
++} // namespace dom
++} // namespace mozilla
++
++#endif // mozilla_dom_BackgroundSync_DBCommon_h
 diff --git a/dom/backgroundsync/DBSchema.cpp b/dom/backgroundsync/DBSchema.cpp
 new file mode 100644
 --- /dev/null
@@ -3070,7 +3111,7 @@ new file mode 100644
 +                  mozIStorageConnection* aConn) override
 +  {
 +    nsresult rv = db::GetTags(aConn, mArgs, mTags);
-+    NS_WARN_IF(NS_FAILED(rv));
++    NS_WARNING_ASSERTION(NS_FAILED(rv), "GetTags failed");
 +    return rv;
 +  }
 +
@@ -3106,14 +3147,14 @@ new file mode 100644
 +                  mozIStorageConnection* aConn) override
 +  {
 +    nsresult rv = db::GetAll(aConn, mRegistrations);
-+    NS_WARN_IF(NS_FAILED(rv));
++    NS_WARNING_ASSERTION(NS_FAILED(rv), "GetAll failed");
 +    return rv;
 +  }
 +
 +  virtual void
 +  Complete(nsresult aRv) override
 +  {
-+    NS_WARN_IF(NS_FAILED(aRv));
++    NS_WARNING_ASSERTION(NS_FAILED(aRv), "GetAll failed");
 +    // We need to remove the reference to the request independently of
 +    // its result so we can close the context.
 +    mManager->OnRequestComplete(mRequestId,
@@ -3141,14 +3182,14 @@ new file mode 100644
 +                  mozIStorageConnection* aConn) override
 +  {
 +    nsresult rv = db::Remove(aConn, mArgs, mOrigin);
-+    NS_WARN_IF(NS_FAILED(rv));
++    NS_WARNING_ASSERTION(NS_FAILED(rv), "Remove failed");
 +    return rv;
 +  }
 +
 +  virtual void
 +  Complete(nsresult aRv) override
 +  {
-+    NS_WARN_IF(NS_FAILED(aRv));
++    NS_WARNING_ASSERTION(NS_FAILED(aRv), "Remove failed");
 +    // We need to remove the reference to the request independently of
 +    // its result so we can close the context.
 +    mManager->OnRequestComplete(mRequestId,
@@ -3177,14 +3218,14 @@ new file mode 100644
 +                  mozIStorageConnection* aConn) override
 +  {
 +    nsresult rv = db::ChangeState(aConn, mArgs, mRegistration);
-+    NS_WARN_IF(NS_FAILED(rv));
++    NS_WARNING_ASSERTION(NS_FAILED(rv), "ChangeState failed");
 +    return rv;
 +  }
 +
 +  virtual void
 +  Complete(nsresult aRv) override
 +  {
-+    NS_WARN_IF(NS_FAILED(aRv));
++    NS_WARNING_ASSERTION(NS_FAILED(aRv), "ChangeState failed");
 +    // We need to remove the reference to the request independently of
 +    // its result so we can close the context.
 +    mManager->OnRequestComplete(mRequestId,
