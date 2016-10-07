@@ -9,3 +9,4 @@ f1b7fc4dc40be9d8e3e10c1841a1514c7daf7c89:bug1217544.background.sync.part6.mozsto
 5c20e59ee23549c1d247aa0e911666bc8d2cbc88:bug1217544.background.sync.part9.service.patch
 03bc93753a16d2b661cba3bab8dd5508f7e5ecc5:bug1217544.background.sync.tests.patch
 5aaf6a71a91eafb7ce41a96d2d9b3957d76b90e1:bug1300844.cache.quotaclient.helpers.patch
+fc5a4069bf6018d5339e10e88f4b47cde0c55dfa:bug1308447.cache.mozstorage.common.patch
