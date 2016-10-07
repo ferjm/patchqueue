@@ -398,6 +398,96 @@ deleted file mode 100644
 -} // namespace mozilla
 -
 -#endif // mozilla_dom_cache_Context_h
+diff --git a/dom/cache/DBAction.h b/dom/cache/DBAction.h
+--- a/dom/cache/DBAction.h
++++ b/dom/cache/DBAction.h
+@@ -2,28 +2,32 @@
+ /* vim: set ts=8 sts=2 et sw=2 tw=80: */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #ifndef mozilla_dom_cache_DBAction_h
+ #define mozilla_dom_cache_DBAction_h
+ 
+-#include "mozilla/dom/cache/Action.h"
++#include "mozilla/dom/quota/shared/ClientAction.h"
++#include "mozilla/dom/quota/shared/QuotaInfo.h"
+ #include "mozilla/RefPtr.h"
+ #include "nsString.h"
+ 
+ class mozIStorageConnection;
+ class nsIFile;
+ 
+ namespace mozilla {
+ namespace dom {
+ namespace cache {
+ 
+-class DBAction : public Action
++using quota::shared::ClientAction;
++using quota::shared::QuotaInfo;
++
++class DBAction : public ClientAction
+ {
+ protected:
+   // The mode specifies whether the database should already exist or if its
+   // ok to create a new database.
+   enum Mode
+   {
+     Existing,
+     Create
+@@ -54,17 +58,17 @@ private:
+   const Mode mMode;
+ };
+ 
+ class SyncDBAction : public DBAction
+ {
+ protected:
+   explicit SyncDBAction(Mode aMode);
+ 
+-  // Action objects are deleted through their base pointer
++  // ClientAction objects are deleted through their base pointer
+   virtual ~SyncDBAction();
+ 
+   virtual nsresult
+   RunSyncWithDBOnTarget(const QuotaInfo& aQuotaInfo, nsIFile* aDBDir,
+                         mozIStorageConnection* aConn) = 0;
+ 
+ private:
+   virtual void
+diff --git a/dom/cache/FileUtils.h b/dom/cache/FileUtils.h
+--- a/dom/cache/FileUtils.h
++++ b/dom/cache/FileUtils.h
+@@ -4,26 +4,29 @@
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #ifndef mozilla_dom_cache_FileUtils_h
+ #define mozilla_dom_cache_FileUtils_h
+ 
+ #include "mozilla/Attributes.h"
+ #include "mozilla/dom/cache/Types.h"
++#include "mozilla/dom/quota/shared/QuotaInfo.h"
+ #include "nsStreamUtils.h"
+ #include "nsTArrayForwardDeclare.h"
+ 
+ struct nsID;
+ class nsIFile;
+ 
+ namespace mozilla {
+ namespace dom {
+ namespace cache {
+ 
++using quota::shared::QuotaInfo;
++
+ nsresult
+ BodyCreateDir(nsIFile* aBaseDir);
+ 
+ // Note that this function can only be used during the initialization of the
+ // database.  We're unlikely to be able to delete the DB successfully past
+ // that point due to the file being in use.
+ nsresult
+ BodyDeleteDir(nsIFile* aBaseDir);
 diff --git a/dom/cache/Manager.cpp b/dom/cache/Manager.cpp
 --- a/dom/cache/Manager.cpp
 +++ b/dom/cache/Manager.cpp
@@ -419,7 +509,7 @@ diff --git a/dom/cache/Manager.cpp b/dom/cache/Manager.cpp
  #include "mozilla/dom/cache/SavedTypes.h"
  #include "mozilla/dom/cache/StreamList.h"
  #include "mozilla/dom/cache/Types.h"
-+#include "mozilla/dom/quota/ClientContext.h"
++#include "mozilla/dom/quota/shared/ClientContext.h"
  #include "mozilla/ipc/BackgroundParent.h"
  #include "mozStorageHelper.h"
  #include "nsIInputStream.h"
@@ -544,7 +634,7 @@ diff --git a/dom/cache/Manager.cpp b/dom/cache/Manager.cpp
 +  virtual bool MatchesStorageId(int64_t aId) const override
    {
 -    return aCacheId == mCacheId;
-+    return aCacheId == mId;
++    return aId == mCacheId;
    }
  
  private:
@@ -553,7 +643,23 @@ diff --git a/dom/cache/Manager.cpp b/dom/cache/Manager.cpp
    RefPtr<StreamList> mStreamList;
    bool mFoundResponse;
    SavedResponse mResponse;
-@@ -597,19 +597,19 @@ private:
+@@ -583,33 +583,33 @@ public:
+   Complete(Listener* aListener, ErrorResult&& aRv) override
+   {
+     mStreamList->Activate(mCacheId);
+     aListener->OnOpComplete(Move(aRv), CacheMatchAllResult(), mSavedResponses,
+                             mStreamList);
+     mStreamList = nullptr;
+   }
+ 
+-  virtual bool MatchesCacheId(CacheId aCacheId) const override
++  virtual bool MatchesStorageId(int64_t aId) const override
+   {
+-    return aCacheId == mCacheId;
++    return aId == mCacheId;
+   }
+ 
+ private:
    const CacheId mCacheId;
    const CacheMatchAllArgs mArgs;
    RefPtr<StreamList> mStreamList;
@@ -614,7 +720,7 @@ diff --git a/dom/cache/Manager.cpp b/dom/cache/Manager.cpp
  
      mManager->NoteOrphanedBodyIdList(mDeletedBodyIdList);
  
-@@ -802,24 +802,24 @@ private:
+@@ -802,25 +802,25 @@ private:
      if (listener) {
        listener->OnOpComplete(ErrorResult(aRv), CachePutAllResult());
      }
@@ -630,11 +736,13 @@ diff --git a/dom/cache/Manager.cpp b/dom/cache/Manager.cpp
      CancelAllStreamCopying();
    }
  
-   virtual bool MatchesCacheId(CacheId aCacheId) const override
+-  virtual bool MatchesCacheId(CacheId aCacheId) const override
++  virtual bool MatchesStorageId(int64_t aId) const override
    {
 -    NS_ASSERT_OWNINGTHREAD(Action);
+-    return aCacheId == mCacheId;
 +    NS_ASSERT_OWNINGTHREAD(ClientAction);
-     return aCacheId == mCacheId;
++    return aId == mCacheId;
    }
  
    struct Entry
@@ -642,6 +750,7 @@ diff --git a/dom/cache/Manager.cpp b/dom/cache/Manager.cpp
      CacheRequest mRequest;
      nsCOMPtr<nsIInputStream> mRequestStream;
      nsID mRequestBodyId;
+     nsCOMPtr<nsISupports> mRequestCopyContext;
 @@ -904,17 +904,17 @@ private:
      CachePutAllAction* action = static_cast<CachePutAllAction*>(aClosure);
      action->CallOnAsyncCopyCompleteOnTargetThread(aRv);
@@ -682,6 +791,50 @@ diff --git a/dom/cache/Manager.cpp b/dom/cache/Manager.cpp
    RefPtr<Manager> mManager;
    const ListenerId mListenerId;
  
+@@ -1012,19 +1012,19 @@ public:
+ 
+   virtual void
+   Complete(Listener* aListener, ErrorResult&& aRv) override
+   {
+     mManager->NoteOrphanedBodyIdList(mDeletedBodyIdList);
+     aListener->OnOpComplete(Move(aRv), CacheDeleteResult(mSuccess));
+   }
+ 
+-  virtual bool MatchesCacheId(CacheId aCacheId) const override
++  virtual bool MatchesStorageId(int64_t aId) const override
+   {
+-    return aCacheId == mCacheId;
++    return aId == mCacheId;
+   }
+ 
+ private:
+   const CacheId mCacheId;
+   const CacheDeleteArgs mArgs;
+   bool mSuccess;
+   nsTArray<nsID> mDeletedBodyIdList;
+ };
+@@ -1074,19 +1074,19 @@ public:
+   Complete(Listener* aListener, ErrorResult&& aRv) override
+   {
+     mStreamList->Activate(mCacheId);
+     aListener->OnOpComplete(Move(aRv), CacheKeysResult(), mSavedRequests,
+                             mStreamList);
+     mStreamList = nullptr;
+   }
+ 
+-  virtual bool MatchesCacheId(CacheId aCacheId) const override
++  virtual bool MatchesStorageId(int64_t aId) const override
+   {
+-    return aCacheId == mCacheId;
++    return aId == mCacheId;
+   }
+ 
+ private:
+   const CacheId mCacheId;
+   const CacheKeysArgs mArgs;
+   RefPtr<StreamList> mStreamList;
+   nsTArray<SavedRequest> mSavedRequests;
+ };
 @@ -1287,23 +1287,23 @@ public:
    Complete(Listener* aListener, ErrorResult&& aRv) override
    {
@@ -697,8 +850,9 @@ diff --git a/dom/cache/Manager.cpp b/dom/cache/Manager.cpp
          if (context->IsCanceled()) {
            context->NoteOrphanedData();
          } else {
-           context->CancelForCacheId(mCacheId);
+-          context->CancelForCacheId(mCacheId);
 -          RefPtr<Action> action =
++          context->CancelForStorageId(mCacheId);
 +          RefPtr<ClientAction> action =
              new DeleteOrphanedCacheAction(mManager, mCacheId);
            context->Dispatch(action);
@@ -789,9 +943,10 @@ diff --git a/dom/cache/Manager.cpp b/dom/cache/Manager.cpp
            if (context->IsCanceled()) {
              context->NoteOrphanedData();
            } else {
-             context->CancelForCacheId(aCacheId);
+-            context->CancelForCacheId(aCacheId);
 -            RefPtr<Action> action = new DeleteOrphanedCacheAction(this,
 -                                                                    aCacheId);
++            context->CancelForStorageId(aCacheId);
 +            RefPtr<ClientAction> action = new DeleteOrphanedCacheAction(this,
 +                                                                        aCacheId);
              context->Dispatch(action);
@@ -911,7 +1066,7 @@ diff --git a/dom/cache/Manager.cpp b/dom/cache/Manager.cpp
    : mManagerId(aManagerId)
    , mIOThread(aIOThread)
    , mContext(nullptr)
-@@ -1763,27 +1772,27 @@ Manager::~Manager()
+@@ -1763,27 +1772,28 @@ Manager::~Manager()
    MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(NewRunnableMethod(ioThread, &nsIThread::Shutdown)));
  }
  
@@ -936,8 +1091,9 @@ diff --git a/dom/cache/Manager.cpp b/dom/cache/Manager.cpp
 +  // ClientContext per Manager now, this lets us cleanly call Factory::Remove()
 +  // once the ClientContext goes away.
 +  RefPtr<ClientAction> setupAction = new SetupAction();
-+  RefPtr<ClientContext> ref = ClientContext::Create(this, mIOThread, setupAction,
-+                                                    oldContext);
++  RefPtr<ClientContext> ref = ClientContext::Create(this, quota::Client::DOMCACHE,
++                                                    NS_LITERAL_STRING("cache"),
++                                                    mIOThread, setupAction, oldContext);
    mContext = ref;
  }
  
@@ -946,7 +1102,7 @@ diff --git a/dom/cache/Manager.cpp b/dom/cache/Manager.cpp
  {
    NS_ASSERT_OWNINGTHREAD(Manager);
  
-@@ -1792,42 +1801,42 @@ Manager::Shutdown()
+@@ -1792,42 +1802,42 @@ Manager::Shutdown()
    // calls Shutdown().
    if (mShuttingDown) {
      return;
@@ -995,7 +1151,7 @@ diff --git a/dom/cache/Manager.cpp b/dom/cache/Manager.cpp
  {
    NS_ASSERT_OWNINGTHREAD(Manager);
  
-@@ -1904,41 +1913,41 @@ Manager::NoteOrphanedBodyIdList(const ns
+@@ -1904,41 +1914,41 @@ Manager::NoteOrphanedBodyIdList(const ns
  
    for (uint32_t i = 0; i < aDeletedBodyIdList.Length(); ++i) {
      if (!SetBodyIdOrphanedIfRefed(aDeletedBodyIdList[i])) {
@@ -1055,7 +1211,7 @@ diff --git a/dom/cache/Manager.h b/dom/cache/Manager.h
  #define mozilla_dom_cache_Manager_h
  
  #include "mozilla/dom/cache/Types.h"
-+#include "mozilla/dom/quota/ClientContext.h"
++#include "mozilla/dom/quota/shared/ClientContext.h"
  #include "nsCOMPtr.h"
  #include "nsISupportsImpl.h"
  #include "mozilla/RefPtr.h"
@@ -1064,7 +1220,7 @@ diff --git a/dom/cache/Manager.h b/dom/cache/Manager.h
  
  class nsIInputStream;
  class nsIThread;
-@@ -22,17 +23,16 @@ namespace mozilla {
+@@ -22,22 +23,23 @@ namespace mozilla {
  class ErrorResult;
  
  namespace dom {
@@ -1079,10 +1235,17 @@ diff --git a/dom/cache/Manager.h b/dom/cache/Manager.h
  struct SavedResponse;
  class StreamList;
  
++using mozilla::dom::quota::shared::ClientContext;
++
  // The Manager is class is responsible for performing all of the underlying
  // work for a Cache or CacheStorage operation.  The DOM objects and IPC actors
  // are basically just plumbing to get the request to the right Manager object
-@@ -57,17 +57,17 @@ class StreamList;
+ // running in the parent process.
+ //
+ // There should be exactly one Manager object for each origin or app using the
+ // Cache API.  This uniqueness is defined by the ManagerId equality operator.
+ // The uniqueness is enforced by the Manager GetOrCreate() factory method.
+@@ -57,17 +59,17 @@ class StreamList;
  //
  // Even once a Manager becomes invalid, however, it may still continue to
  // exist.  This is allowed so that any in-progress Actions can gracefully
@@ -1092,7 +1255,7 @@ diff --git a/dom/cache/Manager.h b/dom/cache/Manager.h
  // is enforced by the Manager::Factory.  If content still holds references to
  // Cache DOM objects during shutdown, then all operations will begin rejecting.
 -class Manager final
-+class Manager final : public quota::ClientContext::Listener
++class Manager final : public ClientContext::Listener
  {
  public:
    // Callback interface implemented by clients of Manager, such as CacheParent
@@ -1101,7 +1264,7 @@ diff --git a/dom/cache/Manager.h b/dom/cache/Manager.h
    // you call Manager::CacheMatch(), then you should expect to receive
    // OnCacheMatch() back in response.
    //
-@@ -135,23 +135,16 @@ public:
+@@ -135,23 +137,16 @@ public:
    static void ShutdownAll();
  
    // Cancel actions for given origin or all actions if passed string is null.
@@ -1125,7 +1288,7 @@ diff --git a/dom/cache/Manager.h b/dom/cache/Manager.h
    // object.  The actor must then call ReleaseCacheId() or ReleaseBodyId()
    // exactly once for every AddRef*() call it made.  Any delayed deletion
    // will then be performed.
-@@ -172,16 +165,28 @@ public:
+@@ -172,16 +167,28 @@ public:
    void ExecutePutAll(Listener* aListener, CacheId aCacheId,
                       const nsTArray<CacheRequestResponse>& aPutList,
                       const nsTArray<nsCOMPtr<nsIInputStream>>& aRequestStreamList,
@@ -1134,7 +1297,7 @@ diff --git a/dom/cache/Manager.h b/dom/cache/Manager.h
    void ExecuteStorageOp(Listener* aListener, Namespace aNamespace,
                          const CacheOpArgs& aOpArgs);
  
-+  /* quota::ClientContext::Listener */
++  /* ClientContext::Listener */
 +
 +  // Must be called by ClientContext objects before they are destroyed.
 +  virtual void RemoveClientContext(ClientContext* aContext) override;
@@ -1154,7 +1317,7 @@ diff --git a/dom/cache/Manager.h b/dom/cache/Manager.h
    class CacheMatchAction;
    class CacheMatchAllAction;
    class CachePutAllAction;
-@@ -210,18 +215,19 @@ private:
+@@ -210,18 +217,19 @@ private:
    bool SetBodyIdOrphanedIfRefed(const nsID& aBodyId);
    void NoteOrphanedBodyIdList(const nsTArray<nsID>& aDeletedBodyIdList);
  
@@ -1176,6 +1339,24 @@ diff --git a/dom/cache/Manager.h b/dom/cache/Manager.h
        : mId(UINT64_MAX)
        , mListener(nullptr)
      {
+@@ -277,16 +285,16 @@ private:
+   {
+     nsID mBodyId;
+     MozRefCountType mCount;
+     bool mOrphaned;
+   };
+   nsTArray<BodyIdRefCounter> mBodyIdRefs;
+ 
+ public:
+-  NS_INLINE_DECL_REFCOUNTING(cache::Manager)
++  NS_INLINE_DECL_REFCOUNTING(cache::Manager, override)
+ };
+ 
+ } // namespace cache
+ } // namespace dom
+ } // namespace mozilla
+ 
+ #endif // mozilla_dom_cache_Manager_h
 diff --git a/dom/cache/StreamList.cpp b/dom/cache/StreamList.cpp
 --- a/dom/cache/StreamList.cpp
 +++ b/dom/cache/StreamList.cpp
@@ -1228,7 +1409,7 @@ diff --git a/dom/cache/StreamList.cpp b/dom/cache/StreamList.cpp
 diff --git a/dom/cache/StreamList.h b/dom/cache/StreamList.h
 --- a/dom/cache/StreamList.h
 +++ b/dom/cache/StreamList.h
-@@ -2,61 +2,61 @@
+@@ -2,61 +2,63 @@
  /* vim: set ts=8 sts=2 et sw=2 tw=80: */
  /* This Source Code Form is subject to the terms of the Mozilla Public
   * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -1239,7 +1420,7 @@ diff --git a/dom/cache/StreamList.h b/dom/cache/StreamList.h
  
 -#include "mozilla/dom/cache/Context.h"
  #include "mozilla/dom/cache/Types.h"
-+#include "mozilla/dom/quota/ClientContext.h"
++#include "mozilla/dom/quota/shared/ClientContext.h"
  #include "mozilla/RefPtr.h"
  #include "nsTArray.h"
  
@@ -1253,6 +1434,8 @@ diff --git a/dom/cache/StreamList.h b/dom/cache/StreamList.h
  class Manager;
  
 -class StreamList final : public Context::Activity
++using quota::shared::ClientContext;
++
 +class StreamList final : public ClientContext::Activity
  {
  public:
@@ -1296,6 +1479,33 @@ diff --git a/dom/cache/StreamList.h b/dom/cache/StreamList.h
  public:
    NS_INLINE_DECL_REFCOUNTING(cache::StreamList)
  };
+diff --git a/dom/cache/Types.h b/dom/cache/Types.h
+--- a/dom/cache/Types.h
++++ b/dom/cache/Types.h
+@@ -22,23 +22,13 @@ enum Namespace
+   CHROME_ONLY_NAMESPACE,
+   NUMBER_OF_NAMESPACES
+ };
+ static const Namespace INVALID_NAMESPACE = NUMBER_OF_NAMESPACES;
+ 
+ typedef int64_t CacheId;
+ static const CacheId INVALID_CACHE_ID = -1;
+ 
+-struct QuotaInfo
+-{
+-  QuotaInfo() : mIsApp(false) { }
+-  nsCOMPtr<nsIFile> mDir;
+-  nsCString mSuffix;
+-  nsCString mGroup;
+-  nsCString mOrigin;
+-  bool mIsApp;
+-};
+-
+ } // namespace cache
+ } // namespace dom
+ } // namespace mozilla
+ 
+ #endif // mozilla_dom_cache_Types_h
 diff --git a/dom/cache/moz.build b/dom/cache/moz.build
 --- a/dom/cache/moz.build
 +++ b/dom/cache/moz.build

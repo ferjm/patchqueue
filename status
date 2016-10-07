@@ -8,4 +8,4 @@ f1b7fc4dc40be9d8e3e10c1841a1514c7daf7c89:bug1217544.background.sync.part6.mozsto
 4b0296258159337895a6d34a360a75573adb8fae:bug1217544.background.sync.part8.onlineobserver.patch
 5c20e59ee23549c1d247aa0e911666bc8d2cbc88:bug1217544.background.sync.part9.service.patch
 03bc93753a16d2b661cba3bab8dd5508f7e5ecc5:bug1217544.background.sync.tests.patch
-afe38b2056426d5b756979133d832e15d8c1abf8:bug1300844.cache.quotaclient.helpers.patch
+5aaf6a71a91eafb7ce41a96d2d9b3957d76b90e1:bug1300844.cache.quotaclient.helpers.patch
