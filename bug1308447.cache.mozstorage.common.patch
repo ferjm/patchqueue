@@ -385,7 +385,27 @@ diff --git a/dom/cache/DBAction.cpp b/dom/cache/DBAction.cpp
 diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
 --- a/dom/cache/DBSchema.cpp
 +++ b/dom/cache/DBSchema.cpp
-@@ -162,27 +162,16 @@ const char* const kTableStorage =
+@@ -28,16 +28,19 @@
+ #include "nsPrintfCString.h"
+ #include "nsTArray.h"
+ 
+ namespace mozilla {
+ namespace dom {
+ namespace cache {
+ namespace db {
+ 
++using storage::utils::Expect;
++using storage::utils::Migration;
++
+ const int32_t kFirstShippedSchemaVersion = 15;
+ 
+ namespace {
+ 
+ // Update this whenever the DB schema is changed.
+ const int32_t kLatestSchemaVersion = 22;
+ 
+ // ---------
+@@ -162,27 +165,16 @@ const char* const kTableStorage =
    ")";
  
  // ---------
@@ -412,6 +432,190 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
                "WAL checkpoint size must be multiple of page size");
  
  } // namespace
+ 
+@@ -354,149 +346,53 @@ static nsresult CreateAndBindKeyStatemen
+                                           const nsAString& aKey,
+                                           mozIStorageStatement** aStateOut);
+ static nsresult HashCString(nsICryptoHash* aCrypto, const nsACString& aIn,
+                             nsACString& aOut);
+ nsresult Validate(mozIStorageConnection* aConn);
+ nsresult Migrate(mozIStorageConnection* aConn);
+ } // namespace
+ 
+-class MOZ_RAII AutoDisableForeignKeyChecking
+-{
+-public:
+-  explicit AutoDisableForeignKeyChecking(mozIStorageConnection* aConn)
+-    : mConn(aConn)
+-    , mForeignKeyCheckingDisabled(false)
+-  {
+-    nsCOMPtr<mozIStorageStatement> state;
+-    nsresult rv = mConn->CreateStatement(NS_LITERAL_CSTRING(
+-      "PRAGMA foreign_keys;"
+-    ), getter_AddRefs(state));
+-    if (NS_WARN_IF(NS_FAILED(rv))) { return; }
+-
+-    bool hasMoreData = false;
+-    rv = state->ExecuteStep(&hasMoreData);
+-    if (NS_WARN_IF(NS_FAILED(rv))) { return; }
+-
+-    int32_t mode;
+-    rv = state->GetInt32(0, &mode);
+-    if (NS_WARN_IF(NS_FAILED(rv))) { return; }
+-
+-    if (mode) {
+-      nsresult rv = mConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
+-        "PRAGMA foreign_keys = OFF;"
+-      ));
+-      if (NS_WARN_IF(NS_FAILED(rv))) { return; }
+-      mForeignKeyCheckingDisabled = true;
+-    }
+-  }
+-
+-  ~AutoDisableForeignKeyChecking()
+-  {
+-    if (mForeignKeyCheckingDisabled) {
+-      nsresult rv = mConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
+-        "PRAGMA foreign_keys = ON;"
+-      ));
+-      if (NS_WARN_IF(NS_FAILED(rv))) { return; }
+-    }
+-  }
+-
+-private:
+-  nsCOMPtr<mozIStorageConnection> mConn;
+-  bool mForeignKeyCheckingDisabled;
+-};
+-
+ nsresult
+ CreateOrMigrateSchema(mozIStorageConnection* aConn)
+ {
+-  MOZ_ASSERT(!NS_IsMainThread());
+-  MOZ_ASSERT(aConn);
+-
+-  int32_t schemaVersion;
+-  nsresult rv = aConn->GetSchemaVersion(&schemaVersion);
+-  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-  if (schemaVersion == kLatestSchemaVersion) {
+-    // We already have the correct schema version.  Validate it matches
+-    // our expected schema and then proceed.
+-    rv = Validate(aConn);
+-    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-    return rv;
+-  }
+-
+-  // Turn off checking foreign keys before starting a transaction, and restore
+-  // it once we're done.
+-  AutoDisableForeignKeyChecking restoreForeignKeyChecking(aConn);
+-  mozStorageTransaction trans(aConn, false,
+-                              mozIStorageConnection::TRANSACTION_IMMEDIATE);
+-  bool needVacuum = false;
+-
+-  if (schemaVersion) {
+-    // A schema exists, but its not the current version.  Attempt to
+-    // migrate it to our new schema.
+-    rv = Migrate(aConn);
+-    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-    // Migrations happen infrequently and reflect a chance in DB structure.
+-    // This is a good time to rebuild the database.  It also helps catch
+-    // if a new migration is incorrect by fast failing on the corruption.
+-    needVacuum = true;
+-  } else {
+-    // There is no schema installed.  Create the database from scratch.
+-    rv = aConn->ExecuteSimpleSQL(nsDependentCString(kTableCaches));
+-    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-    rv = aConn->ExecuteSimpleSQL(nsDependentCString(kTableSecurityInfo));
+-    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-    rv = aConn->ExecuteSimpleSQL(nsDependentCString(kIndexSecurityInfoHash));
+-    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-    rv = aConn->ExecuteSimpleSQL(nsDependentCString(kTableEntries));
+-    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-    rv = aConn->ExecuteSimpleSQL(nsDependentCString(kIndexEntriesRequest));
+-    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-    rv = aConn->ExecuteSimpleSQL(nsDependentCString(kTableRequestHeaders));
+-    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-    rv = aConn->ExecuteSimpleSQL(nsDependentCString(kTableResponseHeaders));
+-    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-    rv = aConn->ExecuteSimpleSQL(nsDependentCString(kIndexResponseHeadersName));
+-    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-    rv = aConn->ExecuteSimpleSQL(nsDependentCString(kTableResponseUrlList));
+-    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-    rv = aConn->ExecuteSimpleSQL(nsDependentCString(kTableStorage));
+-    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-    rv = aConn->SetSchemaVersion(kLatestSchemaVersion);
+-    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-    rv = aConn->GetSchemaVersion(&schemaVersion);
+-    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-  }
+-
+-  rv = Validate(aConn);
+-  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-  rv = trans.Commit();
+-  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-  if (needVacuum) {
+-    // Unfortunately, this must be performed outside of the transaction.
+-    aConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING("VACUUM"));
+-    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-  }
+-
+-  return rv;
++  nsTArray<nsCString> tablesSql;
++  tablesSql.AppendElement(nsCString(kTableCaches));
++  tablesSql.AppendElement(nsCString(kTableSecurityInfo));
++  tablesSql.AppendElement(nsCString(kTableEntries));
++  tablesSql.AppendElement(nsCString(kTableRequestHeaders));
++  tablesSql.AppendElement(nsCString(kTableResponseHeaders));
++  tablesSql.AppendElement(nsCString(kTableResponseUrlList));
++  tablesSql.AppendElement(nsCString(kTableStorage));
++
++  nsTArray<Expect> expect;
++  expect.AppendElement(Expect("caches", "table", kTableCaches));
++  expect.AppendElement(Expect("sqlite_sequence", "table"));
++  expect.AppendElement(Expect("security_info", "table", kTableSecurityInfo));
++  expect.AppendElement(Expect("security_info_hash_index", "index",
++                       kIndexSecurityInfoHash));
++  expect.AppendElement(Expect("entries", "table", kTableEntries));
++  expect.AppendElement(Expect("entries_request_match_index", "index",
++                       kIndexEntriesRequest));
++  expect.AppendElement(Expect("request_headers", "table",
++                       kTableRequestHeaders));
++  expect.AppendElement(Expect("response_headers", "table",
++                       kTableResponseHeaders));
++  expect.AppendElement(Expect("response_headers_name_index", "index",
++                       kIndexResponseHeadersName));
++  expect.AppendElement(Expect("response_url_list", "table",
++                       kTableResponseUrlList));
++  expect.AppendElement(Expect("storage", "table", kTableStorage));
++  expect.AppendElement(Expect("sqlite_autoindex_storage_1", "index"));
++
++  // XXX Migration list.
++  return storage::utils::CreateOrMigrateSchema(aConn,
++                                               kFirstShippedSchemaVersion,
++                                               kLatestSchemaVersion, tablesSql,
++                                               expect, nsTArray<Migration>());
+ }
+ 
+ nsresult
+ InitializeConnection(mozIStorageConnection* aConn)
+ {
+   MOZ_ASSERT(!NS_IsMainThread());
+   MOZ_ASSERT(aConn);
  
 diff --git a/dom/cache/DBSchema.h b/dom/cache/DBSchema.h
 --- a/dom/cache/DBSchema.h
