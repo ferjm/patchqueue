@@ -433,7 +433,7 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
  
  } // namespace
  
-@@ -354,224 +346,67 @@ static nsresult CreateAndBindKeyStatemen
+@@ -354,224 +346,73 @@ static nsresult CreateAndBindKeyStatemen
                                            const nsAString& aKey,
                                            mozIStorageStatement** aStateOut);
  static nsresult HashCString(nsICryptoHash* aCrypto, const nsACString& aIn,
@@ -687,6 +687,12 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
 +  return storage::utils::InitializeConnection(aConn, kPageSize, kGrowthSize,
 +                                              kWalAutoCheckpointPages,
 +                                              kWalAutoCheckpointSize);
++}
++
++nsresult
++IncrementalVacuum(mozIStorageConnection* aConn)
++{
++  return storage::utils::IncrementalVacuum(aConn, kMaxFreePages);
  }
  
  nsresult
@@ -695,6 +701,87 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
    MOZ_ASSERT(!NS_IsMainThread());
    MOZ_ASSERT(aConn);
    MOZ_ASSERT(aCacheIdOut);
+@@ -2288,80 +2129,16 @@ HashCString(nsICryptoHash* aCrypto, cons
+   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+ 
+   aOut = Substring(fullHash, 0, 8);
+   return rv;
+ }
+ 
+ } // namespace
+ 
+-nsresult
+-IncrementalVacuum(mozIStorageConnection* aConn)
+-{
+-  // Determine how much free space is in the database.
+-  nsCOMPtr<mozIStorageStatement> state;
+-  nsresult rv = aConn->CreateStatement(NS_LITERAL_CSTRING(
+-    "PRAGMA freelist_count;"
+-  ), getter_AddRefs(state));
+-  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-  bool hasMoreData = false;
+-  rv = state->ExecuteStep(&hasMoreData);
+-  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-  int32_t freePages = 0;
+-  rv = state->GetInt32(0, &freePages);
+-  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-  // We have a relatively small page size, so we want to be careful to avoid
+-  // fragmentation.  We already use a growth incremental which will cause
+-  // sqlite to allocate and release multiple pages at the same time.  We can
+-  // further reduce fragmentation by making our allocated chunks a bit
+-  // "sticky".  This is done by creating some hysteresis where we allocate
+-  // pages/chunks as soon as we need them, but we only release pages/chunks
+-  // when we have a large amount of free space.  This helps with the case
+-  // where a page is adding and remove resources causing it to dip back and
+-  // forth across a chunk boundary.
+-  //
+-  // So only proceed with releasing pages if we have more than our constant
+-  // threshold.
+-  if (freePages <= kMaxFreePages) {
+-    return NS_OK;
+-  }
+-
+-  // Release the excess pages back to the sqlite VFS.  This may also release
+-  // chunks of multiple pages back to the OS.
+-  int32_t pagesToRelease = freePages - kMaxFreePages;
+-
+-  rv = aConn->ExecuteSimpleSQL(nsPrintfCString(
+-    "PRAGMA incremental_vacuum(%d);", pagesToRelease
+-  ));
+-  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-  // Verify that our incremental vacuum actually did something
+-#ifdef DEBUG
+-  rv = aConn->CreateStatement(NS_LITERAL_CSTRING(
+-    "PRAGMA freelist_count;"
+-  ), getter_AddRefs(state));
+-  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-  hasMoreData = false;
+-  rv = state->ExecuteStep(&hasMoreData);
+-  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-  freePages = 0;
+-  rv = state->GetInt32(0, &freePages);
+-  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-  MOZ_ASSERT(freePages <= kMaxFreePages);
+-#endif
+-
+-  return NS_OK;
+-}
+-
+ namespace {
+ 
+ #ifdef DEBUG
+ struct Expect
+ {
+   // Expect exact SQL
+   Expect(const char* aName, const char* aType, const char* aSql)
+     : mName(aName)
 diff --git a/dom/cache/DBSchema.h b/dom/cache/DBSchema.h
 --- a/dom/cache/DBSchema.h
 +++ b/dom/cache/DBSchema.h
