@@ -2403,7 +2403,7 @@ diff --git a/dom/backgroundsync/DBSchema.h b/dom/backgroundsync/DBSchema.h
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/DBSchema.h
-@@ -0,0 +1,83 @@
+@@ -0,0 +1,80 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -2428,10 +2428,7 @@ new file mode 100644
 +
 +// Note, this cannot be executed within a transaction.
 +nsresult
-+CreateOrMigrateSchema(mozIStorageConnection* aConn,
-+                      int32_t aLatestSchemaVersion,
-+                      const nsDependentCString aSql,
-+                      Expect aExpect);
++CreateOrMigrateSchema(mozIStorageConnection* aConn);
 +
 +// Note, this cannot be executed within a transaction.
 +nsresult
