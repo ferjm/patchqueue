@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  5aaf6a71a91eafb7ce41a96d2d9b3957d76b90e1
+# Parent  2ede05e421ca72adb22e21ef205897a41e05ff4f
 Bug 1308447 - Use mozStorageConnectionUtils and IncrementalVacuumConnection in dom/cache. r=bkelly
 
 diff --git a/dom/cache/Connection.cpp b/dom/cache/Connection.cpp
@@ -336,6 +336,112 @@ deleted file mode 100644
 -} // namespace mozilla
 -
 -#endif // mozilla_dom_cache_Connection_h
+diff --git a/dom/cache/DBAction.cpp b/dom/cache/DBAction.cpp
+--- a/dom/cache/DBAction.cpp
++++ b/dom/cache/DBAction.cpp
+@@ -1,21 +1,21 @@
+ /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+ /* vim: set ts=8 sts=2 et sw=2 tw=80: */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "mozilla/dom/cache/DBAction.h"
+ 
+-#include "mozilla/dom/cache/Connection.h"
+ #include "mozilla/dom/cache/DBSchema.h"
+ #include "mozilla/dom/cache/FileUtils.h"
+ #include "mozilla/dom/quota/PersistenceType.h"
+ #include "mozilla/net/nsFileProtocolHandler.h"
++#include "mozilla/storage.h"
+ #include "mozIStorageConnection.h"
+ #include "mozIStorageService.h"
+ #include "mozStorageCID.h"
+ #include "nsIFile.h"
+ #include "nsIURI.h"
+ #include "nsIFileURL.h"
+ #include "nsThreadUtils.h"
+ 
+@@ -79,17 +79,18 @@ DBAction::RunOnTarget(Resolver* aResolve
+ 
+     // Save this connection in the shared Data object so later Actions can
+     // use it.  This avoids opening a new connection for every Action.
+     if (aOptionalData) {
+       // Since we know this connection will be around for as long as the
+       // Cache is open, use our special wrapped connection class.  This
+       // will let us perform certain operations once the Cache origin
+       // is closed.
+-      nsCOMPtr<mozIStorageConnection> wrapped = new Connection(conn);
++      nsCOMPtr<mozIStorageConnection> wrapped =
++        new storage::IncrementalVacuumConnection(conn, db::kMaxFreePages);
+       aOptionalData->SetConnection(wrapped);
+     }
+   }
+ 
+   RunWithDBOnTarget(aResolver, aQuotaInfo, dbDir, conn);
+ }
+ 
+ nsresult
+diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
+--- a/dom/cache/DBSchema.cpp
++++ b/dom/cache/DBSchema.cpp
+@@ -162,27 +162,16 @@ const char* const kTableStorage =
+   ")";
+ 
+ // ---------
+ // End schema definition
+ // ---------
+ 
+ const int32_t kMaxEntriesPerStatement = 255;
+ 
+-const uint32_t kPageSize = 4 * 1024;
+-
+-// Grow the database in chunks to reduce fragmentation
+-const uint32_t kGrowthSize = 32 * 1024;
+-const uint32_t kGrowthPages = kGrowthSize / kPageSize;
+-static_assert(kGrowthSize % kPageSize == 0,
+-              "Growth size must be multiple of page size");
+-
+-// Only release free pages when we have more than this limit
+-const int32_t kMaxFreePages = kGrowthPages;
+-
+ // Limit WAL journal to a reasonable size
+ const uint32_t kWalAutoCheckpointSize = 512 * 1024;
+ const uint32_t kWalAutoCheckpointPages = kWalAutoCheckpointSize / kPageSize;
+ static_assert(kWalAutoCheckpointSize % kPageSize == 0,
+               "WAL checkpoint size must be multiple of page size");
+ 
+ } // namespace
+ 
+diff --git a/dom/cache/DBSchema.h b/dom/cache/DBSchema.h
+--- a/dom/cache/DBSchema.h
++++ b/dom/cache/DBSchema.h
+@@ -116,14 +116,25 @@ StorageGetKeys(mozIStorageConnection* aC
+ // Note, this works best when its NOT executed within a transaction.
+ nsresult
+ IncrementalVacuum(mozIStorageConnection* aConn);
+ 
+ // We will wipe out databases with a schema versions less than this.  Newer
+ // versions will be migrated on open to the latest schema version.
+ extern const int32_t kFirstShippedSchemaVersion;
+ 
++const uint32_t kPageSize = 4 * 1024;
++
++// Grow the database in chunks to reduce fragmentation
++const uint32_t kGrowthSize = 32 * 1024;
++const uint32_t kGrowthPages = kGrowthSize / kPageSize;
++static_assert(kGrowthSize % kPageSize == 0,
++              "Growth size must be multiple of page size");
++
++// Only release free pages when we have more than this limit
++extern const int32_t kMaxFreePages = kGrowthPages;
++
+ } // namespace db
+ } // namespace cache
+ } // namespace dom
+ } // namespace mozilla
+ 
+ #endif // mozilla_dom_cache_DBSchema_h
 diff --git a/dom/cache/moz.build b/dom/cache/moz.build
 --- a/dom/cache/moz.build
 +++ b/dom/cache/moz.build
