@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  2ede05e421ca72adb22e21ef205897a41e05ff4f
+# Parent  2fd5888afa2d384b85c136dae0e0db8c49a69ce5
 Bug 1308447 - Use mozStorageConnectionUtils and IncrementalVacuumConnection in dom/cache. r=bkelly
 
 diff --git a/dom/cache/Connection.cpp b/dom/cache/Connection.cpp
@@ -433,7 +433,7 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
  
  } // namespace
  
-@@ -354,149 +346,53 @@ static nsresult CreateAndBindKeyStatemen
+@@ -354,224 +346,67 @@ static nsresult CreateAndBindKeyStatemen
                                            const nsAString& aKey,
                                            mozIStorageStatement** aStateOut);
  static nsresult HashCString(nsICryptoHash* aCrypto, const nsACString& aIn,
@@ -490,9 +490,9 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
  nsresult
  CreateOrMigrateSchema(mozIStorageConnection* aConn)
  {
--  MOZ_ASSERT(!NS_IsMainThread());
--  MOZ_ASSERT(aConn);
--
+   MOZ_ASSERT(!NS_IsMainThread());
+   MOZ_ASSERT(aConn);
+ 
 -  int32_t schemaVersion;
 -  nsresult rv = aConn->GetSchemaVersion(&schemaVersion);
 -  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
@@ -617,6 +617,84 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
    MOZ_ASSERT(!NS_IsMainThread());
    MOZ_ASSERT(aConn);
  
+-  // This function needs to perform per-connection initialization tasks that
+-  // need to happen regardless of the schema.
+-
+-  nsPrintfCString pragmas(
+-    // Use a smaller page size to improve perf/footprint; default is too large
+-    "PRAGMA page_size = %u; "
+-    // Enable auto_vacuum; this must happen after page_size and before WAL
+-    "PRAGMA auto_vacuum = INCREMENTAL; "
+-    "PRAGMA foreign_keys = ON; ",
+-    kPageSize
+-  );
+-
+-  // Note, the default encoding of UTF-8 is preferred.  mozStorage does all
+-  // the work necessary to convert UTF-16 nsString values for us.  We don't
+-  // need ordering and the binary equality operations are correct.  So, do
+-  // NOT set PRAGMA encoding to UTF-16.
+-
+-  nsresult rv = aConn->ExecuteSimpleSQL(pragmas);
+-  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-  // Limit fragmentation by growing the database by many pages at once.
+-  rv = aConn->SetGrowthIncrement(kGrowthSize, EmptyCString());
+-  if (rv == NS_ERROR_FILE_TOO_BIG) {
+-    NS_WARNING("Not enough disk space to set sqlite growth increment.");
+-    rv = NS_OK;
+-  }
+-  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-  // Enable WAL journaling.  This must be performed in a separate transaction
+-  // after changing the page_size and enabling auto_vacuum.
+-  nsPrintfCString wal(
+-    // WAL journal can grow to given number of *pages*
+-    "PRAGMA wal_autocheckpoint = %u; "
+-    // Always truncate the journal back to given number of *bytes*
+-    "PRAGMA journal_size_limit = %u; "
+-    // WAL must be enabled at the end to allow page size to be changed, etc.
+-    "PRAGMA journal_mode = WAL; ",
+-    kWalAutoCheckpointPages,
+-    kWalAutoCheckpointSize
+-  );
+-
+-  rv = aConn->ExecuteSimpleSQL(wal);
+-  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-  // Verify that we successfully set the vacuum mode to incremental.  It
+-  // is very easy to put the database in a state where the auto_vacuum
+-  // pragma above fails silently.
+-#ifdef DEBUG
+-  nsCOMPtr<mozIStorageStatement> state;
+-  rv = aConn->CreateStatement(NS_LITERAL_CSTRING(
+-    "PRAGMA auto_vacuum;"
+-  ), getter_AddRefs(state));
+-  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-  bool hasMoreData = false;
+-  rv = state->ExecuteStep(&hasMoreData);
+-  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-  int32_t mode;
+-  rv = state->GetInt32(0, &mode);
+-  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-
+-  // integer value 2 is incremental mode
+-  if (NS_WARN_IF(mode != 2)) { return NS_ERROR_UNEXPECTED; }
+-#endif
+-
+-  return NS_OK;
++  return storage::utils::InitializeConnection(aConn, kPageSize, kGrowthSize,
++                                              kWalAutoCheckpointPages,
++                                              kWalAutoCheckpointSize);
+ }
+ 
+ nsresult
+ CreateCacheId(mozIStorageConnection* aConn, CacheId* aCacheIdOut)
+ {
+   MOZ_ASSERT(!NS_IsMainThread());
+   MOZ_ASSERT(aConn);
+   MOZ_ASSERT(aCacheIdOut);
 diff --git a/dom/cache/DBSchema.h b/dom/cache/DBSchema.h
 --- a/dom/cache/DBSchema.h
 +++ b/dom/cache/DBSchema.h
