@@ -434,7 +434,7 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
  
  } // namespace
  
-@@ -350,228 +343,97 @@ static nsresult BindId(mozIStorageStatem
+@@ -350,228 +343,111 @@ static nsresult BindId(mozIStorageStatem
  static nsresult ExtractId(mozIStorageStatement* aState, uint32_t aPos,
                            nsID* aIdOut);
  static nsresult CreateAndBindKeyStatement(mozIStorageConnection* aConn,
@@ -448,13 +448,27 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
 +
 +// Declare migration functions here.  Each function should upgrade
 +// the version by a single increment.  Don't skip versions.
-+nsresult MigrateFrom15To16(mozIStorageConnection* aConn, SchemaRewrite&);
-+nsresult MigrateFrom16To17(mozIStorageConnection* aConn, SchemaRewrite&);
-+nsresult MigrateFrom17To18(mozIStorageConnection* aConn, SchemaRewrite&);
-+nsresult MigrateFrom18To19(mozIStorageConnection* aConn, SchemaRewrite&);
-+nsresult MigrateFrom19To20(mozIStorageConnection* aConn, SchemaRewrite&);
-+nsresult MigrateFrom20To21(mozIStorageConnection* aConn, SchemaRewrite&);
-+nsresult MigrateFrom21To22(mozIStorageConnection* aConn, SchemaRewrite&);
++nsresult MigrateFrom15To16(mozIStorageConnection* aConn,
++                           nsACString& aSchemaRewriteTable,
++                           nsACString& aSchemaRewriteSql);
++nsresult MigrateFrom16To17(mozIStorageConnection* aConn,
++                           nsACString& aSchemaRewriteTable,
++                           nsACString& aSchemaRewriteSql);
++nsresult MigrateFrom17To18(mozIStorageConnection* aConn,
++                           nsACString& aSchemaRewriteTable,
++                           nsACString& aSchemaRewriteSql);
++nsresult MigrateFrom18To19(mozIStorageConnection* aConn,
++                           nsACString& aSchemaRewriteTable,
++                           nsACString& aSchemaRewriteSql);
++nsresult MigrateFrom19To20(mozIStorageConnection* aConn,
++                           nsACString& aSchemaRewriteTable,
++                           nsACString& aSchemaRewriteSql);
++nsresult MigrateFrom20To21(mozIStorageConnection* aConn,
++                           nsACString& aSchemaRewriteTable,
++                           nsACString& aSchemaRewriteSql);
++nsresult MigrateFrom21To22(mozIStorageConnection* aConn,
++                           nsACString& aSchemaRewriteTable,
++                           nsACString& aSchemaRewriteSql);
 +
 +const char* const kRewriteEntriesSchema =
 +  "UPDATE sqlite_master SET sql=:sql WHERE name='entries'";
@@ -728,7 +742,7 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
    MOZ_ASSERT(!NS_IsMainThread());
    MOZ_ASSERT(aConn);
    MOZ_ASSERT(aCacheIdOut);
-@@ -2288,305 +2150,24 @@ HashCString(nsICryptoHash* aCrypto, cons
+@@ -2288,305 +2164,25 @@ HashCString(nsICryptoHash* aCrypto, cons
    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
  
    aOut = Substring(fullHash, 0, 8);
@@ -1027,7 +1041,8 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
 -
 -nsresult MigrateFrom15To16(mozIStorageConnection* aConn, bool& aRewriteSchema)
 +nsresult MigrateFrom15To16(mozIStorageConnection* aConn,
-+                           SchemaRewrite& aSchemaRewrite)
++                           nsACString& aSchemaRewriteTable,
++                           nsACString& aSchemaRewriteSql)
  {
    MOZ_ASSERT(!NS_IsMainThread());
    MOZ_ASSERT(aConn);
@@ -1036,7 +1051,7 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
    // we only use a default value here because its required by ALTER TABLE and
    // we need to apply the default "follow" to existing records in the table.
    // We don't actually want to keep the default in the schema for future
-@@ -2595,23 +2176,24 @@ nsresult MigrateFrom15To16(mozIStorageCo
+@@ -2595,23 +2191,24 @@ nsresult MigrateFrom15To16(mozIStorageCo
      "ALTER TABLE entries "
      "ADD COLUMN request_redirect INTEGER NOT NULL DEFAULT 0"
    ));
@@ -1046,15 +1061,15 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
  
 -  aRewriteSchema = true;
-+  aSchemaRewrite.mTableName = NS_LITERAL_CSTRING("entries");
-+  aSchemaRewrite.mTableSql = kRewriteEntriesSchema;
++  aSchemaRewriteTable = NS_LITERAL_CSTRING("entries");
++  aSchemaRewriteSql = kRewriteEntriesSchema;
  
    return rv;
  }
  
  nsresult
 -MigrateFrom16To17(mozIStorageConnection* aConn, bool& aRewriteSchema)
-+MigrateFrom16To17(mozIStorageConnection* aConn, SchemaRewrite&)
++MigrateFrom16To17(mozIStorageConnection* aConn, nsACString&, nsACString&)
  {
    MOZ_ASSERT(!NS_IsMainThread());
    MOZ_ASSERT(aConn);
@@ -1063,7 +1078,7 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
    // response_redirected_url columns from the entries table.  sqlite doesn't
    // support removing a column from a table using ALTER TABLE, so we need to
    // create a new table without those columns, fill it up with the existing
-@@ -2733,17 +2315,17 @@ MigrateFrom16To17(mozIStorageConnection*
+@@ -2733,17 +2330,17 @@ MigrateFrom16To17(mozIStorageConnection*
  
    rv = aConn->SetSchemaVersion(17);
    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
@@ -1073,7 +1088,7 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
  
  nsresult
 -MigrateFrom17To18(mozIStorageConnection* aConn, bool& aRewriteSchema)
-+MigrateFrom17To18(mozIStorageConnection* aConn, SchemaRewrite&)
++MigrateFrom17To18(mozIStorageConnection* aConn, nsACString&, nsACString&)
  {
    MOZ_ASSERT(!NS_IsMainThread());
    MOZ_ASSERT(aConn);
@@ -1082,7 +1097,7 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
    // values from the database.  This enum value was removed from the spec in
    // https://github.com/whatwg/fetch/issues/39 but we unfortunately happily
    // accepted this value in the Request constructor.
-@@ -2760,17 +2342,17 @@ MigrateFrom17To18(mozIStorageConnection*
+@@ -2760,17 +2357,17 @@ MigrateFrom17To18(mozIStorageConnection*
  
    rv = aConn->SetSchemaVersion(18);
    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
@@ -1092,7 +1107,7 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
  
  nsresult
 -MigrateFrom18To19(mozIStorageConnection* aConn, bool& aRewriteSchema)
-+MigrateFrom18To19(mozIStorageConnection* aConn, SchemaRewrite&)
++MigrateFrom18To19(mozIStorageConnection* aConn, nsACString&, nsACString&)
  {
    MOZ_ASSERT(!NS_IsMainThread());
    MOZ_ASSERT(aConn);
@@ -1101,7 +1116,7 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
    // Request objects corresponding to a navigation content policy type to
    // "navigate".
  
-@@ -2788,17 +2370,18 @@ MigrateFrom18To19(mozIStorageConnection*
+@@ -2788,17 +2385,19 @@ MigrateFrom18To19(mozIStorageConnection*
    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
  
    rv = aConn->SetSchemaVersion(19);
@@ -1112,7 +1127,8 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
  
 -nsresult MigrateFrom19To20(mozIStorageConnection* aConn, bool& aRewriteSchema)
 +nsresult MigrateFrom19To20(mozIStorageConnection* aConn,
-+                           SchemaRewrite& aSchemaRewrite)
++                           nsACString& aSchemaRewriteTable,
++                           nsACString& aSchemaRewriteSql)
  {
    MOZ_ASSERT(!NS_IsMainThread());
    MOZ_ASSERT(aConn);
@@ -1121,7 +1137,7 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
    // "no-referrer-when-downgrade".  Note, we only use a default value here
    // because its required by ALTER TABLE and we need to apply the default
    // "no-referrer-when-downgrade" to existing records in the table. We don't
-@@ -2807,22 +2390,24 @@ nsresult MigrateFrom19To20(mozIStorageCo
+@@ -2807,22 +2406,25 @@ nsresult MigrateFrom19To20(mozIStorageCo
      "ALTER TABLE entries "
      "ADD COLUMN request_referrer_policy INTEGER NOT NULL DEFAULT 2"
    ));
@@ -1131,15 +1147,16 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
  
 -  aRewriteSchema = true;
-+  aSchemaRewrite.mTableName = NS_LITERAL_CSTRING("entries");
-+  aSchemaRewrite.mTableSql = kRewriteEntriesSchema;
++  aSchemaRewriteTable = NS_LITERAL_CSTRING("entries");
++  aSchemaRewriteSql = kRewriteEntriesSchema;
  
    return rv;
  }
  
 -nsresult MigrateFrom20To21(mozIStorageConnection* aConn, bool& aRewriteSchema)
 +nsresult MigrateFrom20To21(mozIStorageConnection* aConn,
-+                           SchemaRewrite& aSchemaRewrite)
++                           nsACString& aSchemaRewriteTable,
++                           nsACString& aSchemaRewriteSql)
  {
    MOZ_ASSERT(!NS_IsMainThread());
    MOZ_ASSERT(aConn);
@@ -1148,7 +1165,7 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
    // removes the response_url column from the entries table.
    // sqlite doesn't support removing a column from a table using ALTER TABLE,
    // so we need to create a new table without those columns, fill it up with the
-@@ -2961,37 +2546,40 @@ nsresult MigrateFrom20To21(mozIStorageCo
+@@ -2961,37 +2563,41 @@ nsresult MigrateFrom20To21(mozIStorageCo
    bool hasMoreData = false;
    rv = state->ExecuteStep(&hasMoreData);
    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
@@ -1158,15 +1175,16 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
  
 -  aRewriteSchema = true;
-+  aSchemaRewrite.mTableName = NS_LITERAL_CSTRING("entries");
-+  aSchemaRewrite.mTableSql = kRewriteEntriesSchema;
++  aSchemaRewriteTable = NS_LITERAL_CSTRING("entries");
++  aSchemaRewriteSql = kRewriteEntriesSchema;
  
    return rv;
  }
  
 -nsresult MigrateFrom21To22(mozIStorageConnection* aConn, bool& aRewriteSchema)
 +nsresult MigrateFrom21To22(mozIStorageConnection* aConn,
-+                           SchemaRewrite& aSchemaRewrite)
++                           nsACString& aSchemaRewriteTable,
++                           nsACString& aSchemaRewriteSql)
  {
    MOZ_ASSERT(!NS_IsMainThread());
    MOZ_ASSERT(aConn);
@@ -1182,8 +1200,8 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
  
 -  aRewriteSchema = true;
-+  aSchemaRewrite.mTableName = NS_LITERAL_CSTRING("entries");
-+  aSchemaRewrite.mTableSql = kRewriteEntriesSchema;
++  aSchemaRewriteTable = NS_LITERAL_CSTRING("entries");
++  aSchemaRewriteSql = kRewriteEntriesSchema;
  
    return rv;
  }
@@ -1260,3 +1278,206 @@ diff --git a/dom/cache/moz.build b/dom/cache/moz.build
      'PrincipalVerifier.cpp',
      'QuotaClient.cpp',
      'ReadStream.cpp',
+diff --git a/storage/mozStorageConnectionUtils.cpp b/storage/mozStorageConnectionUtils.cpp
+--- a/storage/mozStorageConnectionUtils.cpp
++++ b/storage/mozStorageConnectionUtils.cpp
+@@ -122,102 +122,109 @@ Validate(mozIStorageConnection* aConn,
+   }
+ #endif
+ 
+   return rv;
+ }
+ 
+ nsresult
+ RewriteSchema(mozIStorageConnection* aConn,
+-              const SchemaRewrite& aSchemaRewrite)
++              SchemaRewrite* aSchemaRewrite)
+ {
+   nsresult rv = aConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
+     "PRAGMA writable_schema = ON"
+   ));
+   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+ 
+   nsCOMPtr<mozIStorageStatement> state;
+   rv = aConn->CreateStatement(NS_LITERAL_CSTRING(
+     "UPDATE sqlite_master SET sql=:sql WHERE name=:name"
+   ), getter_AddRefs(state));
+   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+ 
+   rv = state->BindUTF8StringByName(NS_LITERAL_CSTRING("sql"),
+-                                   aSchemaRewrite.mTableSql);
++                                   aSchemaRewrite->mSql);
+   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+ 
+   rv = state->BindUTF8StringByName(NS_LITERAL_CSTRING("name"),
+-                                   aSchemaRewrite.mTableName);
++                                   aSchemaRewrite->mTable);
+   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+ 
+   rv = state->Execute();
+   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+ 
+   rv = aConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
+     "PRAGMA writable_schema = OFF"
+   ));
+   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+ 
+   return rv;
+ }
+ 
+ nsresult
+ Migrate(mozIStorageConnection* aConn,
++        const int32_t aFirstShippedSchemaVersion,
+         const int32_t aLatestSchemaVersion,
+-        const int32_t aFirstShippedSchemaVersion,
+         const nsTArray<Migration>& aMigrationList)
+ {
++  printf_stderr("Migrate\n");
+   MOZ_ASSERT(!NS_IsMainThread());
+   MOZ_ASSERT(aConn);
+ 
+   int32_t currentVersion = 0;
+   nsresult rv = aConn->GetSchemaVersion(&currentVersion);
+   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+ 
+   nsClassHashtable<nsCStringHashKey, nsCString> schemaRewrites;
+ 
++  printf_stderr("currentVersion < aLatestSchemaVersion %d < %d\n",
++                 currentVersion, aLatestSchemaVersion);
+   while (currentVersion < aLatestSchemaVersion) {
++    printf_stderr("currentVersion %d\n", currentVersion);
+     // Wiping old database should be handled elsewhere because it requires
+     // making a whole new mozIStorageConnection.  Make sure we don't
+     // accidentally get here for one of those old databases.
+     MOZ_ASSERT(currentVersion >= aFirstShippedSchemaVersion);
+ 
+     for (uint32_t i = 0; i < aMigrationList.Length(); ++i) {
+       if (aMigrationList[i].mFromVersion == currentVersion) {
+-        SchemaRewrite schemaRewrite;
+-        rv = aMigrationList[i].mFunc(aConn, schemaRewrite);
+-        if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+-        if (!schemaRewrite.mTableName.IsEmpty() &&
+-            !schemaRewrite.mTableSql.IsEmpty() &&
+-            !schemaRewrites.Contains(schemaRewrite.mTableName)) {
+-          schemaRewrites.Put(schemaRewrite.mTableName, &schemaRewrite.mTableSql);
++        nsAutoCString name, sql;
++        rv = aMigrationList[i].mFunc(aConn, name, sql);
++        RefPtr<SchemaRewrite> schemaRewrite = new SchemaRewrite(name, sql);
++        if (!schemaRewrite->mTable.IsEmpty() &&
++            !schemaRewrites.Contains(schemaRewrite->mTable)) {
++          printf_stderr("Adding schemarewrite\n");
++          schemaRewrites.Put(schemaRewrite->mTable, &schemaRewrite->mSql);
+         }
+         break;
+       }
+     }
+ 
+     DebugOnly<int32_t> lastVersion = currentVersion;
+     rv = aConn->GetSchemaVersion(&currentVersion);
+     if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+     MOZ_ASSERT(currentVersion > lastVersion);
+   }
+ 
++  printf_stderr("currentVersion == aLatestSchemaVersion %d == %d\n", currentVersion, aLatestSchemaVersion);
+   MOZ_ASSERT(currentVersion == aLatestSchemaVersion);
+ 
+   // Now overwrite the master SQL for each table that requires so.
+   for (auto iter = schemaRewrites.Iter(); !iter.Done(); iter.Next()) {
+-    SchemaRewrite rewrite;
+-    rewrite.mTableName = iter.Key();
+-    rewrite.mTableSql = *schemaRewrites.Get(iter.Key());
++    printf_stderr("Schema rewrite\n");
++    RefPtr<SchemaRewrite> rewrite;
++    rewrite->mTable = iter.Key();
++    rewrite->mSql = *schemaRewrites.Get(iter.Key());
+     rv = RewriteSchema(aConn, rewrite);
+     if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+   }
+ 
+   schemaRewrites.Clear();
+ 
++  printf_stderr("return\n");
+   return rv;
+ }
+ 
+ nsresult
+ CreateOrMigrateSchema(mozIStorageConnection* aConn,
+                       const int32_t aFirstShippedSchemaVersion,
+                       const int32_t aLatestSchemaVersion,
+                       const nsTArray<nsCString>& aTablesSql,
+@@ -226,16 +233,18 @@ CreateOrMigrateSchema(mozIStorageConnect
+ {
+   MOZ_ASSERT(!NS_IsMainThread());
+   MOZ_ASSERT(aConn);
+ 
+   int32_t schemaVersion;
+   nsresult rv = aConn->GetSchemaVersion(&schemaVersion);
+   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+ 
++  printf_stderr("SchemaVersion %d == aLatestSchemaVersion %d\n", schemaVersion, aLatestSchemaVersion);
++
+   if (schemaVersion == aLatestSchemaVersion) {
+     // We already have the correct schema version.  Validate it matches
+     // our expected schema and then proceed.
+     rv = Validate(aConn, aLatestSchemaVersion, aExpectedSchema);
+     if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+ 
+     return rv;
+   }
+@@ -243,16 +252,17 @@ CreateOrMigrateSchema(mozIStorageConnect
+   // Turn off checking foreign keys before starting a transaction, and restore
+   // it once we're done.
+   AutoDisableForeignKeyChecking restoreForeignKeyChecking(aConn);
+   mozStorageTransaction trans(aConn, false,
+                               mozIStorageConnection::TRANSACTION_IMMEDIATE);
+   bool needVacuum = false;
+ 
+   if (schemaVersion) {
++    printf_stderr("Calling Migrate\n");
+     // A schema exists, but its not the current version.  Attempt to
+     // migrate it to our new schema.
+     rv = Migrate(aConn, aFirstShippedSchemaVersion, aLatestSchemaVersion,
+                  aMigrationList);
+     if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+ 
+     // Migrations happen infrequently and reflect a chance in DB structure.
+     // This is a good time to rebuild the database.  It also helps catch
+diff --git a/storage/mozStorageConnectionUtils.h b/storage/mozStorageConnectionUtils.h
+--- a/storage/mozStorageConnectionUtils.h
++++ b/storage/mozStorageConnectionUtils.h
+@@ -36,21 +36,32 @@ struct Expect
+   const nsCString mName;
+   const nsCString mType;
+   const nsCString mSql;
+   const bool mIgnoreSql;
+ };
+ 
+ struct SchemaRewrite
+ {
+-  nsCString mTableName;
+-  nsCString mTableSql;
++  NS_INLINE_DECL_REFCOUNTING(SchemaRewrite)
++
++  SchemaRewrite(const nsCString aTable, const nsCString aSql)
++    : mTable(aTable)
++    , mSql(aSql)
++  {}
++
++  nsCString mTable;
++  nsCString mSql;
++
++private:
++  ~SchemaRewrite() {}
+ };
+ 
+-typedef nsresult (*MigrationFunc)(mozIStorageConnection*, SchemaRewrite&);
++typedef nsresult (*MigrationFunc)(mozIStorageConnection*, nsACString&,
++                                  nsACString&);
+ 
+ struct Migration
+ {
+   constexpr Migration(int32_t aFromVersion, MigrationFunc aFunc)
+     : mFromVersion(aFromVersion)
+     , mFunc(aFunc)
+   { }
+   int32_t mFromVersion;
