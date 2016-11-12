@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  ddf3899fa7ec883527007191cf7471ee4e2ff500
+# Parent  e72944c7835a7c4875c39d02637d05b63b69cde1
 Bug 1217544 - Implement one-off BackgroundSync API. Part 6: mozStorageConnectionUtils. r=bkelly
 
 diff --git a/storage/IncrementalVacuumConnection.cpp b/storage/IncrementalVacuumConnection.cpp
@@ -390,7 +390,7 @@ diff --git a/storage/mozStorageConnectionUtils.cpp b/storage/mozStorageConnectio
 new file mode 100644
 --- /dev/null
 +++ b/storage/mozStorageConnectionUtils.cpp
-@@ -0,0 +1,436 @@
+@@ -0,0 +1,429 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -520,7 +520,8 @@ new file mode 100644
 +
 +nsresult
 +RewriteSchema(mozIStorageConnection* aConn,
-+              const SchemaRewrite& aSchemaRewrite)
++              const nsACString& aTable,
++              const nsACString& aSql)
 +{
 +  nsresult rv = aConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
 +    "PRAGMA writable_schema = ON"
@@ -533,12 +534,10 @@ new file mode 100644
 +  ), getter_AddRefs(state));
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
-+  rv = state->BindUTF8StringByName(NS_LITERAL_CSTRING("sql"),
-+                                   aSchemaRewrite.mTableSql);
++  rv = state->BindUTF8StringByName(NS_LITERAL_CSTRING("sql"), aSql);
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
-+  rv = state->BindUTF8StringByName(NS_LITERAL_CSTRING("name"),
-+                                   aSchemaRewrite.mTableName);
++  rv = state->BindUTF8StringByName(NS_LITERAL_CSTRING("name"), aTable);
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +  rv = state->Execute();
@@ -554,8 +553,8 @@ new file mode 100644
 +
 +nsresult
 +Migrate(mozIStorageConnection* aConn,
-+        const int32_t aLatestSchemaVersion,
 +        const int32_t aFirstShippedSchemaVersion,
++        const int32_t aLatestSchemaVersion,
 +        const nsTArray<Migration>& aMigrationList)
 +{
 +  MOZ_ASSERT(!NS_IsMainThread());
@@ -575,13 +574,10 @@ new file mode 100644
 +
 +    for (uint32_t i = 0; i < aMigrationList.Length(); ++i) {
 +      if (aMigrationList[i].mFromVersion == currentVersion) {
-+        SchemaRewrite schemaRewrite;
-+        rv = aMigrationList[i].mFunc(aConn, schemaRewrite);
-+        if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
-+        if (!schemaRewrite.mTableName.IsEmpty() &&
-+            !schemaRewrite.mTableSql.IsEmpty() &&
-+            !schemaRewrites.Contains(schemaRewrite.mTableName)) {
-+          schemaRewrites.Put(schemaRewrite.mTableName, &schemaRewrite.mTableSql);
++        nsCString table, sql;
++        rv = aMigrationList[i].mFunc(aConn, table, sql);
++        if (!table.IsEmpty() && !schemaRewrites.Contains(table)) {
++          schemaRewrites.Put(table, new nsCString(sql));
 +        }
 +        break;
 +      }
@@ -597,10 +593,7 @@ new file mode 100644
 +
 +  // Now overwrite the master SQL for each table that requires so.
 +  for (auto iter = schemaRewrites.Iter(); !iter.Done(); iter.Next()) {
-+    SchemaRewrite rewrite;
-+    rewrite.mTableName = iter.Key();
-+    rewrite.mTableSql = *schemaRewrites.Get(iter.Key());
-+    rv = RewriteSchema(aConn, rewrite);
++    rv = RewriteSchema(aConn, iter.Key(), *schemaRewrites.Get(iter.Key()));
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +  }
 +
@@ -831,7 +824,7 @@ diff --git a/storage/mozStorageConnectionUtils.h b/storage/mozStorageConnectionU
 new file mode 100644
 --- /dev/null
 +++ b/storage/mozStorageConnectionUtils.h
-@@ -0,0 +1,83 @@
+@@ -0,0 +1,78 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -873,13 +866,8 @@ new file mode 100644
 +  const bool mIgnoreSql;
 +};
 +
-+struct SchemaRewrite
-+{
-+  nsCString mTableName;
-+  nsCString mTableSql;
-+};
-+
-+typedef nsresult (*MigrationFunc)(mozIStorageConnection*, SchemaRewrite&);
++typedef nsresult (*MigrationFunc)(mozIStorageConnection*, nsACString&,
++                                  nsACString&);
 +
 +struct Migration
 +{
