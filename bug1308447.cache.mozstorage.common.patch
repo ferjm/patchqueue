@@ -385,7 +385,7 @@ diff --git a/dom/cache/DBAction.cpp b/dom/cache/DBAction.cpp
 diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
 --- a/dom/cache/DBSchema.cpp
 +++ b/dom/cache/DBSchema.cpp
-@@ -28,16 +28,20 @@
+@@ -28,16 +28,19 @@
  #include "nsPrintfCString.h"
  #include "nsTArray.h"
  
@@ -396,7 +396,6 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
  
 +using storage::utils::Expect;
 +using storage::utils::Migration;
-+using storage::utils::SchemaRewrite;
 +
  const int32_t kFirstShippedSchemaVersion = 15;
  
@@ -406,7 +405,7 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
  const int32_t kLatestSchemaVersion = 22;
  
  // ---------
-@@ -162,27 +166,16 @@ const char* const kTableStorage =
+@@ -162,27 +165,16 @@ const char* const kTableStorage =
    ")";
  
  // ---------
@@ -434,7 +433,7 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
  
  } // namespace
  
-@@ -350,228 +343,111 @@ static nsresult BindId(mozIStorageStatem
+@@ -350,228 +342,107 @@ static nsresult BindId(mozIStorageStatem
  static nsresult ExtractId(mozIStorageStatement* aState, uint32_t aPos,
                            nsID* aIdOut);
  static nsresult CreateAndBindKeyStatement(mozIStorageConnection* aConn,
@@ -469,10 +468,6 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
 +nsresult MigrateFrom21To22(mozIStorageConnection* aConn,
 +                           nsACString& aSchemaRewriteTable,
 +                           nsACString& aSchemaRewriteSql);
-+
-+const char* const kRewriteEntriesSchema =
-+  "UPDATE sqlite_master SET sql=:sql WHERE name='entries'";
-+
  } // namespace
  
 -class MOZ_RAII AutoDisableForeignKeyChecking
@@ -742,7 +737,7 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
    MOZ_ASSERT(!NS_IsMainThread());
    MOZ_ASSERT(aConn);
    MOZ_ASSERT(aCacheIdOut);
-@@ -2288,305 +2164,25 @@ HashCString(nsICryptoHash* aCrypto, cons
+@@ -2288,305 +2159,25 @@ HashCString(nsICryptoHash* aCrypto, cons
    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
  
    aOut = Substring(fullHash, 0, 8);
@@ -1051,7 +1046,7 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
    // we only use a default value here because its required by ALTER TABLE and
    // we need to apply the default "follow" to existing records in the table.
    // We don't actually want to keep the default in the schema for future
-@@ -2595,23 +2191,24 @@ nsresult MigrateFrom15To16(mozIStorageCo
+@@ -2595,23 +2186,24 @@ nsresult MigrateFrom15To16(mozIStorageCo
      "ALTER TABLE entries "
      "ADD COLUMN request_redirect INTEGER NOT NULL DEFAULT 0"
    ));
@@ -1062,7 +1057,7 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
  
 -  aRewriteSchema = true;
 +  aSchemaRewriteTable = NS_LITERAL_CSTRING("entries");
-+  aSchemaRewriteSql = kRewriteEntriesSchema;
++  aSchemaRewriteSql = kTableEntries;
  
    return rv;
  }
@@ -1078,7 +1073,7 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
    // response_redirected_url columns from the entries table.  sqlite doesn't
    // support removing a column from a table using ALTER TABLE, so we need to
    // create a new table without those columns, fill it up with the existing
-@@ -2733,17 +2330,17 @@ MigrateFrom16To17(mozIStorageConnection*
+@@ -2733,17 +2325,17 @@ MigrateFrom16To17(mozIStorageConnection*
  
    rv = aConn->SetSchemaVersion(17);
    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
@@ -1097,7 +1092,7 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
    // values from the database.  This enum value was removed from the spec in
    // https://github.com/whatwg/fetch/issues/39 but we unfortunately happily
    // accepted this value in the Request constructor.
-@@ -2760,17 +2357,17 @@ MigrateFrom17To18(mozIStorageConnection*
+@@ -2760,17 +2352,17 @@ MigrateFrom17To18(mozIStorageConnection*
  
    rv = aConn->SetSchemaVersion(18);
    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
@@ -1116,7 +1111,7 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
    // Request objects corresponding to a navigation content policy type to
    // "navigate".
  
-@@ -2788,17 +2385,19 @@ MigrateFrom18To19(mozIStorageConnection*
+@@ -2788,17 +2380,19 @@ MigrateFrom18To19(mozIStorageConnection*
    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
  
    rv = aConn->SetSchemaVersion(19);
@@ -1137,7 +1132,7 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
    // "no-referrer-when-downgrade".  Note, we only use a default value here
    // because its required by ALTER TABLE and we need to apply the default
    // "no-referrer-when-downgrade" to existing records in the table. We don't
-@@ -2807,22 +2406,25 @@ nsresult MigrateFrom19To20(mozIStorageCo
+@@ -2807,22 +2401,25 @@ nsresult MigrateFrom19To20(mozIStorageCo
      "ALTER TABLE entries "
      "ADD COLUMN request_referrer_policy INTEGER NOT NULL DEFAULT 2"
    ));
@@ -1148,7 +1143,7 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
  
 -  aRewriteSchema = true;
 +  aSchemaRewriteTable = NS_LITERAL_CSTRING("entries");
-+  aSchemaRewriteSql = kRewriteEntriesSchema;
++  aSchemaRewriteSql = kTableEntries;
  
    return rv;
  }
@@ -1165,7 +1160,7 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
    // removes the response_url column from the entries table.
    // sqlite doesn't support removing a column from a table using ALTER TABLE,
    // so we need to create a new table without those columns, fill it up with the
-@@ -2961,37 +2563,41 @@ nsresult MigrateFrom20To21(mozIStorageCo
+@@ -2961,37 +2558,41 @@ nsresult MigrateFrom20To21(mozIStorageCo
    bool hasMoreData = false;
    rv = state->ExecuteStep(&hasMoreData);
    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
@@ -1176,7 +1171,7 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
  
 -  aRewriteSchema = true;
 +  aSchemaRewriteTable = NS_LITERAL_CSTRING("entries");
-+  aSchemaRewriteSql = kRewriteEntriesSchema;
++  aSchemaRewriteSql = kTableEntries;
  
    return rv;
  }
@@ -1201,7 +1196,7 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
  
 -  aRewriteSchema = true;
 +  aSchemaRewriteTable = NS_LITERAL_CSTRING("entries");
-+  aSchemaRewriteSql = kRewriteEntriesSchema;
++  aSchemaRewriteSql = kTableEntries;
  
    return rv;
  }
@@ -1281,7 +1276,30 @@ diff --git a/dom/cache/moz.build b/dom/cache/moz.build
 diff --git a/storage/mozStorageConnectionUtils.cpp b/storage/mozStorageConnectionUtils.cpp
 --- a/storage/mozStorageConnectionUtils.cpp
 +++ b/storage/mozStorageConnectionUtils.cpp
-@@ -122,102 +122,109 @@ Validate(mozIStorageConnection* aConn,
+@@ -98,19 +98,20 @@ Validate(mozIStorageConnection* aConn,
+     for (uint32_t i = 0; i < aExpectedSchema.Length(); ++i) {
+       if (name == aExpectedSchema[i].mName) {
+         if (type != aExpectedSchema[i].mType) {
+           NS_WARNING(nsPrintfCString("Unexpected type for schema entry %s",
+                      name.get()).get());
+           return NS_ERROR_FAILURE;
+         }
+ 
++        nsAutoCString ss(aExpectedSchema[i].mSql);
+         if (!aExpectedSchema[i].mIgnoreSql && sql != aExpectedSchema[i].mSql) {
+-          NS_WARNING(nsPrintfCString("Unexpected SQL for schema entry %s",
+-                     name.get()).get());
++          NS_WARNING(nsPrintfCString("Unexpected SQL for schema entry %d != %d",
++                     ss.Length(), sql.Length()).get());
+           return NS_ERROR_FAILURE;
+         }
+ 
+         foundMatch = true;
+         break;
+       }
+     }
+ 
+@@ -122,102 +123,109 @@ Validate(mozIStorageConnection* aConn,
    }
  #endif
  
@@ -1291,7 +1309,8 @@ diff --git a/storage/mozStorageConnectionUtils.cpp b/storage/mozStorageConnectio
  nsresult
  RewriteSchema(mozIStorageConnection* aConn,
 -              const SchemaRewrite& aSchemaRewrite)
-+              SchemaRewrite* aSchemaRewrite)
++              const nsACString& aTable,
++              const nsACString& aSql)
  {
    nsresult rv = aConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
      "PRAGMA writable_schema = ON"
@@ -1306,16 +1325,19 @@ diff --git a/storage/mozStorageConnectionUtils.cpp b/storage/mozStorageConnectio
  
    rv = state->BindUTF8StringByName(NS_LITERAL_CSTRING("sql"),
 -                                   aSchemaRewrite.mTableSql);
-+                                   aSchemaRewrite->mSql);
++                                   aSql);
    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
  
    rv = state->BindUTF8StringByName(NS_LITERAL_CSTRING("name"),
 -                                   aSchemaRewrite.mTableName);
-+                                   aSchemaRewrite->mTable);
++                                   aTable);
    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
  
    rv = state->Execute();
    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++  
++  nsAutoCString ss(aSql);
++  NS_WARNING(nsPrintfCString("RewriteSchema %s", ss.get()).get());
  
    rv = aConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
      "PRAGMA writable_schema = OFF"
@@ -1360,13 +1382,12 @@ diff --git a/storage/mozStorageConnectionUtils.cpp b/storage/mozStorageConnectio
 -            !schemaRewrite.mTableSql.IsEmpty() &&
 -            !schemaRewrites.Contains(schemaRewrite.mTableName)) {
 -          schemaRewrites.Put(schemaRewrite.mTableName, &schemaRewrite.mTableSql);
-+        nsAutoCString name, sql;
-+        rv = aMigrationList[i].mFunc(aConn, name, sql);
-+        RefPtr<SchemaRewrite> schemaRewrite = new SchemaRewrite(name, sql);
-+        if (!schemaRewrite->mTable.IsEmpty() &&
-+            !schemaRewrites.Contains(schemaRewrite->mTable)) {
++        nsCString table, sql;
++        rv = aMigrationList[i].mFunc(aConn, table, sql);
++        printf_stderr("From version %d table.IsEmpty %d\n", aMigrationList[i].mFromVersion, table.IsEmpty());
++        if (!table.IsEmpty() && !schemaRewrites.Contains(table)) {
 +          printf_stderr("Adding schemarewrite\n");
-+          schemaRewrites.Put(schemaRewrite->mTable, &schemaRewrite->mSql);
++          schemaRewrites.Put(table, new nsCString(sql));
          }
          break;
        }
@@ -1386,11 +1407,9 @@ diff --git a/storage/mozStorageConnectionUtils.cpp b/storage/mozStorageConnectio
 -    SchemaRewrite rewrite;
 -    rewrite.mTableName = iter.Key();
 -    rewrite.mTableSql = *schemaRewrites.Get(iter.Key());
+-    rv = RewriteSchema(aConn, rewrite);
 +    printf_stderr("Schema rewrite\n");
-+    RefPtr<SchemaRewrite> rewrite;
-+    rewrite->mTable = iter.Key();
-+    rewrite->mSql = *schemaRewrites.Get(iter.Key());
-     rv = RewriteSchema(aConn, rewrite);
++    rv = RewriteSchema(aConn, iter.Key(), *schemaRewrites.Get(iter.Key()));
      if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
    }
  
@@ -1405,7 +1424,7 @@ diff --git a/storage/mozStorageConnectionUtils.cpp b/storage/mozStorageConnectio
                        const int32_t aFirstShippedSchemaVersion,
                        const int32_t aLatestSchemaVersion,
                        const nsTArray<nsCString>& aTablesSql,
-@@ -226,16 +233,18 @@ CreateOrMigrateSchema(mozIStorageConnect
+@@ -226,16 +234,18 @@ CreateOrMigrateSchema(mozIStorageConnect
  {
    MOZ_ASSERT(!NS_IsMainThread());
    MOZ_ASSERT(aConn);
@@ -1424,7 +1443,7 @@ diff --git a/storage/mozStorageConnectionUtils.cpp b/storage/mozStorageConnectio
  
      return rv;
    }
-@@ -243,16 +252,17 @@ CreateOrMigrateSchema(mozIStorageConnect
+@@ -243,16 +253,17 @@ CreateOrMigrateSchema(mozIStorageConnect
    // Turn off checking foreign keys before starting a transaction, and restore
    // it once we're done.
    AutoDisableForeignKeyChecking restoreForeignKeyChecking(aConn);
@@ -1445,31 +1464,21 @@ diff --git a/storage/mozStorageConnectionUtils.cpp b/storage/mozStorageConnectio
 diff --git a/storage/mozStorageConnectionUtils.h b/storage/mozStorageConnectionUtils.h
 --- a/storage/mozStorageConnectionUtils.h
 +++ b/storage/mozStorageConnectionUtils.h
-@@ -36,21 +36,32 @@ struct Expect
+@@ -34,23 +34,18 @@ struct Expect
+   { }
+ 
    const nsCString mName;
    const nsCString mType;
    const nsCString mSql;
    const bool mIgnoreSql;
  };
  
- struct SchemaRewrite
- {
+-struct SchemaRewrite
+-{
 -  nsCString mTableName;
 -  nsCString mTableSql;
-+  NS_INLINE_DECL_REFCOUNTING(SchemaRewrite)
-+
-+  SchemaRewrite(const nsCString aTable, const nsCString aSql)
-+    : mTable(aTable)
-+    , mSql(aSql)
-+  {}
-+
-+  nsCString mTable;
-+  nsCString mSql;
-+
-+private:
-+  ~SchemaRewrite() {}
- };
- 
+-};
+-
 -typedef nsresult (*MigrationFunc)(mozIStorageConnection*, SchemaRewrite&);
 +typedef nsresult (*MigrationFunc)(mozIStorageConnection*, nsACString&,
 +                                  nsACString&);
