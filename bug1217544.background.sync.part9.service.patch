@@ -266,7 +266,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncService.cpp
-@@ -0,0 +1,685 @@
+@@ -0,0 +1,680 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -302,12 +302,9 @@ new file mode 100644
 +
 +// ----------------------------------------------------------------------------
 +
-+class GetStorageManagerRunnable final : public nsIRunnable
-+                                      , public nsICancelableRunnable
++class GetStorageManagerRunnable final : public CancelableRunnable
 +{
 +public:
-+  NS_DECL_THREADSAFE_ISUPPORTS
-+
 +  GetStorageManagerRunnable(BackgroundSyncService* aService,
 +                            const nsString& aOrigin,
 +                            const SyncInternalOp& aOp)
@@ -390,8 +387,6 @@ new file mode 100644
 +  const SyncInternalOp mOp;
 +  PrincipalInfo mPrincipalInfo;
 +};
-+
-+NS_IMPL_ISUPPORTS(GetStorageManagerRunnable, nsICancelableRunnable, nsIRunnable)
 +
 +// ----------------------------------------------------------------------------
 +

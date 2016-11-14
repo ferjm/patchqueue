@@ -10,8 +10,8 @@ bug1217544.background.sync.part9.service.patch
 bug1217544.background.sync.tests.patch
 bug1300844.cache.quotaclient.helpers.patch
 bug1308447.cache.mozstorage.common.patch
-debug.patch
 try-all
+debug.patch
 attachment.cgi?id=8743366
 bug1252573.mobileid.patch
 bug1252570.remove.mozpay.patch
