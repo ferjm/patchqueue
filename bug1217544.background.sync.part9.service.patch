@@ -266,7 +266,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncService.cpp
-@@ -0,0 +1,682 @@
+@@ -0,0 +1,686 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -692,12 +692,11 @@ new file mode 100644
 +        manager->Register(aRequestId,
 +            aResponse.get_SyncRegisterResponse().mRegistration());
 +        return;
-+      } else {
-+        // If this is not the first registration for this origin, we can
-+        // directly try to trigger the sync event.
-+        MaybeTriggerSyncEvent(
-+            aResponse.get_SyncRegisterResponse().mRegistration());
 +      }
++      // If this is not the first registration for this origin, we can
++      // directly try to trigger the sync event.
++      MaybeTriggerSyncEvent(
++          aResponse.get_SyncRegisterResponse().mRegistration());
 +      break;
 +    case SyncOpResponse::TSyncRegisterOriginResponse:
 +      // Once we have registered the origin for the sync request, we can try
@@ -739,7 +738,8 @@ new file mode 100644
 +        RefPtr<GetStorageManagerRunnable> runnable =
 +          new GetStorageManagerRunnable(this, origins,
 +              SyncInternalOp(SyncGetAllArgs()));
-+        MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(runnable));
++        NS_WARNING_ASSERTION(NS_FAILED(NS_DispatchToMainThread(runnable)),
++                             "Failed to dispatch a runnable to main-thread.");
 +      }
 +      break;
 +    case SyncOpResponse::TSyncGetAllResponse:
@@ -779,7 +779,8 @@ new file mode 100644
 +            new GetStorageManagerRunnable(this, registration.mOrigin(),
 +                SyncInternalOp(SyncChangeStateArgs(registration.mId(),
 +                               RegistrationState::ePending)));
-+          MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(runnable));
++          NS_WARNING_ASSERTION(NS_FAILED(NS_DispatchToMainThread(runnable)),
++                               "Failed to dispatch a runnable to main-thread.");
 +          return;
 +        }
 +
@@ -827,7 +828,8 @@ new file mode 100644
 +    new GetStorageManagerRunnable(this, aRegistration.mOrigin(), SyncInternalOp(
 +      SyncChangeStateArgs(aRegistration.mId(),RegistrationState::eFiring)
 +    ));
-+  MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(runnable));
++  NS_WARNING_ASSERTION(NS_FAILED(NS_DispatchToMainThread(runnable)),
++                       "Failed to dispatch a runnable to main-thread.");
 +}
 +
 +void
@@ -842,7 +844,8 @@ new file mode 100644
 +        new GetStorageManagerRunnable(this, aRegistration.mOrigin(), SyncInternalOp(
 +          SyncChangeStateArgs(aRegistration.mId(),RegistrationState::eFiring)
 +        ));
-+      MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(runnable));
++      NS_WARNING_ASSERTION(NS_FAILED(NS_DispatchToMainThread(runnable)),
++                           "Failed to dispatch a runnable to main-thread.");
 +    }
 +    return;
 +  }
@@ -862,7 +865,8 @@ new file mode 100644
 +  RefPtr<GetStorageManagerRunnable> runnable =
 +    new GetStorageManagerRunnable(this, aRegistration.mOrigin(),
 +        SyncInternalOp(SyncRemoveArgs(aRegistration.mId())));
-+  MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(runnable));
++  NS_WARNING_ASSERTION(NS_FAILED(NS_DispatchToMainThread(runnable)),
++                       "Failed to dispatch a runnable to main-thread.");
 +}
 +
 +// --------------------------------------------------------------------------
