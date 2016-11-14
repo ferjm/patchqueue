@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  2fd5888afa2d384b85c136dae0e0db8c49a69ce5
+# Parent  b47313b9d57b46a2b88b489ed51bad2bb741978a
 Bug 1308447 - Use mozStorageConnectionUtils and IncrementalVacuumConnection in dom/cache. r=bkelly
 
 diff --git a/dom/cache/Connection.cpp b/dom/cache/Connection.cpp
@@ -385,7 +385,8 @@ diff --git a/dom/cache/DBAction.cpp b/dom/cache/DBAction.cpp
 diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
 --- a/dom/cache/DBSchema.cpp
 +++ b/dom/cache/DBSchema.cpp
-@@ -28,16 +28,19 @@
+@@ -27,20 +27,27 @@
+ #include "nsNetCID.h"
  #include "nsPrintfCString.h"
  #include "nsTArray.h"
  
@@ -393,19 +394,26 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
  namespace dom {
  namespace cache {
  namespace db {
- 
++
 +using storage::utils::Expect;
 +using storage::utils::Migration;
 +
  const int32_t kFirstShippedSchemaVersion = 15;
- 
++
  namespace {
- 
++
  // Update this whenever the DB schema is changed.
- const int32_t kLatestSchemaVersion = 22;
- 
+ const int32_t kLatestSchemaVersion = 24;
++
  // ---------
-@@ -162,27 +165,16 @@ const char* const kTableStorage =
+ // The following constants define the SQL schema.  These are defined in the
+ // same order the SQL should be executed in CreateOrMigrateSchema().  They are
+ // broken out as constants for convenient use in validation and migration.
+ // ---------
+ // The caches table is the single source of truth about what Cache
+ // objects exist for the origin.  The contents of the Cache are stored
+ // in the entries table that references back to caches.
+@@ -156,27 +163,16 @@ const char* const kTableStorage =
    ")";
  
  // ---------
@@ -433,7 +441,7 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
  
  } // namespace
  
-@@ -350,228 +342,107 @@ static nsresult BindId(mozIStorageStatem
+@@ -345,228 +341,116 @@ static nsresult BindId(mozIStorageStatem
  static nsresult ExtractId(mozIStorageStatement* aState, uint32_t aPos,
                            nsID* aIdOut);
  static nsresult CreateAndBindKeyStatement(mozIStorageConnection* aConn,
@@ -468,6 +476,13 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
 +nsresult MigrateFrom21To22(mozIStorageConnection* aConn,
 +                           nsACString& aSchemaRewriteTable,
 +                           nsACString& aSchemaRewriteSql);
++nsresult MigrateFrom22To23(mozIStorageConnection* aConn,
++                           nsACString& aSchemaRewriteTable,
++                           nsACString& aSchemaRewriteSql);
++nsresult MigrateFrom23To24(mozIStorageConnection* aConn,
++                           nsACString& aSchemaRewriteTable,
++                           nsACString& aSchemaRewriteSql);
++
  } // namespace
  
 -class MOZ_RAII AutoDisableForeignKeyChecking
@@ -640,6 +655,8 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
 +  migrationList.AppendElement(Migration(19, MigrateFrom19To20));
 +  migrationList.AppendElement(Migration(20, MigrateFrom20To21));
 +  migrationList.AppendElement(Migration(21, MigrateFrom21To22));
++  migrationList.AppendElement(Migration(22, MigrateFrom22To23));
++  migrationList.AppendElement(Migration(23, MigrateFrom23To24));
 +
 +  return storage::utils::CreateOrMigrateSchema(aConn,
 +                                               kFirstShippedSchemaVersion,
@@ -737,7 +754,7 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
    MOZ_ASSERT(!NS_IsMainThread());
    MOZ_ASSERT(aConn);
    MOZ_ASSERT(aCacheIdOut);
-@@ -2288,305 +2159,25 @@ HashCString(nsICryptoHash* aCrypto, cons
+@@ -2274,306 +2158,25 @@ HashCString(nsICryptoHash* aCrypto, cons
    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
  
    aOut = Substring(fullHash, 0, 8);
@@ -943,7 +960,8 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
 -nsresult MigrateFrom19To20(mozIStorageConnection* aConn, bool& aRewriteSchema);
 -nsresult MigrateFrom20To21(mozIStorageConnection* aConn, bool& aRewriteSchema);
 -nsresult MigrateFrom21To22(mozIStorageConnection* aConn, bool& aRewriteSchema);
--
+-nsresult MigrateFrom22To23(mozIStorageConnection* aConn, bool& aRewriteSchema);
+-nsresult MigrateFrom23To24(mozIStorageConnection* aConn, bool& aRewriteSchema);
 -// Configure migration functions to run for the given starting version.
 -Migration sMigrationList[] = {
 -  Migration(15, MigrateFrom15To16),
@@ -953,10 +971,10 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
 -  Migration(19, MigrateFrom19To20),
 -  Migration(20, MigrateFrom20To21),
 -  Migration(21, MigrateFrom21To22),
+-  Migration(22, MigrateFrom22To23),
+-  Migration(23, MigrateFrom23To24),
 -};
--
 -uint32_t sMigrationListLength = sizeof(sMigrationList) / sizeof(Migration);
--
 -nsresult
 -RewriteEntriesSchema(mozIStorageConnection* aConn)
 -{
@@ -1046,7 +1064,7 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
    // we only use a default value here because its required by ALTER TABLE and
    // we need to apply the default "follow" to existing records in the table.
    // We don't actually want to keep the default in the schema for future
-@@ -2595,23 +2186,24 @@ nsresult MigrateFrom15To16(mozIStorageCo
+@@ -2582,23 +2185,25 @@ nsresult MigrateFrom15To16(mozIStorageCo
      "ALTER TABLE entries "
      "ADD COLUMN request_redirect INTEGER NOT NULL DEFAULT 0"
    ));
@@ -1062,9 +1080,11 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
    return rv;
  }
  
- nsresult
+-nsresult
 -MigrateFrom16To17(mozIStorageConnection* aConn, bool& aRewriteSchema)
-+MigrateFrom16To17(mozIStorageConnection* aConn, nsACString&, nsACString&)
++nsresult MigrateFrom16To17(mozIStorageConnection* aConn,
++                           nsACString& aSchemaRewriteTable,
++                           nsACString& aSchemaRewriteSql)
  {
    MOZ_ASSERT(!NS_IsMainThread());
    MOZ_ASSERT(aConn);
@@ -1073,7 +1093,8 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
    // response_redirected_url columns from the entries table.  sqlite doesn't
    // support removing a column from a table using ALTER TABLE, so we need to
    // create a new table without those columns, fill it up with the existing
-@@ -2733,17 +2325,17 @@ MigrateFrom16To17(mozIStorageConnection*
+@@ -2719,18 +2324,19 @@ MigrateFrom16To17(mozIStorageConnection*
+   if (NS_WARN_IF(hasMoreData)) { return NS_ERROR_FAILURE; }
  
    rv = aConn->SetSchemaVersion(17);
    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
@@ -1081,9 +1102,11 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
    return rv;
  }
  
- nsresult
+-nsresult
 -MigrateFrom17To18(mozIStorageConnection* aConn, bool& aRewriteSchema)
-+MigrateFrom17To18(mozIStorageConnection* aConn, nsACString&, nsACString&)
++nsresult MigrateFrom17To18(mozIStorageConnection* aConn,
++                           nsACString& aSchemaRewriteTable,
++                           nsACString& aSchemaRewriteSql)
  {
    MOZ_ASSERT(!NS_IsMainThread());
    MOZ_ASSERT(aConn);
@@ -1092,7 +1115,8 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
    // values from the database.  This enum value was removed from the spec in
    // https://github.com/whatwg/fetch/issues/39 but we unfortunately happily
    // accepted this value in the Request constructor.
-@@ -2760,17 +2352,17 @@ MigrateFrom17To18(mozIStorageConnection*
+@@ -2746,18 +2352,19 @@ MigrateFrom17To18(mozIStorageConnection*
+   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
  
    rv = aConn->SetSchemaVersion(18);
    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
@@ -1100,9 +1124,11 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
    return rv;
  }
  
- nsresult
+-nsresult
 -MigrateFrom18To19(mozIStorageConnection* aConn, bool& aRewriteSchema)
-+MigrateFrom18To19(mozIStorageConnection* aConn, nsACString&, nsACString&)
++nsresult MigrateFrom18To19(mozIStorageConnection* aConn,
++                           nsACString& aSchemaRewriteTable,
++                           nsACString& aSchemaRewriteSql)
  {
    MOZ_ASSERT(!NS_IsMainThread());
    MOZ_ASSERT(aConn);
@@ -1111,7 +1137,7 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
    // Request objects corresponding to a navigation content policy type to
    // "navigate".
  
-@@ -2788,17 +2380,19 @@ MigrateFrom18To19(mozIStorageConnection*
+@@ -2775,17 +2382,19 @@ MigrateFrom18To19(mozIStorageConnection*
    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
  
    rv = aConn->SetSchemaVersion(19);
@@ -1132,7 +1158,7 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
    // "no-referrer-when-downgrade".  Note, we only use a default value here
    // because its required by ALTER TABLE and we need to apply the default
    // "no-referrer-when-downgrade" to existing records in the table. We don't
-@@ -2807,22 +2401,25 @@ nsresult MigrateFrom19To20(mozIStorageCo
+@@ -2794,22 +2403,25 @@ nsresult MigrateFrom19To20(mozIStorageCo
      "ALTER TABLE entries "
      "ADD COLUMN request_referrer_policy INTEGER NOT NULL DEFAULT 2"
    ));
@@ -1160,7 +1186,7 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
    // removes the response_url column from the entries table.
    // sqlite doesn't support removing a column from a table using ALTER TABLE,
    // so we need to create a new table without those columns, fill it up with the
-@@ -2961,37 +2558,41 @@ nsresult MigrateFrom20To21(mozIStorageCo
+@@ -2948,68 +2560,78 @@ nsresult MigrateFrom20To21(mozIStorageCo
    bool hasMoreData = false;
    rv = state->ExecuteStep(&hasMoreData);
    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
@@ -1201,10 +1227,50 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
    return rv;
  }
  
- } // anonymous namespace
+-nsresult MigrateFrom22To23(mozIStorageConnection* aConn, bool& aRewriteSchema)
++nsresult MigrateFrom22To23(mozIStorageConnection* aConn,
++                           nsACString& aSchemaRewriteTable,
++                           nsACString& aSchemaRewriteSql)
+ {
+   MOZ_ASSERT(!NS_IsMainThread());
+   MOZ_ASSERT(aConn);
  
+   // The only change between 22 and 23 was a different snappy compression
+   // format, but it's backwards-compatible.
+   nsresult rv = aConn->SetSchemaVersion(23);
+   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+   return rv;
+ }
+-nsresult MigrateFrom23To24(mozIStorageConnection* aConn, bool& aRewriteSchema)
++
++nsresult MigrateFrom23To24(mozIStorageConnection* aConn,
++                           nsACString& aSchemaRewriteTable,
++                           nsACString& aSchemaRewriteSql)
+ {
+   MOZ_ASSERT(!NS_IsMainThread());
+   MOZ_ASSERT(aConn);
+ 
+   // Add the request_url_fragment column.
+   nsresult rv = aConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
+     "ALTER TABLE entries "
+     "ADD COLUMN request_url_fragment TEXT NOT NULL DEFAULT ''"
+   ));
+   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+ 
+   rv = aConn->SetSchemaVersion(24);
+   if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
+ 
+-  aRewriteSchema = true;
++  aSchemaRewriteTable = NS_LITERAL_CSTRING("entries");
++  aSchemaRewriteSql = kTableEntries;
+ 
+   return rv;
+ }
+ 
+ } // anonymous namespace
  } // namespace db
  } // namespace cache
+ } // namespace dom
 diff --git a/dom/cache/DBSchema.h b/dom/cache/DBSchema.h
 --- a/dom/cache/DBSchema.h
 +++ b/dom/cache/DBSchema.h
