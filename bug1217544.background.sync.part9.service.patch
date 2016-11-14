@@ -753,8 +753,8 @@ new file mode 100644
 +
 +        // If we are still online, we try to trigger a sync event per each
 +        // registration.
-+        nsTArray<Registration> registrations(
-+            aResponse.get_SyncGetAllResponse().mRegistrations());
++        const nsTArray<Registration>& registrations =
++            aResponse.get_SyncGetAllResponse().mRegistrations();
 +        for (uint32_t i = 0; i < registrations.Length(); i++) {
 +          MaybeTriggerSyncEvent(registrations[i]);
 +        }
@@ -989,7 +989,7 @@ new file mode 100644
 +class SyncOp;
 +
 +class BackgroundSyncService final : public OnlineStateObserver::Listener
-+                                  , StorageManagerIdFactory::Listener
++                                  , public StorageManagerIdFactory::Listener
 +{
 +  friend class ChromeStorageManager;
 +  friend class StorageManager;
