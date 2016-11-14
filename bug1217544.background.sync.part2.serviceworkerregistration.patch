@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  61d7a7a8937703903724e18f46b0f6ef15998e51
+# Parent  79dc74cf5e3a2a29650e53caa329233895ef0769
 Bug 1217544 - Implement one-off BackgroundSync API. Part 2: ServiceWorkerRegistration. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
@@ -356,14 +356,14 @@ diff --git a/dom/workers/ServiceWorkerRegistration.h b/dom/workers/ServiceWorker
 diff --git a/dom/workers/WorkerPrefs.h b/dom/workers/WorkerPrefs.h
 --- a/dom/workers/WorkerPrefs.h
 +++ b/dom/workers/WorkerPrefs.h
-@@ -29,17 +29,17 @@ WORKER_SIMPLE_PREF("dom.caches.enabled",
- WORKER_SIMPLE_PREF("dom.caches.testing.enabled", DOMCachesTestingEnabled, DOM_CACHES_TESTING)
- WORKER_SIMPLE_PREF("dom.performance.enable_user_timing_logging", PerformanceLoggingEnabled, PERFORMANCE_LOGGING_ENABLED)
+@@ -31,17 +31,17 @@ WORKER_SIMPLE_PREF("dom.performance.enab
  WORKER_SIMPLE_PREF("dom.webnotifications.enabled", DOMWorkerNotificationEnabled, DOM_WORKERNOTIFICATION)
  WORKER_SIMPLE_PREF("dom.webnotifications.serviceworker.enabled", DOMServiceWorkerNotificationEnabled, DOM_SERVICEWORKERNOTIFICATION)
+ WORKER_SIMPLE_PREF("dom.webnotifications.requireinteraction.enabled", DOMWorkerNotificationRIEnabled, DOM_WORKERNOTIFICATIONRI)
  WORKER_SIMPLE_PREF("dom.serviceWorkers.enabled", ServiceWorkersEnabled, SERVICEWORKERS_ENABLED)
  WORKER_SIMPLE_PREF("dom.serviceWorkers.testing.enabled", ServiceWorkersTestingEnabled, SERVICEWORKERS_TESTING_ENABLED)
  WORKER_SIMPLE_PREF("dom.serviceWorkers.openWindow.enabled", OpenWindowEnabled, OPEN_WINDOW_ENABLED)
+ WORKER_SIMPLE_PREF("dom.storageManager.enabled", StorageManagerEnabled, STORAGEMANAGER_ENABLED)
  WORKER_SIMPLE_PREF("dom.push.enabled", PushEnabled, PUSH_ENABLED)
 -WORKER_SIMPLE_PREF("dom.background.sync.enabled", BackgroundSyncEnabled, BACKGROUND_SYNC_ENABLED)
 +WORKER_SIMPLE_PREF("dom.backgroundSync.enabled", BackgroundSyncEnabled, BACKGROUND_SYNC_ENABLED)
