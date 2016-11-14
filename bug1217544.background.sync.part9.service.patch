@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  4e3d159da136ce7796881b9afccb645fc48db3bd
+# Parent  c47dc39b84d2168f70389594964ded2d615b19f7
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: BackgroundSyncService. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSyncChild.cpp b/dom/backgroundsync/BackgroundSyncChild.cpp
@@ -1813,7 +1813,7 @@ diff --git a/dom/workers/ServiceWorkerManagerParent.cpp b/dom/workers/ServiceWor
  #include "mozilla/ipc/BackgroundParent.h"
  #include "mozilla/ipc/BackgroundUtils.h"
  #include "mozilla/Unused.h"
-@@ -148,22 +149,24 @@ private:
+@@ -148,21 +149,23 @@ private:
    PrincipalInfo mPrincipalInfo;
    RefPtr<Runnable> mCallback;
    nsCOMPtr<nsIThread> mBackgroundThread;
@@ -1826,7 +1826,6 @@ diff --git a/dom/workers/ServiceWorkerManagerParent.cpp b/dom/workers/ServiceWor
 +  : mServiceWorkerService(ServiceWorkerManagerService::GetOrCreate())
 +  , mBackgroundSyncService(backgroundsync::BackgroundSyncService::GetOrCreate())
    , mID(++sServiceWorkerManagerParentID)
-   , mActorDestroyed(false)
  {
    AssertIsOnBackgroundThread();
 -  mService->RegisterActor(this);
@@ -1839,8 +1838,8 @@ diff --git a/dom/workers/ServiceWorkerManagerParent.cpp b/dom/workers/ServiceWor
    AssertIsOnBackgroundThread();
  }
  
- already_AddRefed<ContentParent>
-@@ -246,89 +249,98 @@ ServiceWorkerManagerParent::RecvUnregist
+ bool
+@@ -234,87 +237,96 @@ ServiceWorkerManagerParent::RecvUnregist
  }
  
  bool
@@ -1934,8 +1933,6 @@ diff --git a/dom/workers/ServiceWorkerManagerParent.cpp b/dom/workers/ServiceWor
  {
    AssertIsOnBackgroundThread();
  
-   mActorDestroyed = true;
- 
 -  if (mService) {
 -    // This object is about to be released and with it, also mService will be
 +  if (mServiceWorkerService) {
@@ -1978,7 +1975,7 @@ diff --git a/dom/workers/ServiceWorkerManagerParent.h b/dom/workers/ServiceWorke
  {
    friend class mozilla::ipc::BackgroundParentImpl;
  
-@@ -59,17 +64,18 @@ private:
+@@ -53,17 +58,18 @@ private:
    virtual bool RecvPropagateRemove(const nsCString& aHost) override;
  
    virtual bool RecvPropagateRemoveAll() override;
@@ -1994,14 +1991,14 @@ diff --git a/dom/workers/ServiceWorkerManagerParent.h b/dom/workers/ServiceWorke
    // We use this ID in the Service in order to avoid the sending of messages to
    // ourself.
    uint64_t mID;
- 
-   bool mActorDestroyed;
  };
  
+ } // namespace workers
+ } // namespace dom
 diff --git a/dom/workers/moz.build b/dom/workers/moz.build
 --- a/dom/workers/moz.build
 +++ b/dom/workers/moz.build
-@@ -90,16 +90,17 @@ UNIFIED_SOURCES += [
+@@ -88,16 +88,17 @@ UNIFIED_SOURCES += [
  IPDL_SOURCES += [
      'PServiceWorkerManager.ipdl',
      'ServiceWorkerRegistrarTypes.ipdlh',
