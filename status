@@ -1,2 +1,4 @@
 79dc74cf5e3a2a29650e53caa329233895ef0769:bug1217544.background.sync.part1.webidl.patch
 f678fa7e49b37b7e210df3b463c6bceac521aca5:bug1217544.background.sync.part2.serviceworkerregistration.patch
+4464ff3d3155ee019fe23586d39f9b2d82097771:bug1217544.background.sync.part3.ipc.patch
+a7f3a6fc52b9f76fe66885da432ca930eb40b4af:bug1217544.background.sync.part4.syncevent.patch

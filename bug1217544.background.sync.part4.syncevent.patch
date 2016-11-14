@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  87ce2cb91b84f7197ff92bf52ecbed6f2f9265e0
+# Parent  4464ff3d3155ee019fe23586d39f9b2d82097771
 Bug 1217544 - Implement one-off BackgroundSync API. Part 4: Sync event. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
@@ -226,7 +226,7 @@ diff --git a/dom/bindings/Bindings.conf b/dom/bindings/Bindings.conf
 diff --git a/dom/interfaces/base/nsIServiceWorkerManager.idl b/dom/interfaces/base/nsIServiceWorkerManager.idl
 --- a/dom/interfaces/base/nsIServiceWorkerManager.idl
 +++ b/dom/interfaces/base/nsIServiceWorkerManager.idl
-@@ -199,19 +199,23 @@ interface nsIServiceWorkerManager : nsIS
+@@ -209,19 +209,23 @@ interface nsIServiceWorkerManager : nsIS
                                    in AString aBehavior);
  
    [optional_argc] void sendPushEvent(in ACString aOriginAttributes,
@@ -328,7 +328,7 @@ diff --git a/dom/workers/PServiceWorkerManager.ipdl b/dom/workers/PServiceWorker
 diff --git a/dom/workers/ServiceWorkerEvents.cpp b/dom/workers/ServiceWorkerEvents.cpp
 --- a/dom/workers/ServiceWorkerEvents.cpp
 +++ b/dom/workers/ServiceWorkerEvents.cpp
-@@ -1021,17 +1021,17 @@ ExtractBytesFromData(const OwningArrayBu
+@@ -1015,17 +1015,17 @@ ExtractBytesFromData(const OwningArrayBu
      return NS_OK;
    }
    if (aDataInit.IsUSVString()) {
@@ -347,7 +347,7 @@ diff --git a/dom/workers/ServiceWorkerEvents.cpp b/dom/workers/ServiceWorkerEven
  PushMessageData::~PushMessageData()
  {
  }
-@@ -1162,16 +1162,50 @@ NS_INTERFACE_MAP_END_INHERITING(Extendab
+@@ -1157,16 +1157,50 @@ NS_INTERFACE_MAP_END_INHERITING(Extendab
  NS_IMPL_CYCLE_COLLECTION_INHERITED(PushEvent, ExtendableEvent, mData)
  
  JSObject*
@@ -420,13 +420,13 @@ diff --git a/dom/workers/ServiceWorkerEvents.h b/dom/workers/ServiceWorkerEvents
  namespace mozilla {
  namespace dom {
  class Blob;
-@@ -311,11 +313,61 @@ public:
+@@ -305,11 +307,61 @@ public:
+   {
+     aLastEventId = mLastEventId;
+     return NS_OK;
+   }
  
-   void SetPorts(MessagePortList* aPorts);
- 
-   void SetSource(ServiceWorkerClient* aClient);
- 
-   void SetSource(ServiceWorker* aServiceWorker);
+   void GetPorts(nsTArray<RefPtr<MessagePort>>& aPorts);
  };
  
 +class BackgroundSyncEvent final : public ExtendableEvent
@@ -600,7 +600,7 @@ diff --git a/dom/workers/ServiceWorkerManagerChild.h b/dom/workers/ServiceWorker
 diff --git a/dom/workers/ServiceWorkerPrivate.cpp b/dom/workers/ServiceWorkerPrivate.cpp
 --- a/dom/workers/ServiceWorkerPrivate.cpp
 +++ b/dom/workers/ServiceWorkerPrivate.cpp
-@@ -1650,16 +1650,102 @@ ServiceWorkerPrivate::SendFetchEvent(nsI
+@@ -1651,16 +1651,102 @@ ServiceWorkerPrivate::SendFetchEvent(nsI
  
    if (NS_WARN_IF(!r->Dispatch())) {
      return NS_ERROR_FAILURE;
@@ -706,7 +706,7 @@ diff --git a/dom/workers/ServiceWorkerPrivate.cpp b/dom/workers/ServiceWorkerPri
 diff --git a/dom/workers/ServiceWorkerPrivate.h b/dom/workers/ServiceWorkerPrivate.h
 --- a/dom/workers/ServiceWorkerPrivate.h
 +++ b/dom/workers/ServiceWorkerPrivate.h
-@@ -109,16 +109,21 @@ public:
+@@ -110,16 +110,21 @@ public:
                          const nsAString& aScope);
  
    nsresult
@@ -728,7 +728,7 @@ diff --git a/dom/workers/ServiceWorkerPrivate.h b/dom/workers/ServiceWorkerPriva
  
    // This will terminate the current running worker thread and drop the
    // workerPrivate reference.
-@@ -153,17 +158,18 @@ private:
+@@ -157,17 +162,18 @@ private:
    enum WakeUpReason {
      FetchEvent = 0,
      PushEvent,
