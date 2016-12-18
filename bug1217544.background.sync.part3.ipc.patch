@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  ea90766d492ad34f4aecc4c508eac3e30b6c6cf1
+# Parent  4a5078a2d25819b503f6a1c8f3b0e92e099737d5
 Bug 1217544 - Implement one-off BackgroundSync API. Part 3: IPC. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
@@ -679,30 +679,30 @@ new file mode 100644
 +  return NS_OK;
 +}
 +
-+bool
++mozilla::ipc::IPCResult
 +BackgroundSyncChild::RecvResponse(const nsID& aRequestId,
 +                                  const SyncOpResponse& aResponse)
 +{
 +  Promise* p = GetPendingRequest(aRequestId);
 +  if (NS_WARN_IF(!p)) {
 +    // This should never happen.
-+    return false;
++    return IPC_FAIL_NO_REASON(this);
 +  }
 +
 +  switch(aResponse.type()) {
 +    case SyncOpResponse::TSyncRegisterResponse:
 +      p->MaybeResolve(true);
-+      return true;
++      return IPC_OK();
 +    case SyncOpResponse::TSyncGetTagsResponse:
 +      p->MaybeResolve(aResponse.get_SyncGetTagsResponse().mTags());
-+      return true;
++      return IPC_OK();
 +    case SyncOpResponse::TSyncOpError:
 +      p->MaybeReject(
 +          static_cast<nsresult>(aResponse.get_SyncOpError().mCode()));
-+      return true;
++      return IPC_OK();
 +    default:
 +      MOZ_CRASH("Unknown BackgroundSync response");
-+      return false;
++      return IPC_FAIL(this, "Unknown BackgroundSync response");
 +  }
 +}
 +
@@ -713,7 +713,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncChild.h b/dom/backgroundsync/Backg
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncChild.h
-@@ -0,0 +1,64 @@
+@@ -0,0 +1,65 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -755,8 +755,9 @@ new file mode 100644
 +
 +  nsresult ExecuteOp(Promise* aPromise, SyncOp* aOp);
 +
-+  virtual bool RecvResponse(const nsID& aRequestId,
-+                            const SyncOpResponse& aResponse) override;
++  virtual mozilla::ipc::IPCResult
++  RecvResponse(const nsID& aRequestId,
++               const SyncOpResponse& aResponse) override;
 +
 +private:
 +  BackgroundSyncChild();
@@ -841,7 +842,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncParent.cpp
-@@ -0,0 +1,84 @@
+@@ -0,0 +1,86 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -875,8 +876,9 @@ new file mode 100644
 +  AssertIsOnBackgroundThread();
 +}
 +
-+bool BackgroundSyncParent::RecvRequest(const nsID& aRequestId,
-+                                       const SyncOp& aOp)
++mozilla::ipc::IPCResult
++BackgroundSyncParent::RecvRequest(const nsID& aRequestId,
++                                  const SyncOp& aOp)
 +{
 +  AssertIsOnBackgroundThread();
 +
@@ -902,16 +904,17 @@ new file mode 100644
 +      MOZ_CRASH("Unknown BackgroundSync request");
 +    }
 +  }
-+  return true;
++  return IPC_OK();
 +}
 +
-+bool BackgroundSyncParent::RecvShutdown()
++mozilla::ipc::IPCResult
++BackgroundSyncParent::RecvShutdown()
 +{
 +  AssertIsOnBackgroundThread();
 +
 +  Unused << Send__delete__(this);
 +
-+  return true;
++  return IPC_OK();
 +}
 +
 +void
@@ -930,7 +933,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/Back
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncParent.h
-@@ -0,0 +1,48 @@
+@@ -0,0 +1,49 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -959,10 +962,11 @@ new file mode 100644
 +  friend class mozilla::ipc::BackgroundParentImpl;
 +
 +public:
-+  virtual bool RecvRequest(const nsID& aRequestId,
-+                           const SyncOp& aOp) override;
++  virtual mozilla::ipc::IPCResult
++  RecvRequest(const nsID& aRequestId, const SyncOp& aOp) override;
 +
-+  virtual bool RecvShutdown() override;
++  virtual mozilla::ipc::IPCResult
++  RecvShutdown() override;
 +
 +  void NotifyResponse(const nsID& aRequestId,
 +                      const SyncOpResponse& aResponse);
@@ -1112,7 +1116,7 @@ diff --git a/ipc/glue/BackgroundChildImpl.cpp b/ipc/glue/BackgroundChildImpl.cpp
  } // namespace ipc
  } // namespace mozilla
  
- bool
+ mozilla::ipc::IPCResult
  TestChild::Recv__delete__(const nsCString& aTestArg)
  {
    MOZ_RELEASE_ASSERT(aTestArg == mTestArg,
@@ -1146,7 +1150,7 @@ diff --git a/ipc/glue/BackgroundChildImpl.h b/ipc/glue/BackgroundChildImpl.h
 diff --git a/ipc/glue/BackgroundParentImpl.cpp b/ipc/glue/BackgroundParentImpl.cpp
 --- a/ipc/glue/BackgroundParentImpl.cpp
 +++ b/ipc/glue/BackgroundParentImpl.cpp
-@@ -45,25 +45,27 @@
+@@ -43,25 +43,27 @@
  #include "nsNetUtil.h"
  #include "nsIScriptSecurityManager.h"
  #include "nsProxyRelease.h"
@@ -1174,7 +1178,7 @@ diff --git a/ipc/glue/BackgroundParentImpl.cpp b/ipc/glue/BackgroundParentImpl.c
  using mozilla::dom::MessagePortParent;
  using mozilla::dom::PMessagePortParent;
  using mozilla::dom::UDPSocketParent;
-@@ -99,16 +101,17 @@ public:
+@@ -97,16 +99,17 @@ public:
  } // namespace
  
  namespace mozilla {
@@ -1192,7 +1196,7 @@ diff --git a/ipc/glue/BackgroundParentImpl.cpp b/ipc/glue/BackgroundParentImpl.c
    AssertIsOnMainThread();
  
    MOZ_COUNT_CTOR(mozilla::ipc::BackgroundParentImpl);
-@@ -943,16 +946,36 @@ BackgroundParentImpl::DeallocPGamepadTes
+@@ -946,16 +949,36 @@ BackgroundParentImpl::DeallocPGamepadTes
  #ifdef MOZ_GAMEPAD
    MOZ_ASSERT(aActor);
    RefPtr<dom::GamepadTestChannelParent> parent =
@@ -1313,7 +1317,7 @@ diff --git a/ipc/glue/PBackground.ipdl b/ipc/glue/PBackground.ipdl
 diff --git a/ipc/glue/moz.build b/ipc/glue/moz.build
 --- a/ipc/glue/moz.build
 +++ b/ipc/glue/moz.build
-@@ -151,16 +151,17 @@ SOURCES += [
+@@ -157,16 +157,17 @@ SOURCES += [
  if CONFIG['_MSC_VER']:
      # This is intended as a temporary hack to support building with VS2015.
      # 'reinterpret_cast': conversion from 'DWORD' to 'HANDLE' of greater size
