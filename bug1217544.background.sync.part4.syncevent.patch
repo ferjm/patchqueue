@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  4464ff3d3155ee019fe23586d39f9b2d82097771
+# Parent  49d4aec80a77c0e667fdc53da9fee8d4680dc7f4
 Bug 1217544 - Implement one-off BackgroundSync API. Part 4: Sync event. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
@@ -200,7 +200,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsyn
 diff --git a/dom/bindings/Bindings.conf b/dom/bindings/Bindings.conf
 --- a/dom/bindings/Bindings.conf
 +++ b/dom/bindings/Bindings.conf
-@@ -94,16 +94,22 @@ DOMInterfaces = {
+@@ -99,16 +99,22 @@ DOMInterfaces = {
      },
  },
  
@@ -279,14 +279,14 @@ new file mode 100644
 diff --git a/dom/webidl/moz.build b/dom/webidl/moz.build
 --- a/dom/webidl/moz.build
 +++ b/dom/webidl/moz.build
-@@ -44,16 +44,17 @@ WEBIDL_FILES = [
+@@ -42,16 +42,17 @@ WEBIDL_FILES = [
      'AudioParam.webidl',
      'AudioProcessingEvent.webidl',
      'AudioStreamTrack.webidl',
      'AudioTrack.webidl',
      'AudioTrackList.webidl',
+     'AudioWorkletGlobalScope.webidl',
      'AutocompleteInfo.webidl',
-     'AVInputPort.webidl',
      'BackgroundSync.webidl',
 +    'BackgroundSyncEvent.webidl',
      'BarProp.webidl',
@@ -328,7 +328,7 @@ diff --git a/dom/workers/PServiceWorkerManager.ipdl b/dom/workers/PServiceWorker
 diff --git a/dom/workers/ServiceWorkerEvents.cpp b/dom/workers/ServiceWorkerEvents.cpp
 --- a/dom/workers/ServiceWorkerEvents.cpp
 +++ b/dom/workers/ServiceWorkerEvents.cpp
-@@ -1015,17 +1015,17 @@ ExtractBytesFromData(const OwningArrayBu
+@@ -1004,17 +1004,17 @@ ExtractBytesFromData(const OwningArrayBu
      return NS_OK;
    }
    if (aDataInit.IsUSVString()) {
@@ -347,7 +347,7 @@ diff --git a/dom/workers/ServiceWorkerEvents.cpp b/dom/workers/ServiceWorkerEven
  PushMessageData::~PushMessageData()
  {
  }
-@@ -1157,16 +1157,50 @@ NS_INTERFACE_MAP_END_INHERITING(Extendab
+@@ -1146,16 +1146,50 @@ NS_INTERFACE_MAP_END_INHERITING(Extendab
  NS_IMPL_CYCLE_COLLECTION_INHERITED(PushEvent, ExtendableEvent, mData)
  
  JSObject*
@@ -420,7 +420,7 @@ diff --git a/dom/workers/ServiceWorkerEvents.h b/dom/workers/ServiceWorkerEvents
  namespace mozilla {
  namespace dom {
  class Blob;
-@@ -305,11 +307,61 @@ public:
+@@ -321,11 +323,61 @@ public:
    {
      aLastEventId = mLastEventId;
      return NS_OK;
@@ -537,27 +537,27 @@ diff --git a/dom/workers/ServiceWorkerManagerChild.cpp b/dom/workers/ServiceWork
    MOZ_ASSERT(swm);
  
    swm->RemoveAll();
-   return true;
+   return IPC_OK();
  }
  
-+bool
++mozilla::ipc::IPCResult
 +ServiceWorkerManagerChild::RecvNotifyBackgroundSyncEvent(
 +    const PrincipalInfo& aPrincipalInfo, const nsString& aScope,
 +    const nsString& aTag, const bool& aLastChance)
 +{
 +  if (mShuttingDown) {
-+    return true;
++    return IPC_OK();
 +  }
 +
 +  nsCOMPtr<nsIPrincipal> principal = PrincipalInfoToPrincipal(aPrincipalInfo);
 +  if (NS_WARN_IF(!principal)) {
-+    return true;
++    return IPC_OK();
 +  }
 +
 +  nsAutoCString originSuffix;
 +  nsresult rv = principal->GetOriginSuffix(originSuffix);
 +  if (NS_WARN_IF(NS_FAILED(rv))) {
-+    return true;
++    return IPC_OK();
 +  }
 +
 +  RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
@@ -566,7 +566,7 @@ diff --git a/dom/workers/ServiceWorkerManagerChild.cpp b/dom/workers/ServiceWork
 +  swm->SendBackgroundSyncEvent(originSuffix,
 +                               NS_ConvertUTF16toUTF8(aScope),
 +                               aTag, aLastChance);
-+  return true;
++  return IPC_OK();
 +}
 +
  } // namespace workers
@@ -577,17 +577,17 @@ diff --git a/dom/workers/ServiceWorkerManagerChild.h b/dom/workers/ServiceWorker
 +++ b/dom/workers/ServiceWorkerManagerChild.h
 @@ -41,16 +41,21 @@ public:
  
-   virtual bool RecvNotifyUnregister(const PrincipalInfo& aPrincipalInfo,
-                                     const nsString& aScope) override;
+   virtual mozilla::ipc::IPCResult RecvNotifyUnregister(const PrincipalInfo& aPrincipalInfo,
+                                                        const nsString& aScope) override;
  
-   virtual bool RecvNotifyRemove(const nsCString& aHost) override;
+   virtual mozilla::ipc::IPCResult RecvNotifyRemove(const nsCString& aHost) override;
  
-   virtual bool RecvNotifyRemoveAll() override;
+   virtual mozilla::ipc::IPCResult RecvNotifyRemoveAll() override;
  
-+  virtual bool RecvNotifyBackgroundSyncEvent(const PrincipalInfo& aPrincipalInfo,
-+                                             const nsString& aScope,
-+                                             const nsString& aTag,
-+                                             const bool& aLastChance) override;
++  virtual mozilla::ipc::IPCResult RecvNotifyBackgroundSyncEvent(const PrincipalInfo& aPrincipalInfo,
++                                                                const nsString& aScope,
++                                                                const nsString& aTag,
++                                                                const bool& aLastChance) override;
 +
  private:
    ServiceWorkerManagerChild()
@@ -600,7 +600,7 @@ diff --git a/dom/workers/ServiceWorkerManagerChild.h b/dom/workers/ServiceWorker
 diff --git a/dom/workers/ServiceWorkerPrivate.cpp b/dom/workers/ServiceWorkerPrivate.cpp
 --- a/dom/workers/ServiceWorkerPrivate.cpp
 +++ b/dom/workers/ServiceWorkerPrivate.cpp
-@@ -1651,16 +1651,102 @@ ServiceWorkerPrivate::SendFetchEvent(nsI
+@@ -1726,16 +1726,102 @@ ServiceWorkerPrivate::SendFetchEvent(nsI
  
    if (NS_WARN_IF(!r->Dispatch())) {
      return NS_ERROR_FAILURE;
@@ -751,7 +751,7 @@ diff --git a/dom/workers/ServiceWorkerPrivate.h b/dom/workers/ServiceWorkerPriva
 diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWorkerRegistration.cpp
 --- a/dom/workers/ServiceWorkerRegistration.cpp
 +++ b/dom/workers/ServiceWorkerRegistration.cpp
-@@ -876,17 +876,17 @@ ServiceWorkerRegistrationMainThread::Get
+@@ -897,17 +897,17 @@ ServiceWorkerRegistrationMainThread::Get
  
      nsCOMPtr<nsIPrincipal> principal = document->NodePrincipal();
      if (!principal) {
@@ -770,7 +770,7 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
  ////////////////////////////////////////////////////
  // Worker Thread implementation
  
-@@ -1389,17 +1389,17 @@ ServiceWorkerRegistrationWorkerThread::G
+@@ -1417,17 +1417,17 @@ ServiceWorkerRegistrationWorkerThread::G
    return ret.forget();
  }
  
