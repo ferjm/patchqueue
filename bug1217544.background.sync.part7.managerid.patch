@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  f1b7fc4dc40be9d8e3e10c1841a1514c7daf7c89
+# Parent  9e491123e1ed8209dbe8ca7bd5671f041cc82fc6
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: Storage. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
@@ -665,7 +665,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsyn
 diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/BackgroundSyncParent.cpp
 --- a/dom/backgroundsync/BackgroundSyncParent.cpp
 +++ b/dom/backgroundsync/BackgroundSyncParent.cpp
-@@ -11,71 +11,120 @@
+@@ -11,73 +11,120 @@
  
  namespace mozilla {
  
@@ -703,6 +703,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
 +};
 +
 +BackgroundSyncParent::BackgroundSyncParent(const PrincipalInfo& aPrincipalInfo)
++
  {
    AssertIsOnBackgroundThread();
 +
@@ -722,11 +723,17 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
    AssertIsOnBackgroundThread();
  }
  
--bool BackgroundSyncParent::RecvRequest(const nsID& aRequestId,
--                                       const SyncOp& aOp)
 +void
 +BackgroundSyncParent::ExecuteRequest(const nsID& aRequestId,
 +                                     const SyncOp& aOp)
++{
++  AssertIsOnBackgroundThread();
++  // XXX Progress request to BackgroundSyncService.
++}
++
+ mozilla::ipc::IPCResult
+ BackgroundSyncParent::RecvRequest(const nsID& aRequestId,
+                                   const SyncOp& aOp)
  {
    AssertIsOnBackgroundThread();
  
@@ -751,36 +758,26 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
 -    {
 -      MOZ_CRASH("Unknown BackgroundSync request");
 -    }
-+  // XXX Progress request to BackgroundSyncService.
-+}
-+
-+bool
-+BackgroundSyncParent::RecvRequest(const nsID& aRequestId,
-+                                  const SyncOp& aOp)
-+{
-+  AssertIsOnBackgroundThread();
-+
 +  // If we haven't created a StorageManagerId for this parent yet, we
 +  // queue the request.
 +  if (!mStorageManagerId) {
 +    RefPtr<PendingRequest> pendingRequest = new PendingRequest(aRequestId, aOp);
 +    mPendingRequests.AppendElement(pendingRequest);
-+    return true;
++    return IPC_OK();
    }
 +
 +  ExecuteRequest(aRequestId, aOp);
-   return true;
+   return IPC_OK();
  }
  
--bool BackgroundSyncParent::RecvShutdown()
-+bool
-+BackgroundSyncParent::RecvShutdown()
+ mozilla::ipc::IPCResult
+ BackgroundSyncParent::RecvShutdown()
  {
    AssertIsOnBackgroundThread();
  
    Unused << Send__delete__(this);
  
-   return true;
+   return IPC_OK();
  }
  
  void
@@ -815,7 +812,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
 diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/BackgroundSyncParent.h
 --- a/dom/backgroundsync/BackgroundSyncParent.h
 +++ b/dom/backgroundsync/BackgroundSyncParent.h
-@@ -2,47 +2,68 @@
+@@ -2,48 +2,69 @@
  /* vim: set ts=8 sts=2 et sw=2 tw=80: */
  /* This Source Code Form is subject to the terms of the Mozilla Public
   * License, v. 2.0. If a copy of the MPL was not distributed with this file,
@@ -852,10 +849,11 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/Back
  public:
 +  NS_INLINE_DECL_REFCOUNTING(BackgroundSyncParent)
 +
-   virtual bool RecvRequest(const nsID& aRequestId,
-                            const SyncOp& aOp) override;
+   virtual mozilla::ipc::IPCResult
+   RecvRequest(const nsID& aRequestId, const SyncOp& aOp) override;
  
-   virtual bool RecvShutdown() override;
+   virtual mozilla::ipc::IPCResult
+   RecvShutdown() override;
  
    void NotifyResponse(const nsID& aRequestId,
                        const SyncOpResponse& aResponse);
@@ -4126,7 +4124,7 @@ diff --git a/ipc/glue/BackgroundChildImpl.h b/ipc/glue/BackgroundChildImpl.h
 diff --git a/ipc/glue/BackgroundParentImpl.cpp b/ipc/glue/BackgroundParentImpl.cpp
 --- a/ipc/glue/BackgroundParentImpl.cpp
 +++ b/ipc/glue/BackgroundParentImpl.cpp
-@@ -946,33 +946,39 @@ BackgroundParentImpl::DeallocPGamepadTes
+@@ -949,33 +949,39 @@ BackgroundParentImpl::DeallocPGamepadTes
  #ifdef MOZ_GAMEPAD
    MOZ_ASSERT(aActor);
    RefPtr<dom::GamepadTestChannelParent> parent =
