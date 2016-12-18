@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  79dc74cf5e3a2a29650e53caa329233895ef0769
+# Parent  13f718e521fd02fda6ae809d8d3d9143904ccb3a
 Bug 1217544 - Implement one-off BackgroundSync API. Part 2: ServiceWorkerRegistration. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
@@ -137,7 +137,7 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
    }
  
    // ServiceWorkerRegistrationListener
-@@ -154,27 +161,29 @@ private:
+@@ -157,27 +164,29 @@ private:
    // instead of acquiring a new worker instance from the ServiceWorkerManager
    // for every access. A null value is considered a cache miss.
    // These three may change to a new worker at any time.
@@ -168,7 +168,7 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
    , mListeningForEvents(false)
  {
    AssertIsOnMainThread();
-@@ -841,16 +850,48 @@ ServiceWorkerRegistrationMainThread::Get
+@@ -862,16 +871,48 @@ ServiceWorkerRegistrationMainThread::Get
        return nullptr;
      }
    }
@@ -217,7 +217,7 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
  {
  public:
    NS_DECL_ISUPPORTS_INHERITED
-@@ -893,16 +934,19 @@ public:
+@@ -914,16 +955,19 @@ public:
    }
  
    bool
@@ -237,7 +237,7 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
    };
  
    ~ServiceWorkerRegistrationWorkerThread();
-@@ -912,16 +956,18 @@ private:
+@@ -933,16 +977,18 @@ private:
  
    void
    ReleaseListener(Reason aReason);
@@ -256,7 +256,7 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
    WorkerPrivate* mWorkerPrivate;
    nsString mScope;
    bool mListeningForEvents;
-@@ -1034,22 +1080,23 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_
+@@ -1062,22 +1108,23 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_
  NS_INTERFACE_MAP_END_INHERITING(ServiceWorkerRegistration)
  
  // Expanded macros since we need special behaviour to release the proxy.
@@ -281,7 +281,7 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
    : ServiceWorkerRegistration(nullptr, aScope)
    , mWorkerPrivate(aWorkerPrivate)
  {
-@@ -1337,16 +1384,27 @@ ServiceWorkerRegistrationWorkerThread::G
+@@ -1365,16 +1412,27 @@ ServiceWorkerRegistrationWorkerThread::G
    if (!mPushManager) {
      mPushManager = new PushManager(mScope);
    }
@@ -333,7 +333,7 @@ diff --git a/dom/workers/ServiceWorkerRegistration.h b/dom/workers/ServiceWorker
    NS_IMETHOD_(MozExternalRefCountType) AddRef() = 0;
    NS_IMETHOD_(MozExternalRefCountType) Release() = 0;
  
-@@ -92,16 +96,19 @@ public:
+@@ -95,16 +99,19 @@ public:
    Update(ErrorResult& aRv) = 0;
  
    virtual already_AddRefed<Promise>
@@ -370,8 +370,8 @@ diff --git a/dom/workers/WorkerPrefs.h b/dom/workers/WorkerPrefs.h
  WORKER_SIMPLE_PREF("dom.requestcontext.enabled", RequestContextEnabled, REQUESTCONTEXT_ENABLED)
  WORKER_SIMPLE_PREF("gfx.offscreencanvas.enabled", OffscreenCanvasEnabled, OFFSCREENCANVAS_ENABLED)
  WORKER_SIMPLE_PREF("dom.webkitBlink.dirPicker.enabled", WebkitBlinkDirectoryPickerEnabled, DOM_WEBKITBLINK_DIRPICKER_WEBKITBLINK)
+ WORKER_SIMPLE_PREF("dom.netinfo.enabled", NetworkInformationEnabled, NETWORKINFORMATION_ENABLED)
  WORKER_PREF("dom.workers.latestJSVersion", JSVersionChanged)
  WORKER_PREF("intl.accept_languages", PrefLanguagesChanged)
  WORKER_PREF("general.appname.override", AppNameOverrideChanged)
  WORKER_PREF("general.appversion.override", AppVersionOverrideChanged)
- WORKER_PREF("general.platform.override", PlatformOverrideChanged)
