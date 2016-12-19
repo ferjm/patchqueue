@@ -3106,7 +3106,7 @@ new file mode 100644
 +                  mozIStorageConnection* aConn) override
 +  {
 +    nsresult rv = db::GetTags(aConn, mArgs, mTags);
-+    NS_WARNING_ASSERTION(NS_FAILED(rv), "GetTags failed");
++    NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "GetTags failed");
 +    return rv;
 +  }
 +
@@ -3142,14 +3142,14 @@ new file mode 100644
 +                  mozIStorageConnection* aConn) override
 +  {
 +    nsresult rv = db::GetAll(aConn, mRegistrations);
-+    NS_WARNING_ASSERTION(NS_FAILED(rv), "GetAll failed");
++    NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "GetAll failed");
 +    return rv;
 +  }
 +
 +  virtual void
 +  Complete(nsresult aRv) override
 +  {
-+    NS_WARNING_ASSERTION(NS_FAILED(aRv), "GetAll failed");
++    NS_WARNING_ASSERTION(NS_SUCCEEDED(aRv), "GetAll failed");
 +    // We need to remove the reference to the request independently of
 +    // its result so we can close the context.
 +    mManager->OnRequestComplete(mRequestId,
@@ -3177,14 +3177,14 @@ new file mode 100644
 +                  mozIStorageConnection* aConn) override
 +  {
 +    nsresult rv = db::Remove(aConn, mArgs, mOrigin);
-+    NS_WARNING_ASSERTION(NS_FAILED(rv), "Remove failed");
++    NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "Remove failed");
 +    return rv;
 +  }
 +
 +  virtual void
 +  Complete(nsresult aRv) override
 +  {
-+    NS_WARNING_ASSERTION(NS_FAILED(aRv), "Remove failed");
++    NS_WARNING_ASSERTION(NS_SUCCEEDED(aRv), "Remove failed");
 +    // We need to remove the reference to the request independently of
 +    // its result so we can close the context.
 +    mManager->OnRequestComplete(mRequestId,
@@ -3213,14 +3213,14 @@ new file mode 100644
 +                  mozIStorageConnection* aConn) override
 +  {
 +    nsresult rv = db::ChangeState(aConn, mArgs, mRegistration);
-+    NS_WARNING_ASSERTION(NS_FAILED(rv), "ChangeState failed");
++    NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "ChangeState failed");
 +    return rv;
 +  }
 +
 +  virtual void
 +  Complete(nsresult aRv) override
 +  {
-+    NS_WARNING_ASSERTION(NS_FAILED(aRv), "ChangeState failed");
++    NS_WARNING_ASSERTION(NS_SUCCEEDED(aRv), "ChangeState failed");
 +    // We need to remove the reference to the request independently of
 +    // its result so we can close the context.
 +    mManager->OnRequestComplete(mRequestId,
