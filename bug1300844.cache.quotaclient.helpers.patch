@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  03bc93753a16d2b661cba3bab8dd5508f7e5ecc5
+# Parent  c440eec05fb90e650df385b377ce6f12c37cf80c
 Bug 1300844 - Remove Action* and Context* and use QuotaClient helpers introduced in bug 1217544. r=bkelly
 
 diff --git a/dom/cache/Action.cpp b/dom/cache/Action.cpp
@@ -1036,7 +1036,7 @@ deleted file mode 100644
 -    return;
 -  }
 -
--  MOZ_ASSERT(STATE_CONTEXT_READY);
+-  MOZ_ASSERT(mState == STATE_CONTEXT_READY);
 -  DispatchAction(aAction);
 -}
 -
