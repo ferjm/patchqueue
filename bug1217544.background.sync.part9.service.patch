@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  c47dc39b84d2168f70389594964ded2d615b19f7
+# Parent  d3a591bf12ad991fe6ce23055611799f7483fb8a
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: BackgroundSyncService. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSyncChild.cpp b/dom/backgroundsync/BackgroundSyncChild.cpp
@@ -10,17 +10,17 @@ diff --git a/dom/backgroundsync/BackgroundSyncChild.cpp b/dom/backgroundsync/Bac
    Promise* p = GetPendingRequest(aRequestId);
    if (NS_WARN_IF(!p)) {
      // This should never happen.
-     return false;
+     return IPC_FAIL_NO_REASON(this);
    }
  
    switch(aResponse.type()) {
      case SyncOpResponse::TSyncRegisterResponse:
 +    case SyncOpResponse::TSyncRegisterOriginResponse:
        p->MaybeResolve(true);
-       return true;
+       return IPC_OK();
      case SyncOpResponse::TSyncGetTagsResponse:
        p->MaybeResolve(aResponse.get_SyncGetTagsResponse().mTags());
-       return true;
+       return IPC_OK();
      case SyncOpResponse::TSyncOpError:
        p->MaybeReject(
            static_cast<nsresult>(aResponse.get_SyncOpError().mCode()));
@@ -59,7 +59,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
    explicit PendingRequest(const nsID& aRequestId,
                            const SyncOp& aOp)
      : mRequestId(aRequestId)
-@@ -39,95 +44,120 @@ public:
+@@ -39,95 +44,121 @@ public:
  private:
    ~PendingRequest() {}
  
@@ -68,6 +68,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
  };
  
  BackgroundSyncParent::BackgroundSyncParent(const PrincipalInfo& aPrincipalInfo)
+-
 +  : mService(BackgroundSyncService::GetOrCreate())
 +  , mId(++sBackgroundSyncManagerParentId)
 +  , mActorDestroyed(false)
@@ -107,18 +108,19 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
 +  mActorDestroyed = true;
 +}
 +
-+bool
++mozilla::ipc::IPCResult
  BackgroundSyncParent::ExecuteRequest(const nsID& aRequestId,
                                       const SyncOp& aOp)
  {
    AssertIsOnBackgroundThread();
-+  MOZ_ASSERT(mService);
- 
 -  // XXX Progress request to BackgroundSyncService.
-+  return mService->Request(mId, mStorageManagerId, aRequestId, aOp);
++  MOZ_ASSERT(mService);
++
++  return mService->Request(mId, mStorageManagerId, aRequestId, aOp) ?
++    IPC_OK() : IPC_FAIL_NO_REASON(this);
  }
  
- bool
+ mozilla::ipc::IPCResult
  BackgroundSyncParent::RecvRequest(const nsID& aRequestId,
                                    const SyncOp& aOp)
  {
@@ -129,22 +131,22 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
    if (!mStorageManagerId) {
      RefPtr<PendingRequest> pendingRequest = new PendingRequest(aRequestId, aOp);
      mPendingRequests.AppendElement(pendingRequest);
-     return true;
+     return IPC_OK();
    }
  
 -  ExecuteRequest(aRequestId, aOp);
--  return true;
-+  return ExecuteRequest(aRequestId, aOp);
+-  return IPC_OK();
++  return ExecuteRequest(aRequestId, aOp) ? IPC_OK() : IPC_FAIL_NO_REASON(this);
  }
  
- bool
+ mozilla::ipc::IPCResult
  BackgroundSyncParent::RecvShutdown()
  {
    AssertIsOnBackgroundThread();
  
    Unused << Send__delete__(this);
  
-   return true;
+   return IPC_OK();
  }
  
  void
@@ -189,7 +191,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
 diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/BackgroundSyncParent.h
 --- a/dom/backgroundsync/BackgroundSyncParent.h
 +++ b/dom/backgroundsync/BackgroundSyncParent.h
-@@ -19,44 +19,69 @@ namespace mozilla {
+@@ -19,45 +19,71 @@ namespace mozilla {
  namespace ipc {
    class BackgroundParentImpl;
    class PrincipalInfo;
@@ -209,10 +211,11 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/Back
  public:
    NS_INLINE_DECL_REFCOUNTING(BackgroundSyncParent)
  
-   virtual bool RecvRequest(const nsID& aRequestId,
-                            const SyncOp& aOp) override;
+   virtual mozilla::ipc::IPCResult
+   RecvRequest(const nsID& aRequestId, const SyncOp& aOp) override;
  
-   virtual bool RecvShutdown() override;
+   virtual mozilla::ipc::IPCResult
+   RecvShutdown() override;
  
 -  void NotifyResponse(const nsID& aRequestId,
 +  bool NotifyResponse(const nsID& aRequestId,
@@ -237,7 +240,8 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/Back
 -  void ExecuteRequest(const nsID& aRequestId, const SyncOp& aOp);
 +  void Shutdown();
 +
-+  bool ExecuteRequest(const nsID& aRequestId, const SyncOp& aOp);
++  mozilla::ipc::IPCResult
++  ExecuteRequest(const nsID& aRequestId, const SyncOp& aOp);
  
    // StorageManagerId method
    virtual void
@@ -959,7 +963,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.h b/dom/backgroundsync/Bac
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncService.h
-@@ -0,0 +1,132 @@
+@@ -0,0 +1,131 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -1008,10 +1012,9 @@ new file mode 100644
 +  void RegisterActor(workers::ServiceWorkerManagerParent* aParent);
 +  void UnregisterActor(workers::ServiceWorkerManagerParent* aParent);
 +
-+  bool Request(const uint64_t aActorId,
-+               StorageManagerId* aManagerId,
-+               const nsID& aRequestId,
-+               const SyncOp& aOp);
++  bool
++  Request(const uint64_t aActorId, StorageManagerId* aManagerId,
++          const nsID& aRequestId, const SyncOp& aOp);
 +
 +private:
 +  BackgroundSyncService();
@@ -1022,9 +1025,9 @@ new file mode 100644
 +
 +  // --------------------------------------------------------------------------
 +
-+  bool Response(const uint64_t aActorId,
-+                const nsID& aRequestId,
-+                const SyncOpResponse& aResponse);
++  bool
++  Response(const uint64_t aActorId, const nsID& aRequestId,
++           const SyncOpResponse& aResponse);
 +
 +  void OnRequestComplete(const nsID& aRequestId,
 +                         const SyncOpResponse& aResponse);
@@ -1702,28 +1705,28 @@ diff --git a/dom/workers/ServiceWorkerManagerChild.cpp b/dom/workers/ServiceWork
    MOZ_ASSERT(swm);
  
    swm->RemoveAll();
-   return true;
+   return IPC_OK();
  }
  
- bool
+ mozilla::ipc::IPCResult
  ServiceWorkerManagerChild::RecvNotifyBackgroundSyncEvent(
 -    const PrincipalInfo& aPrincipalInfo, const nsString& aScope,
 +    const nsString& aOrigin, const nsString& aScope,
      const nsString& aTag, const bool& aLastChance)
  {
    if (mShuttingDown) {
-     return true;
+     return IPC_OK();
    }
  
 -  nsCOMPtr<nsIPrincipal> principal = PrincipalInfoToPrincipal(aPrincipalInfo);
 -  if (NS_WARN_IF(!principal)) {
--    return true;
+-    return IPC_OK();
 -  }
 -
 -  nsAutoCString originSuffix;
 -  nsresult rv = principal->GetOriginSuffix(originSuffix);
 -  if (NS_WARN_IF(NS_FAILED(rv))) {
--    return true;
+-    return IPC_OK();
 -  }
 -
    RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
@@ -1733,7 +1736,7 @@ diff --git a/dom/workers/ServiceWorkerManagerChild.cpp b/dom/workers/ServiceWork
 +  swm->SendBackgroundSyncEvent(NS_ConvertUTF16toUTF8(aOrigin),
                                 NS_ConvertUTF16toUTF8(aScope),
                                 aTag, aLastChance);
-   return true;
+   return IPC_OK();
  }
  
  } // namespace workers
@@ -1744,18 +1747,18 @@ diff --git a/dom/workers/ServiceWorkerManagerChild.h b/dom/workers/ServiceWorker
 +++ b/dom/workers/ServiceWorkerManagerChild.h
 @@ -41,17 +41,17 @@ public:
  
-   virtual bool RecvNotifyUnregister(const PrincipalInfo& aPrincipalInfo,
-                                     const nsString& aScope) override;
+   virtual mozilla::ipc::IPCResult RecvNotifyUnregister(const PrincipalInfo& aPrincipalInfo,
+                                                        const nsString& aScope) override;
  
-   virtual bool RecvNotifyRemove(const nsCString& aHost) override;
+   virtual mozilla::ipc::IPCResult RecvNotifyRemove(const nsCString& aHost) override;
  
-   virtual bool RecvNotifyRemoveAll() override;
+   virtual mozilla::ipc::IPCResult RecvNotifyRemoveAll() override;
  
--  virtual bool RecvNotifyBackgroundSyncEvent(const PrincipalInfo& aPrincipalInfo,
-+  virtual bool RecvNotifyBackgroundSyncEvent(const nsString& aOrigin,
-                                              const nsString& aScope,
-                                              const nsString& aTag,
-                                              const bool& aLastChance) override;
+-  virtual mozilla::ipc::IPCResult RecvNotifyBackgroundSyncEvent(const PrincipalInfo& aPrincipalInfo,
++  virtual mozilla::ipc::IPCResult RecvNotifyBackgroundSyncEvent(const nsString& aOrigin,
+                                                                 const nsString& aScope,
+                                                                 const nsString& aTag,
+                                                                 const bool& aLastChance) override;
  
  private:
    ServiceWorkerManagerChild()
@@ -1774,13 +1777,13 @@ diff --git a/dom/workers/ServiceWorkerManagerParent.cpp b/dom/workers/ServiceWor
 +#include "BackgroundSyncService.h"
  #include "ServiceWorkerManagerParent.h"
  #include "ServiceWorkerManagerService.h"
- #include "mozilla/AppProcessChecker.h"
  #include "mozilla/dom/ContentParent.h"
  #include "mozilla/dom/ServiceWorkerRegistrar.h"
  #include "mozilla/ipc/BackgroundParent.h"
  #include "mozilla/ipc/BackgroundUtils.h"
  #include "mozilla/Unused.h"
-@@ -148,21 +149,23 @@ private:
+ #include "nsThreadUtils.h"
+@@ -145,21 +146,23 @@ private:
    PrincipalInfo mPrincipalInfo;
    RefPtr<Runnable> mCallback;
    nsCOMPtr<nsIThread> mBackgroundThread;
@@ -1805,11 +1808,11 @@ diff --git a/dom/workers/ServiceWorkerManagerParent.cpp b/dom/workers/ServiceWor
    AssertIsOnBackgroundThread();
  }
  
- bool
-@@ -234,87 +237,96 @@ ServiceWorkerManagerParent::RecvUnregist
+ mozilla::ipc::IPCResult
+@@ -231,87 +234,96 @@ ServiceWorkerManagerParent::RecvUnregist
  }
  
- bool
+ mozilla::ipc::IPCResult
  ServiceWorkerManagerParent::RecvPropagateSoftUpdate(const PrincipalOriginAttributes& aOriginAttributes,
                                                      const nsString& aScope)
  {
@@ -1817,15 +1820,15 @@ diff --git a/dom/workers/ServiceWorkerManagerParent.cpp b/dom/workers/ServiceWor
  
 -  if (NS_WARN_IF(!mService)) {
 +  if (NS_WARN_IF(!mServiceWorkerService)) {
-     return false;
+     return IPC_FAIL_NO_REASON(this);
    }
  
 -  mService->PropagateSoftUpdate(mID, aOriginAttributes, aScope);
 +  mServiceWorkerService->PropagateSoftUpdate(mID, aOriginAttributes, aScope);
-   return true;
+   return IPC_OK();
  }
  
- bool
+ mozilla::ipc::IPCResult
  ServiceWorkerManagerParent::RecvPropagateUnregister(const PrincipalInfo& aPrincipalInfo,
                                                      const nsString& aScope)
  {
@@ -1833,52 +1836,52 @@ diff --git a/dom/workers/ServiceWorkerManagerParent.cpp b/dom/workers/ServiceWor
  
 -  if (NS_WARN_IF(!mService)) {
 +  if (NS_WARN_IF(!mServiceWorkerService)) {
-     return false;
+     return IPC_FAIL_NO_REASON(this);
    }
  
 -  mService->PropagateUnregister(mID, aPrincipalInfo, aScope);
 +  mServiceWorkerService->PropagateUnregister(mID, aPrincipalInfo, aScope);
-   return true;
+   return IPC_OK();
  }
  
- bool
+ mozilla::ipc::IPCResult
  ServiceWorkerManagerParent::RecvPropagateRemove(const nsCString& aHost)
  {
    AssertIsOnBackgroundThread();
  
 -  if (NS_WARN_IF(!mService)) {
 +  if (NS_WARN_IF(!mServiceWorkerService)) {
-     return false;
+     return IPC_FAIL_NO_REASON(this);
    }
  
 -  mService->PropagateRemove(mID, aHost);
 +  mServiceWorkerService->PropagateRemove(mID, aHost);
-   return true;
+   return IPC_OK();
  }
  
- bool
+ mozilla::ipc::IPCResult
  ServiceWorkerManagerParent::RecvPropagateRemoveAll()
  {
    AssertIsOnBackgroundThread();
  
 -  if (NS_WARN_IF(!mService)) {
 +  if (NS_WARN_IF(!mServiceWorkerService)) {
-     return false;
+     return IPC_FAIL_NO_REASON(this);
    }
  
 -  mService->PropagateRemoveAll(mID);
 +  mServiceWorkerService->PropagateRemoveAll(mID);
-   return true;
+   return IPC_OK();
  }
  
- bool
+ mozilla::ipc::IPCResult
  ServiceWorkerManagerParent::RecvShutdown()
  {
    AssertIsOnBackgroundThread();
  
 -  if (NS_WARN_IF(!mService)) {
 +  if (NS_WARN_IF(!mServiceWorkerService)) {
-     return false;
+     return IPC_FAIL_NO_REASON(this);
    }
  
 -  mService->UnregisterActor(this);
@@ -1892,7 +1895,7 @@ diff --git a/dom/workers/ServiceWorkerManagerParent.cpp b/dom/workers/ServiceWor
 +  }
  
    Unused << Send__delete__(this);
-   return true;
+   return IPC_OK();
  }
  
  void
@@ -1902,10 +1905,11 @@ diff --git a/dom/workers/ServiceWorkerManagerParent.cpp b/dom/workers/ServiceWor
  
 -  if (mService) {
 -    // This object is about to be released and with it, also mService will be
-+  if (mServiceWorkerService) {
-+    // This object is about to be released and with it, also mServiceWorkerService will be
-     // released too.
+-    // released too.
 -    mService->UnregisterActor(this);
++  if (mServiceWorkerService) {
++    // This object is about to be released and with it, also
++    // mServiceWorkerService will be released too.
 +    mServiceWorkerService->UnregisterActor(this);
 +  }
 +
@@ -1943,11 +1947,11 @@ diff --git a/dom/workers/ServiceWorkerManagerParent.h b/dom/workers/ServiceWorke
    friend class mozilla::ipc::BackgroundParentImpl;
  
 @@ -53,17 +58,18 @@ private:
-   virtual bool RecvPropagateRemove(const nsCString& aHost) override;
+   virtual mozilla::ipc::IPCResult RecvPropagateRemove(const nsCString& aHost) override;
  
-   virtual bool RecvPropagateRemoveAll() override;
+   virtual mozilla::ipc::IPCResult RecvPropagateRemoveAll() override;
  
-   virtual bool RecvShutdown() override;
+   virtual mozilla::ipc::IPCResult RecvShutdown() override;
  
    virtual void ActorDestroy(ActorDestroyReason aWhy) override;
  
