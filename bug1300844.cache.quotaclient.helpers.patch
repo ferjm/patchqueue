@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  c440eec05fb90e650df385b377ce6f12c37cf80c
+# Parent  f3aa2130ae5febd01ef621090871c4b9a9d104a8
 Bug 1300844 - Remove Action* and Context* and use QuotaClient helpers introduced in bug 1217544. r=bkelly
 
 diff --git a/dom/cache/Action.cpp b/dom/cache/Action.cpp
@@ -2731,3 +2731,28 @@ diff --git a/dom/cache/moz.build b/dom/cache/moz.build
      'PrincipalVerifier.cpp',
      'QuotaClient.cpp',
      'ReadStream.cpp',
+diff --git a/dom/quota/shared/moz.build b/dom/quota/shared/moz.build
+new file mode 100644
+--- /dev/null
++++ b/dom/quota/shared/moz.build
+@@ -0,0 +1,20 @@
++# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
++# vim: set filetype=python:
++# This Source Code Form is subject to the terms of the Mozilla Public
++# License, v. 2.0. If a copy of the MPL was not distributed with this
++# file, You can obtain one at http://mozilla.org/MPL/2.0/.
++
++EXPORTS.mozilla.dom.quota.shared += [
++    'ClientAction.h',
++    'ClientContext.h',
++    'QuotaInfo.h'
++]
++
++UNIFIED_SOURCES += [
++    'ClientAction.cpp',
++    'ClientContext.cpp'
++]
++
++include('/ipc/chromium/chromium-config.mozbuild')
++
++FINAL_LIBRARY = 'xul'
