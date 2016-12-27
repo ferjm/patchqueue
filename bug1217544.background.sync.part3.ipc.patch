@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  4a5078a2d25819b503f6a1c8f3b0e92e099737d5
+# Parent  1ec5885b072639a13f63c64fcc6f9e2ac45131d2
 Bug 1217544 - Implement one-off BackgroundSync API. Part 3: IPC. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
@@ -1066,7 +1066,7 @@ diff --git a/ipc/glue/BackgroundChildImpl.cpp b/ipc/glue/BackgroundChildImpl.cpp
  #include "mozilla/Assertions.h"
  #include "mozilla/dom/PBlobChild.h"
  #include "mozilla/dom/PFileSystemRequestChild.h"
-@@ -66,16 +67,17 @@ public:
+@@ -64,16 +65,17 @@ public:
  
  namespace mozilla {
  namespace ipc {
@@ -1084,12 +1084,12 @@ diff --git a/ipc/glue/BackgroundChildImpl.cpp b/ipc/glue/BackgroundChildImpl.cpp
  // BackgroundChildImpl::ThreadLocal
  // -----------------------------------------------------------------------------
  
-@@ -502,16 +504,36 @@ BackgroundChildImpl::DeallocPGamepadTest
+@@ -494,16 +496,36 @@ BackgroundChildImpl::AllocPGamepadTestCh
+ bool
+ BackgroundChildImpl::DeallocPGamepadTestChannelChild(PGamepadTestChannelChild* aActor)
  {
- #ifdef MOZ_GAMEPAD
    MOZ_ASSERT(aActor);
    delete static_cast<dom::GamepadTestChannelChild*>(aActor);
- #endif
    return true;
  }
  
@@ -1150,7 +1150,7 @@ diff --git a/ipc/glue/BackgroundChildImpl.h b/ipc/glue/BackgroundChildImpl.h
 diff --git a/ipc/glue/BackgroundParentImpl.cpp b/ipc/glue/BackgroundParentImpl.cpp
 --- a/ipc/glue/BackgroundParentImpl.cpp
 +++ b/ipc/glue/BackgroundParentImpl.cpp
-@@ -43,25 +43,27 @@
+@@ -41,25 +41,27 @@
  #include "nsNetUtil.h"
  #include "nsIScriptSecurityManager.h"
  #include "nsProxyRelease.h"
@@ -1178,7 +1178,7 @@ diff --git a/ipc/glue/BackgroundParentImpl.cpp b/ipc/glue/BackgroundParentImpl.c
  using mozilla::dom::MessagePortParent;
  using mozilla::dom::PMessagePortParent;
  using mozilla::dom::UDPSocketParent;
-@@ -97,16 +99,17 @@ public:
+@@ -95,16 +97,17 @@ public:
  } // namespace
  
  namespace mozilla {
@@ -1196,12 +1196,12 @@ diff --git a/ipc/glue/BackgroundParentImpl.cpp b/ipc/glue/BackgroundParentImpl.c
    AssertIsOnMainThread();
  
    MOZ_COUNT_CTOR(mozilla::ipc::BackgroundParentImpl);
-@@ -946,16 +949,36 @@ BackgroundParentImpl::DeallocPGamepadTes
- #ifdef MOZ_GAMEPAD
+@@ -932,16 +935,36 @@ bool
+ BackgroundParentImpl::DeallocPGamepadTestChannelParent(dom::PGamepadTestChannelParent *aActor)
+ {
    MOZ_ASSERT(aActor);
    RefPtr<dom::GamepadTestChannelParent> parent =
      dont_AddRef(static_cast<dom::GamepadTestChannelParent*>(aActor));
- #endif
    return true;
  }
  
