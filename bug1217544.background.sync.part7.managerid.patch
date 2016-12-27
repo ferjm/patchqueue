@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  9e491123e1ed8209dbe8ca7bd5671f041cc82fc6
+# Parent  b749197bf72f25b89a31ce7ea5c4cff591ead462
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: Storage. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
@@ -3966,7 +3966,7 @@ diff --git a/dom/quota/ActorsParent.cpp b/dom/quota/ActorsParent.cpp
  #include "mozilla/ipc/BackgroundParent.h"
  #include "mozilla/ipc/BackgroundUtils.h"
  #include "mozilla/IntegerRange.h"
-@@ -3142,25 +3143,27 @@ QuotaManager::Init(const nsAString& aBas
+@@ -3140,25 +3141,27 @@ QuotaManager::Init(const nsAString& aBas
    // Make a timer here to avoid potential failures later. We don't actually
    // initialize the timer until shutdown.
    mShutdownTimer = do_CreateInstance(NS_TIMER_CONTRACTID);
@@ -4078,8 +4078,8 @@ diff --git a/dom/quota/Client.h b/dom/quota/Client.h
 diff --git a/ipc/glue/BackgroundChildImpl.cpp b/ipc/glue/BackgroundChildImpl.cpp
 --- a/ipc/glue/BackgroundChildImpl.cpp
 +++ b/ipc/glue/BackgroundChildImpl.cpp
-@@ -508,18 +508,18 @@ BackgroundChildImpl::DeallocPGamepadTest
- #endif
+@@ -500,18 +500,18 @@ BackgroundChildImpl::DeallocPGamepadTest
+   delete static_cast<dom::GamepadTestChannelChild*>(aActor);
    return true;
  }
  
@@ -4124,12 +4124,12 @@ diff --git a/ipc/glue/BackgroundChildImpl.h b/ipc/glue/BackgroundChildImpl.h
 diff --git a/ipc/glue/BackgroundParentImpl.cpp b/ipc/glue/BackgroundParentImpl.cpp
 --- a/ipc/glue/BackgroundParentImpl.cpp
 +++ b/ipc/glue/BackgroundParentImpl.cpp
-@@ -949,33 +949,39 @@ BackgroundParentImpl::DeallocPGamepadTes
- #ifdef MOZ_GAMEPAD
+@@ -935,33 +935,39 @@ bool
+ BackgroundParentImpl::DeallocPGamepadTestChannelParent(dom::PGamepadTestChannelParent *aActor)
+ {
    MOZ_ASSERT(aActor);
    RefPtr<dom::GamepadTestChannelParent> parent =
      dont_AddRef(static_cast<dom::GamepadTestChannelParent*>(aActor));
- #endif
    return true;
  }
  
