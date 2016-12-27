@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  f22c6dc53276d9cb1e7365e47dc52657facc5e48
+# Parent  59610e848db33c3f3fbe8015c5f7a7655c1e4471
 Bug 1217544 - Implement one-off BackgroundSync API. Part 1: BackgroundSync interface. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
@@ -266,13 +266,13 @@ new file mode 100644
 diff --git a/dom/bindings/Bindings.conf b/dom/bindings/Bindings.conf
 --- a/dom/bindings/Bindings.conf
 +++ b/dom/bindings/Bindings.conf
-@@ -94,16 +94,21 @@ DOMInterfaces = {
- 'AudioNode' : {
-     'concrete': False,
-     'binaryNames': {
-         'channelCountMode': 'channelCountModeValue',
+@@ -98,16 +98,21 @@ DOMInterfaces = {
          'channelInterpretation': 'channelInterpretationValue',
      },
+ },
+ 
+ 'BarProp': {
+     'headerFile': 'mozilla/dom/BarProps.h',
  },
  
 +'BackgroundSync': {
@@ -280,8 +280,8 @@ diff --git a/dom/bindings/Bindings.conf b/dom/bindings/Bindings.conf
 +    'headerFile': 'mozilla/dom/backgroundsync/BackgroundSync.h',
 +},
 +
- 'BarProp': {
-     'headerFile': 'mozilla/dom/BarProps.h',
+ 'BaseAudioContext': {
+     'nativeType': 'mozilla::dom::AudioContext',
  },
  
  'Blob': {
@@ -312,24 +312,24 @@ diff --git a/dom/moz.build b/dom/moz.build
 diff --git a/dom/tests/mochitest/general/test_interfaces.html b/dom/tests/mochitest/general/test_interfaces.html
 --- a/dom/tests/mochitest/general/test_interfaces.html
 +++ b/dom/tests/mochitest/general/test_interfaces.html
-@@ -152,16 +152,18 @@ var interfaceNamesInGlobalScope =
-     "AudioNode",
- // IMPORTANT: Do not change this list without review from a DOM peer!
+@@ -154,16 +154,18 @@ var interfaceNamesInGlobalScope =
      "AudioParam",
  // IMPORTANT: Do not change this list without review from a DOM peer!
      "AudioProcessingEvent",
  // IMPORTANT: Do not change this list without review from a DOM peer!
+     "AudioScheduledSourceNode",
+ // IMPORTANT: Do not change this list without review from a DOM peer!
      "AudioStreamTrack",
  // IMPORTANT: Do not change this list without review from a DOM peer!
-+    {name: "BackgroundSync", b2g: true},
++    "BackgroundSync",
 +// IMPORTANT: Do not change this list without review from a DOM peer!
      "BarProp",
+ // IMPORTANT: Do not change this list without review from a DOM peer!
+     "BaseAudioContext",
  // IMPORTANT: Do not change this list without review from a DOM peer!
      "BatteryManager",
  // IMPORTANT: Do not change this list without review from a DOM peer!
      "BeforeUnloadEvent",
- // IMPORTANT: Do not change this list without review from a DOM peer!
-     "BiquadFilterNode",
  // IMPORTANT: Do not change this list without review from a DOM peer!
 diff --git a/dom/webidl/BackgroundSync.webidl b/dom/webidl/BackgroundSync.webidl
 new file mode 100644
@@ -356,10 +356,10 @@ new file mode 100644
 diff --git a/dom/webidl/moz.build b/dom/webidl/moz.build
 --- a/dom/webidl/moz.build
 +++ b/dom/webidl/moz.build
-@@ -41,16 +41,17 @@ WEBIDL_FILES = [
-     'AudioNode.webidl',
+@@ -42,16 +42,17 @@ WEBIDL_FILES = [
      'AudioParam.webidl',
      'AudioProcessingEvent.webidl',
+     'AudioScheduledSourceNode.webidl',
      'AudioStreamTrack.webidl',
      'AudioTrack.webidl',
      'AudioTrackList.webidl',
@@ -367,9 +367,9 @@ diff --git a/dom/webidl/moz.build b/dom/webidl/moz.build
      'AutocompleteInfo.webidl',
 +    'BackgroundSync.webidl',
      'BarProp.webidl',
+     'BaseAudioContext.webidl',
      'BaseKeyframeTypes.webidl',
      'BatteryManager.webidl',
-     'BeforeAfterKeyboardEvent.webidl',
      'BeforeUnloadEvent.webidl',
      'BiquadFilterNode.webidl',
      'Blob.webidl',
