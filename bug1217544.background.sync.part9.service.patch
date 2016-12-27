@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  d3a591bf12ad991fe6ce23055611799f7483fb8a
+# Parent  d4dd0e4f97f8dcd7ffbe7ac120b34ac19287c083
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: BackgroundSyncService. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSyncChild.cpp b/dom/backgroundsync/BackgroundSyncChild.cpp
@@ -270,7 +270,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncService.cpp
-@@ -0,0 +1,691 @@
+@@ -0,0 +1,692 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -295,6 +295,7 @@ new file mode 100644
 +
 +#include "mozilla/ipc/BackgroundUtils.h"
 +#include "nsContentUtils.h"
++#include "nsIScriptSecurityManager.h"
 +
 +namespace mozilla {
 +namespace dom {
@@ -1682,7 +1683,7 @@ diff --git a/dom/workers/PServiceWorkerManager.ipdl b/dom/workers/PServiceWorker
 diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
 --- a/dom/workers/ServiceWorkerManager.cpp
 +++ b/dom/workers/ServiceWorkerManager.cpp
-@@ -1027,17 +1027,17 @@ ServiceWorkerManager::SendNotificationCl
+@@ -1028,17 +1028,17 @@ ServiceWorkerManager::SendNotificationCl
  NS_IMETHODIMP
  ServiceWorkerManager::SendBackgroundSyncEvent(const nsACString& aOrigin,
                                                const nsACString& aScope,
