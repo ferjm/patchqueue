@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  49d4aec80a77c0e667fdc53da9fee8d4680dc7f4
+# Parent  9201510e07985fab93b88607a1acc6363f632889
 Bug 1217544 - Implement one-off BackgroundSync API. Part 4: Sync event. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
@@ -200,8 +200,8 @@ diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsyn
 diff --git a/dom/bindings/Bindings.conf b/dom/bindings/Bindings.conf
 --- a/dom/bindings/Bindings.conf
 +++ b/dom/bindings/Bindings.conf
-@@ -99,16 +99,22 @@ DOMInterfaces = {
-     },
+@@ -103,16 +103,22 @@ DOMInterfaces = {
+     'headerFile': 'mozilla/dom/BarProps.h',
  },
  
  'BackgroundSync': {
@@ -215,8 +215,8 @@ diff --git a/dom/bindings/Bindings.conf b/dom/bindings/Bindings.conf
 +    'workers': True
 +},
 +
- 'BarProp': {
-     'headerFile': 'mozilla/dom/BarProps.h',
+ 'BaseAudioContext': {
+     'nativeType': 'mozilla::dom::AudioContext',
  },
  
  'Blob': {
@@ -279,9 +279,9 @@ new file mode 100644
 diff --git a/dom/webidl/moz.build b/dom/webidl/moz.build
 --- a/dom/webidl/moz.build
 +++ b/dom/webidl/moz.build
-@@ -42,16 +42,17 @@ WEBIDL_FILES = [
-     'AudioParam.webidl',
+@@ -43,16 +43,17 @@ WEBIDL_FILES = [
      'AudioProcessingEvent.webidl',
+     'AudioScheduledSourceNode.webidl',
      'AudioStreamTrack.webidl',
      'AudioTrack.webidl',
      'AudioTrackList.webidl',
@@ -290,9 +290,9 @@ diff --git a/dom/webidl/moz.build b/dom/webidl/moz.build
      'BackgroundSync.webidl',
 +    'BackgroundSyncEvent.webidl',
      'BarProp.webidl',
+     'BaseAudioContext.webidl',
      'BaseKeyframeTypes.webidl',
      'BatteryManager.webidl',
-     'BeforeAfterKeyboardEvent.webidl',
      'BeforeUnloadEvent.webidl',
      'BiquadFilterNode.webidl',
      'Blob.webidl',
@@ -485,7 +485,7 @@ diff --git a/dom/workers/ServiceWorkerEvents.h b/dom/workers/ServiceWorkerEvents
 diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
 --- a/dom/workers/ServiceWorkerManager.cpp
 +++ b/dom/workers/ServiceWorkerManager.cpp
-@@ -1020,16 +1020,42 @@ ServiceWorkerManager::SendNotificationCl
+@@ -1021,16 +1021,42 @@ ServiceWorkerManager::SendNotificationCl
                                                   const nsAString& aBehavior)
  {
    return SendNotificationEvent(NS_LITERAL_STRING(NOTIFICATION_CLOSE_EVENT_NAME),
@@ -600,7 +600,7 @@ diff --git a/dom/workers/ServiceWorkerManagerChild.h b/dom/workers/ServiceWorker
 diff --git a/dom/workers/ServiceWorkerPrivate.cpp b/dom/workers/ServiceWorkerPrivate.cpp
 --- a/dom/workers/ServiceWorkerPrivate.cpp
 +++ b/dom/workers/ServiceWorkerPrivate.cpp
-@@ -1726,16 +1726,102 @@ ServiceWorkerPrivate::SendFetchEvent(nsI
+@@ -1758,16 +1758,102 @@ ServiceWorkerPrivate::SendFetchEvent(nsI
  
    if (NS_WARN_IF(!r->Dispatch())) {
      return NS_ERROR_FAILURE;
@@ -728,7 +728,7 @@ diff --git a/dom/workers/ServiceWorkerPrivate.h b/dom/workers/ServiceWorkerPriva
  
    // This will terminate the current running worker thread and drop the
    // workerPrivate reference.
-@@ -157,17 +162,18 @@ private:
+@@ -160,17 +165,18 @@ private:
    enum WakeUpReason {
      FetchEvent = 0,
      PushEvent,
