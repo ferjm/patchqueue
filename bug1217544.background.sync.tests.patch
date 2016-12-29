@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  16d5481ff26a4eae6cf8a016ea6ba20c90d8aa86
+# Parent  58ba3ded352f0978455063710a9d507cbf0e09c3
 Bug 1217544 - Implement one-off BackgroundSync API. Tests. r=baku
 
 diff --git a/dom/backgroundsync/moz.build b/dom/backgroundsync/moz.build
@@ -193,10 +193,10 @@ new file mode 100644
 +
 +  <script class="testbody" type="text/javascript">
 +
-+  function resetStorage() {
++  function clearStorage() {
 +    return new Promise(function(resolve, reject) {
 +      var qms = SpecialPowers.Services.qms;
-+      var request = qms.reset();
++      var request = qms.clear();
 +      var cb = SpecialPowers.wrapCallback(resolve);
 +      request.callback = cb;
 +    });
@@ -220,8 +220,8 @@ new file mode 100644
 +    is(tags[0], "tag", "Should have a tag named 'tag' registered");
 +  });
 +
-+  add_task(function* resetStorageAndGetTags() {
-+    yield resetStorage();
++  add_task(function* clearStorageAndGetTags() {
++    yield clearStorage();
 +    var tags = yield registration.sync.getTags();
 +    is(tags.length, 0, "Should have 0 registered tag");
 +    yield unregisterWorker(".");
