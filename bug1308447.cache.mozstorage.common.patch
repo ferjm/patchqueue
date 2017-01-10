@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  7875648cd16f48961d44345f0a29a16569a8fb60
+# Parent  6991edf9ce52fbe77ff13f54c813ddad8658c14b
 Bug 1308447 - Use mozStorageConnectionUtils and IncrementalVacuumConnection in dom/cache. r=bkelly
 
 diff --git a/dom/cache/Connection.h b/dom/cache/Connection.h
@@ -94,7 +94,7 @@ diff --git a/dom/cache/DBAction.cpp b/dom/cache/DBAction.cpp
 diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
 --- a/dom/cache/DBSchema.cpp
 +++ b/dom/cache/DBSchema.cpp
-@@ -27,20 +27,27 @@
+@@ -27,20 +27,28 @@
  #include "nsNetCID.h"
  #include "nsPrintfCString.h"
  #include "nsTArray.h"
@@ -108,6 +108,7 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
 +using storage::utils::Migration;
 +
  const int32_t kFirstShippedSchemaVersion = 15;
++const int32_t kMaxFreePages = kGrowthPages;
 +
  namespace {
 +
@@ -122,7 +123,7 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
  // The caches table is the single source of truth about what Cache
  // objects exist for the origin.  The contents of the Cache are stored
  // in the entries table that references back to caches.
-@@ -156,27 +163,16 @@ const char* const kTableStorage =
+@@ -156,27 +164,16 @@ const char* const kTableStorage =
    ")";
  
  // ---------
@@ -150,7 +151,7 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
  
  } // namespace
  
-@@ -348,228 +344,116 @@ static nsresult BindId(mozIStorageStatem
+@@ -348,228 +345,116 @@ static nsresult BindId(mozIStorageStatem
  static nsresult ExtractId(mozIStorageStatement* aState, uint32_t aPos,
                            nsID* aIdOut);
  static nsresult CreateAndBindKeyStatement(mozIStorageConnection* aConn,
@@ -463,7 +464,7 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
    MOZ_ASSERT(!NS_IsMainThread());
    MOZ_DIAGNOSTIC_ASSERT(aConn);
    MOZ_DIAGNOSTIC_ASSERT(aCacheIdOut);
-@@ -2277,308 +2161,25 @@ HashCString(nsICryptoHash* aCrypto, cons
+@@ -2277,308 +2162,25 @@ HashCString(nsICryptoHash* aCrypto, cons
    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
  
    aOut = Substring(fullHash, 0, 8);
@@ -775,7 +776,7 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
    // we only use a default value here because its required by ALTER TABLE and
    // we need to apply the default "follow" to existing records in the table.
    // We don't actually want to keep the default in the schema for future
-@@ -2587,23 +2188,25 @@ nsresult MigrateFrom15To16(mozIStorageCo
+@@ -2587,23 +2189,25 @@ nsresult MigrateFrom15To16(mozIStorageCo
      "ALTER TABLE entries "
      "ADD COLUMN request_redirect INTEGER NOT NULL DEFAULT 0"
    ));
@@ -804,7 +805,7 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
    // response_redirected_url columns from the entries table.  sqlite doesn't
    // support removing a column from a table using ALTER TABLE, so we need to
    // create a new table without those columns, fill it up with the existing
-@@ -2724,18 +2327,19 @@ MigrateFrom16To17(mozIStorageConnection*
+@@ -2724,18 +2328,19 @@ MigrateFrom16To17(mozIStorageConnection*
    if (NS_WARN_IF(hasMoreData)) { return NS_ERROR_FAILURE; }
  
    rv = aConn->SetSchemaVersion(17);
@@ -826,7 +827,7 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
    // values from the database.  This enum value was removed from the spec in
    // https://github.com/whatwg/fetch/issues/39 but we unfortunately happily
    // accepted this value in the Request constructor.
-@@ -2751,18 +2355,19 @@ MigrateFrom17To18(mozIStorageConnection*
+@@ -2751,18 +2356,19 @@ MigrateFrom17To18(mozIStorageConnection*
    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
  
    rv = aConn->SetSchemaVersion(18);
@@ -848,7 +849,7 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
    // Request objects corresponding to a navigation content policy type to
    // "navigate".
  
-@@ -2780,17 +2385,19 @@ MigrateFrom18To19(mozIStorageConnection*
+@@ -2780,17 +2386,19 @@ MigrateFrom18To19(mozIStorageConnection*
    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
  
    rv = aConn->SetSchemaVersion(19);
@@ -869,7 +870,7 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
    // "no-referrer-when-downgrade".  Note, we only use a default value here
    // because its required by ALTER TABLE and we need to apply the default
    // "no-referrer-when-downgrade" to existing records in the table. We don't
-@@ -2799,22 +2406,25 @@ nsresult MigrateFrom19To20(mozIStorageCo
+@@ -2799,22 +2407,25 @@ nsresult MigrateFrom19To20(mozIStorageCo
      "ALTER TABLE entries "
      "ADD COLUMN request_referrer_policy INTEGER NOT NULL DEFAULT 2"
    ));
@@ -897,7 +898,7 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
    // removes the response_url column from the entries table.
    // sqlite doesn't support removing a column from a table using ALTER TABLE,
    // so we need to create a new table without those columns, fill it up with the
-@@ -2953,68 +2563,78 @@ nsresult MigrateFrom20To21(mozIStorageCo
+@@ -2953,68 +2564,78 @@ nsresult MigrateFrom20To21(mozIStorageCo
    bool hasMoreData = false;
    rv = state->ExecuteStep(&hasMoreData);
    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
@@ -1003,7 +1004,7 @@ diff --git a/dom/cache/DBSchema.h b/dom/cache/DBSchema.h
 +              "Growth size must be multiple of page size");
 +
 +// Only release free pages when we have more than this limit
-+extern const int32_t kMaxFreePages = kGrowthPages;
++extern const int32_t kMaxFreePages;
 +
  } // namespace db
  } // namespace cache
