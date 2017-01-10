@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  12a42210e73c99ccf136eea315e2e7ef21ffce94
+# Parent  3cad205e81c17f5ada08a0d1518250e5557d9092
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: Storage. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
@@ -1718,7 +1718,7 @@ new file mode 100644
 +      // will let us perform certain operations once the storage origin
 +      // is closed.
 +      nsCOMPtr<mozIStorageConnection> wrapped =
-+        new storage::IncrementalVacuumConnection(conn, db::kMaxFreePages);
++        new storage::IncrementalVacuumConnection(conn, dbcommon::kMaxFreePages);
 +      aOptionalData->SetConnection(wrapped);
 +    }
 +  }
@@ -2401,7 +2401,7 @@ diff --git a/dom/backgroundsync/DBSchema.h b/dom/backgroundsync/DBSchema.h
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/DBSchema.h
-@@ -0,0 +1,80 @@
+@@ -0,0 +1,69 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -2464,17 +2464,6 @@ new file mode 100644
 +// We will wipe out databases with schema versions less than this. Newer
 +// versions will be migrated on open to the latest schema version.
 +extern const int32_t kFirstShippedSchemaVersion;
-+
-+const uint32_t kPageSize = 4 * 1024;
-+
-+// Grow the database in chunks to reduce fragmentation
-+const uint32_t kGrowthSize = 32 * 1024;
-+const uint32_t kGrowthPages = kGrowthSize / kPageSize;
-+static_assert(kGrowthSize % kPageSize == 0,
-+              "Growth size must be multiple of page size");
-+
-+// Only release free pages when we have more than this limit
-+extern const int32_t kMaxFreePages = kGrowthPages;
 +
 +} // namespace db
 +} // namespace backgroundsync
@@ -3966,7 +3955,7 @@ diff --git a/dom/quota/ActorsParent.cpp b/dom/quota/ActorsParent.cpp
  #include "mozilla/ipc/BackgroundParent.h"
  #include "mozilla/ipc/BackgroundUtils.h"
  #include "mozilla/IntegerRange.h"
-@@ -3173,25 +3174,27 @@ QuotaManager::Init(const nsAString& aBas
+@@ -3140,25 +3141,27 @@ QuotaManager::Init(const nsAString& aBas
    // Make a timer here to avoid potential failures later. We don't actually
    // initialize the timer until shutdown.
    mShutdownTimer = do_CreateInstance(NS_TIMER_CONTRACTID);
