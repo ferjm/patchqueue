@@ -1,299 +1,8 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  b47313b9d57b46a2b88b489ed51bad2bb741978a
+# Parent  7875648cd16f48961d44345f0a29a16569a8fb60
 Bug 1308447 - Use mozStorageConnectionUtils and IncrementalVacuumConnection in dom/cache. r=bkelly
 
-diff --git a/dom/cache/Connection.cpp b/dom/cache/Connection.cpp
-deleted file mode 100644
---- a/dom/cache/Connection.cpp
-+++ /dev/null
-@@ -1,286 +0,0 @@
--/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
--/* vim: set ts=8 sts=2 et sw=2 tw=80: */
--/* This Source Code Form is subject to the terms of the Mozilla Public
-- * License, v. 2.0. If a copy of the MPL was not distributed with this
-- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
--
--#include "mozilla/dom/cache/Connection.h"
--
--#include "mozilla/dom/cache/DBSchema.h"
--#include "mozStorageHelper.h"
--
--namespace mozilla {
--namespace dom {
--namespace cache {
--
--using mozilla::dom::quota::QuotaObject;
--
--NS_IMPL_ISUPPORTS(cache::Connection, mozIStorageAsyncConnection,
--                                     mozIStorageConnection);
--
--Connection::Connection(mozIStorageConnection* aBase)
--  : mBase(aBase)
--  , mClosed(false)
--{
--  MOZ_ASSERT(mBase);
--}
--
--Connection::~Connection()
--{
--  NS_ASSERT_OWNINGTHREAD(Connection);
--  MOZ_ALWAYS_SUCCEEDS(Close());
--}
--
--NS_IMETHODIMP
--Connection::Close()
--{
--  NS_ASSERT_OWNINGTHREAD(Connection);
--
--  if (mClosed) {
--    return NS_OK;
--  }
--  mClosed = true;
--
--  // If we are closing here, then Cache must not have a transaction
--  // open anywhere else.  This should be guaranteed to succeed.
--  MOZ_ALWAYS_SUCCEEDS(db::IncrementalVacuum(this));
--
--  return mBase->Close();
--}
--
--// The following methods are all boilerplate that either forward to the
--// base connection or block the method.  All the async execution methods
--// are blocked because Cache does not use them and they would require more
--// work to wrap properly.
--
--// mozIStorageAsyncConnection methods
--
--NS_IMETHODIMP
--Connection::AsyncClose(mozIStorageCompletionCallback*)
--{
--  // async methods are not supported
--  return NS_ERROR_NOT_IMPLEMENTED;
--}
--
--NS_IMETHODIMP
--Connection::AsyncClone(bool, mozIStorageCompletionCallback*)
--{
--  // async methods are not supported
--  return NS_ERROR_NOT_IMPLEMENTED;
--}
--
--NS_IMETHODIMP
--Connection::GetDatabaseFile(nsIFile** aFileOut)
--{
--  return mBase->GetDatabaseFile(aFileOut);
--}
--
--NS_IMETHODIMP
--Connection::CreateAsyncStatement(const nsACString&, mozIStorageAsyncStatement**)
--{
--  // async methods are not supported
--  return NS_ERROR_NOT_IMPLEMENTED;
--}
--
--NS_IMETHODIMP
--Connection::ExecuteAsync(mozIStorageBaseStatement**, uint32_t,
--                         mozIStorageStatementCallback*,
--                         mozIStoragePendingStatement**)
--{
--  // async methods are not supported
--  return NS_ERROR_NOT_IMPLEMENTED;
--}
--
--NS_IMETHODIMP
--Connection::ExecuteSimpleSQLAsync(const nsACString&,
--                                  mozIStorageStatementCallback*,
--                                  mozIStoragePendingStatement**)
--{
--  // async methods are not supported
--  return NS_ERROR_NOT_IMPLEMENTED;
--}
--
--NS_IMETHODIMP
--Connection::CreateFunction(const nsACString& aFunctionName,
--                           int32_t aNumArguments,
--                           mozIStorageFunction* aFunction)
--{
--  // async methods are not supported
--  return NS_ERROR_NOT_IMPLEMENTED;
--}
--
--NS_IMETHODIMP
--Connection::CreateAggregateFunction(const nsACString& aFunctionName,
--                                    int32_t aNumArguments,
--                                    mozIStorageAggregateFunction* aFunction)
--{
--  return mBase->CreateAggregateFunction(aFunctionName, aNumArguments,
--                                        aFunction);
--}
--
--NS_IMETHODIMP
--Connection::RemoveFunction(const nsACString& aFunctionName)
--{
--  return mBase->RemoveFunction(aFunctionName);
--}
--
--NS_IMETHODIMP
--Connection::SetProgressHandler(int32_t aGranularity,
--                               mozIStorageProgressHandler* aHandler,
--                               mozIStorageProgressHandler** aHandlerOut)
--{
--  return mBase->SetProgressHandler(aGranularity, aHandler, aHandlerOut);
--}
--
--NS_IMETHODIMP
--Connection::RemoveProgressHandler(mozIStorageProgressHandler** aHandlerOut)
--{
--  return mBase->RemoveProgressHandler(aHandlerOut);
--}
--
--// mozIStorageConnection methods
--
--NS_IMETHODIMP
--Connection::Clone(bool aReadOnly, mozIStorageConnection** aConnectionOut)
--{
--  nsCOMPtr<mozIStorageConnection> conn;
--  nsresult rv = mBase->Clone(aReadOnly, getter_AddRefs(conn));
--  if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
--
--  nsCOMPtr<mozIStorageConnection> wrapped = new Connection(conn);
--  wrapped.forget(aConnectionOut);
--
--  return rv;
--}
--
--NS_IMETHODIMP
--Connection::GetDefaultPageSize(int32_t* aSizeOut)
--{
--  return mBase->GetDefaultPageSize(aSizeOut);
--}
--
--NS_IMETHODIMP
--Connection::GetConnectionReady(bool* aReadyOut)
--{
--  return mBase->GetConnectionReady(aReadyOut);
--}
--
--NS_IMETHODIMP
--Connection::GetLastInsertRowID(int64_t* aRowIdOut)
--{
--  return mBase->GetLastInsertRowID(aRowIdOut);
--}
--
--NS_IMETHODIMP
--Connection::GetAffectedRows(int32_t* aCountOut)
--{
--  return mBase->GetAffectedRows(aCountOut);
--}
--
--NS_IMETHODIMP
--Connection::GetLastError(int32_t* aErrorOut)
--{
--  return mBase->GetLastError(aErrorOut);
--}
--
--NS_IMETHODIMP
--Connection::GetLastErrorString(nsACString& aErrorOut)
--{
--  return mBase->GetLastErrorString(aErrorOut);
--}
--
--NS_IMETHODIMP
--Connection::GetSchemaVersion(int32_t* aVersionOut)
--{
--  return mBase->GetSchemaVersion(aVersionOut);
--}
--
--NS_IMETHODIMP
--Connection::SetSchemaVersion(int32_t aVersion)
--{
--  return mBase->SetSchemaVersion(aVersion);
--}
--
--NS_IMETHODIMP
--Connection::CreateStatement(const nsACString& aQuery,
--                            mozIStorageStatement** aStatementOut)
--{
--  return mBase->CreateStatement(aQuery, aStatementOut);
--}
--
--NS_IMETHODIMP
--Connection::ExecuteSimpleSQL(const nsACString& aQuery)
--{
--  return mBase->ExecuteSimpleSQL(aQuery);
--}
--
--NS_IMETHODIMP
--Connection::TableExists(const nsACString& aTableName, bool* aExistsOut)
--{
--  return mBase->TableExists(aTableName, aExistsOut);
--}
--
--NS_IMETHODIMP
--Connection::IndexExists(const nsACString& aIndexName, bool* aExistsOut)
--{
--  return mBase->IndexExists(aIndexName, aExistsOut);
--}
--
--NS_IMETHODIMP
--Connection::GetTransactionInProgress(bool* aResultOut)
--{
--  return mBase->GetTransactionInProgress(aResultOut);
--}
--
--NS_IMETHODIMP
--Connection::BeginTransaction()
--{
--  return mBase->BeginTransaction();
--}
--
--NS_IMETHODIMP
--Connection::BeginTransactionAs(int32_t aType)
--{
--  return mBase->BeginTransactionAs(aType);
--}
--
--NS_IMETHODIMP
--Connection::CommitTransaction()
--{
--  return mBase->CommitTransaction();
--}
--
--NS_IMETHODIMP
--Connection::RollbackTransaction()
--{
--  return mBase->RollbackTransaction();
--}
--
--NS_IMETHODIMP
--Connection::CreateTable(const char* aTable, const char* aSchema)
--{
--  return mBase->CreateTable(aTable, aSchema);
--}
--
--NS_IMETHODIMP
--Connection::SetGrowthIncrement(int32_t aIncrement, const nsACString& aDatabase)
--{
--  return mBase->SetGrowthIncrement(aIncrement, aDatabase);
--}
--
--NS_IMETHODIMP
--Connection::EnableModule(const nsACString& aModule)
--{
--  return mBase->EnableModule(aModule);
--}
--
--NS_IMETHODIMP
--Connection::GetQuotaObjects(QuotaObject** aDatabaseQuotaObject,
--                            QuotaObject** aJournalQuotaObject)
--{
--  return mBase->GetQuotaObjects(aDatabaseQuotaObject, aJournalQuotaObject);
--}
--
--} // namespace cache
--} // namespace dom
--} // namespace mozilla
 diff --git a/dom/cache/Connection.h b/dom/cache/Connection.h
 deleted file mode 100644
 --- a/dom/cache/Connection.h
@@ -441,7 +150,7 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
  
  } // namespace
  
-@@ -345,228 +341,116 @@ static nsresult BindId(mozIStorageStatem
+@@ -348,228 +344,116 @@ static nsresult BindId(mozIStorageStatem
  static nsresult ExtractId(mozIStorageStatement* aState, uint32_t aPos,
                            nsID* aIdOut);
  static nsresult CreateAndBindKeyStatement(mozIStorageConnection* aConn,
@@ -534,7 +243,7 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
  CreateOrMigrateSchema(mozIStorageConnection* aConn)
  {
    MOZ_ASSERT(!NS_IsMainThread());
-   MOZ_ASSERT(aConn);
+   MOZ_DIAGNOSTIC_ASSERT(aConn);
  
 -  int32_t schemaVersion;
 -  nsresult rv = aConn->GetSchemaVersion(&schemaVersion);
@@ -668,7 +377,7 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
  InitializeConnection(mozIStorageConnection* aConn)
  {
    MOZ_ASSERT(!NS_IsMainThread());
-   MOZ_ASSERT(aConn);
+   MOZ_DIAGNOSTIC_ASSERT(aConn);
  
 -  // This function needs to perform per-connection initialization tasks that
 -  // need to happen regardless of the schema.
@@ -752,9 +461,9 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
  CreateCacheId(mozIStorageConnection* aConn, CacheId* aCacheIdOut)
  {
    MOZ_ASSERT(!NS_IsMainThread());
-   MOZ_ASSERT(aConn);
-   MOZ_ASSERT(aCacheIdOut);
-@@ -2274,306 +2158,25 @@ HashCString(nsICryptoHash* aCrypto, cons
+   MOZ_DIAGNOSTIC_ASSERT(aConn);
+   MOZ_DIAGNOSTIC_ASSERT(aCacheIdOut);
+@@ -2277,308 +2161,25 @@ HashCString(nsICryptoHash* aCrypto, cons
    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
  
    aOut = Substring(fullHash, 0, 8);
@@ -1008,7 +717,7 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
 -Migrate(mozIStorageConnection* aConn)
 -{
 -  MOZ_ASSERT(!NS_IsMainThread());
--  MOZ_ASSERT(aConn);
+-  MOZ_DIAGNOSTIC_ASSERT(aConn);
 -
 -  int32_t currentVersion = 0;
 -  nsresult rv = aConn->GetSchemaVersion(&currentVersion);
@@ -1020,7 +729,7 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
 -    // Wiping old databases is handled in DBAction because it requires
 -    // making a whole new mozIStorageConnection.  Make sure we don't
 -    // accidentally get here for one of those old databases.
--    MOZ_ASSERT(currentVersion >= kFirstShippedSchemaVersion);
+-    MOZ_DIAGNOSTIC_ASSERT(currentVersion >= kFirstShippedSchemaVersion);
 -
 -    for (uint32_t i = 0; i < sMigrationListLength; ++i) {
 -      if (sMigrationList[i].mFromVersion == currentVersion) {
@@ -1034,13 +743,15 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
 -      }
 -    }
 -
--    DebugOnly<int32_t> lastVersion = currentVersion;
+-#if !defined(RELEASE_OR_BETA)
+-    int32_t lastVersion = currentVersion;
+-#endif
 -    rv = aConn->GetSchemaVersion(&currentVersion);
 -    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
--    MOZ_ASSERT(currentVersion > lastVersion);
+-    MOZ_DIAGNOSTIC_ASSERT(currentVersion > lastVersion);
 -  }
 -
--  MOZ_ASSERT(currentVersion == kLatestSchemaVersion);
+-  MOZ_DIAGNOSTIC_ASSERT(currentVersion == kLatestSchemaVersion);
 -
 -  if (rewriteSchema) {
 -    // Now overwrite the master SQL for the entries table to remove the column
@@ -1058,13 +769,13 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
 +                           nsACString& aSchemaRewriteSql)
  {
    MOZ_ASSERT(!NS_IsMainThread());
-   MOZ_ASSERT(aConn);
+   MOZ_DIAGNOSTIC_ASSERT(aConn);
  
    // Add the request_redirect column with a default value of "follow".  Note,
    // we only use a default value here because its required by ALTER TABLE and
    // we need to apply the default "follow" to existing records in the table.
    // We don't actually want to keep the default in the schema for future
-@@ -2582,23 +2185,25 @@ nsresult MigrateFrom15To16(mozIStorageCo
+@@ -2587,23 +2188,25 @@ nsresult MigrateFrom15To16(mozIStorageCo
      "ALTER TABLE entries "
      "ADD COLUMN request_redirect INTEGER NOT NULL DEFAULT 0"
    ));
@@ -1087,13 +798,13 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
 +                           nsACString& aSchemaRewriteSql)
  {
    MOZ_ASSERT(!NS_IsMainThread());
-   MOZ_ASSERT(aConn);
+   MOZ_DIAGNOSTIC_ASSERT(aConn);
  
    // This migration path removes the response_redirected and
    // response_redirected_url columns from the entries table.  sqlite doesn't
    // support removing a column from a table using ALTER TABLE, so we need to
    // create a new table without those columns, fill it up with the existing
-@@ -2719,18 +2324,19 @@ MigrateFrom16To17(mozIStorageConnection*
+@@ -2724,18 +2327,19 @@ MigrateFrom16To17(mozIStorageConnection*
    if (NS_WARN_IF(hasMoreData)) { return NS_ERROR_FAILURE; }
  
    rv = aConn->SetSchemaVersion(17);
@@ -1109,13 +820,13 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
 +                           nsACString& aSchemaRewriteSql)
  {
    MOZ_ASSERT(!NS_IsMainThread());
-   MOZ_ASSERT(aConn);
+   MOZ_DIAGNOSTIC_ASSERT(aConn);
  
    // This migration is needed in order to remove "only-if-cached" RequestCache
    // values from the database.  This enum value was removed from the spec in
    // https://github.com/whatwg/fetch/issues/39 but we unfortunately happily
    // accepted this value in the Request constructor.
-@@ -2746,18 +2352,19 @@ MigrateFrom17To18(mozIStorageConnection*
+@@ -2751,18 +2355,19 @@ MigrateFrom17To18(mozIStorageConnection*
    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
  
    rv = aConn->SetSchemaVersion(18);
@@ -1131,13 +842,13 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
 +                           nsACString& aSchemaRewriteSql)
  {
    MOZ_ASSERT(!NS_IsMainThread());
-   MOZ_ASSERT(aConn);
+   MOZ_DIAGNOSTIC_ASSERT(aConn);
  
    // This migration is needed in order to update the RequestMode values for
    // Request objects corresponding to a navigation content policy type to
    // "navigate".
  
-@@ -2775,17 +2382,19 @@ MigrateFrom18To19(mozIStorageConnection*
+@@ -2780,17 +2385,19 @@ MigrateFrom18To19(mozIStorageConnection*
    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
  
    rv = aConn->SetSchemaVersion(19);
@@ -1152,13 +863,13 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
 +                           nsACString& aSchemaRewriteSql)
  {
    MOZ_ASSERT(!NS_IsMainThread());
-   MOZ_ASSERT(aConn);
+   MOZ_DIAGNOSTIC_ASSERT(aConn);
  
    // Add the request_referrer_policy column with a default value of
    // "no-referrer-when-downgrade".  Note, we only use a default value here
    // because its required by ALTER TABLE and we need to apply the default
    // "no-referrer-when-downgrade" to existing records in the table. We don't
-@@ -2794,22 +2403,25 @@ nsresult MigrateFrom19To20(mozIStorageCo
+@@ -2799,22 +2406,25 @@ nsresult MigrateFrom19To20(mozIStorageCo
      "ALTER TABLE entries "
      "ADD COLUMN request_referrer_policy INTEGER NOT NULL DEFAULT 2"
    ));
@@ -1180,13 +891,13 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
 +                           nsACString& aSchemaRewriteSql)
  {
    MOZ_ASSERT(!NS_IsMainThread());
-   MOZ_ASSERT(aConn);
+   MOZ_DIAGNOSTIC_ASSERT(aConn);
  
    // This migration creates response_url_list table to store response_url and
    // removes the response_url column from the entries table.
    // sqlite doesn't support removing a column from a table using ALTER TABLE,
    // so we need to create a new table without those columns, fill it up with the
-@@ -2948,68 +2560,78 @@ nsresult MigrateFrom20To21(mozIStorageCo
+@@ -2953,68 +2563,78 @@ nsresult MigrateFrom20To21(mozIStorageCo
    bool hasMoreData = false;
    rv = state->ExecuteStep(&hasMoreData);
    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
@@ -1208,7 +919,7 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
 +                           nsACString& aSchemaRewriteSql)
  {
    MOZ_ASSERT(!NS_IsMainThread());
-   MOZ_ASSERT(aConn);
+   MOZ_DIAGNOSTIC_ASSERT(aConn);
  
    // Add the request_integrity column.
    nsresult rv = aConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
@@ -1233,7 +944,7 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
 +                           nsACString& aSchemaRewriteSql)
  {
    MOZ_ASSERT(!NS_IsMainThread());
-   MOZ_ASSERT(aConn);
+   MOZ_DIAGNOSTIC_ASSERT(aConn);
  
    // The only change between 22 and 23 was a different snappy compression
    // format, but it's backwards-compatible.
@@ -1248,7 +959,7 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
 +                           nsACString& aSchemaRewriteSql)
  {
    MOZ_ASSERT(!NS_IsMainThread());
-   MOZ_ASSERT(aConn);
+   MOZ_DIAGNOSTIC_ASSERT(aConn);
  
    // Add the request_url_fragment column.
    nsresult rv = aConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
