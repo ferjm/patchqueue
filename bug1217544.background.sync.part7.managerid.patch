@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  9df4f086c74696ba0129ae487af65821517c9c40
+# Parent  12a42210e73c99ccf136eea315e2e7ef21ffce94
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: Storage. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
@@ -1181,10 +1181,10 @@ new file mode 100644
 +public:
 +  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(ChromeStorageAction)
 +
-+  enum class Type {
-+    Register = 0,
-+    Unregister,
-+    GetAll
++  enum Type {
++    eRegister = 0,
++    eUnregister,
++    eGetAll
 +  };
 +
 +  ChromeStorageAction(Type aType,
@@ -1209,17 +1209,17 @@ new file mode 100644
 +    , mRegistration(aRegistration)
 +  {}
 +
-+  Type Type()
++  Type GetType()
 +  {
 +    return mType;
 +  }
 +
-+  nsString& Origin()
++  nsString& GetOrigin()
 +  {
 +    return mOrigin;
 +  }
 +
-+  nsID& RequestId()
++  nsID& GetRequestId()
 +  {
 +    return mRequestId;
 +  }
@@ -1360,12 +1360,12 @@ new file mode 100644
 +  {
 +    nsresult rv = NS_OK;
 +    if (mInitiatingThread == nsCOMPtr<nsIThread>(do_GetCurrentThread())) {
-+      mManager->OnRequestComplete(mAction->RequestId(), mResponse);
++      mManager->OnRequestComplete(mAction->GetRequestId(), mResponse);
 +      return rv;
 +    }
 +
-+    switch (mAction->Type()) {
-+      case ChromeStorageAction::Type::Register:
++    switch (mAction->GetType()) {
++      case ChromeStorageAction::Type::eRegister:
 +        {
 +          Registration registration = mAction->GetRegistration();
 +          rv = chromedb::Register(mConn, registration.mOrigin());
@@ -1376,15 +1376,15 @@ new file mode 100644
 +          }
 +        }
 +        break;
-+      case ChromeStorageAction::Type::Unregister:
-+        rv = chromedb::Unregister(mConn, mAction->Origin());
++      case ChromeStorageAction::Type::eUnregister:
++        rv = chromedb::Unregister(mConn, mAction->GetOrigin());
 +        if (NS_WARN_IF(NS_FAILED(rv))) {
 +          mResponse = SyncOpError(static_cast<uint32_t>(rv));
 +        } else {
 +          mResponse = SyncUnregisterOriginResponse();
 +        }
 +        break;
-+      case ChromeStorageAction::Type::GetAll:
++      case ChromeStorageAction::Type::eGetAll:
 +        {
 +          nsTArray<nsString> origins;
 +          rv = chromedb::GetAll(mConn, origins);
@@ -1514,7 +1514,7 @@ new file mode 100644
 +  AssertIsOnBackgroundThread();
 +
 +  RefPtr<ChromeStorageAction> action =
-+    new ChromeStorageAction(ChromeStorageAction::Type::Register, aRequestId,
++    new ChromeStorageAction(ChromeStorageAction::Type::eRegister, aRequestId,
 +                            aRegistration);
 +  ExecuteStorageAction(action);
 +}
@@ -1526,7 +1526,7 @@ new file mode 100644
 +  AssertIsOnBackgroundThread();
 +
 +  RefPtr<ChromeStorageAction> action =
-+    new ChromeStorageAction(ChromeStorageAction::Type::Unregister, aRequestId,
++    new ChromeStorageAction(ChromeStorageAction::Type::eUnregister, aRequestId,
 +                            aOrigin);
 +  ExecuteStorageAction(action);
 +}
@@ -1537,7 +1537,7 @@ new file mode 100644
 +  AssertIsOnBackgroundThread();
 +
 +  RefPtr<ChromeStorageAction> action =
-+    new ChromeStorageAction(ChromeStorageAction::Type::GetAll, aRequestId);
++    new ChromeStorageAction(ChromeStorageAction::Type::eGetAll, aRequestId);
 +  ExecuteStorageAction(action);
 +}
 +
@@ -3966,7 +3966,7 @@ diff --git a/dom/quota/ActorsParent.cpp b/dom/quota/ActorsParent.cpp
  #include "mozilla/ipc/BackgroundParent.h"
  #include "mozilla/ipc/BackgroundUtils.h"
  #include "mozilla/IntegerRange.h"
-@@ -3140,25 +3141,27 @@ QuotaManager::Init(const nsAString& aBas
+@@ -3173,25 +3174,27 @@ QuotaManager::Init(const nsAString& aBas
    // Make a timer here to avoid potential failures later. We don't actually
    // initialize the timer until shutdown.
    mShutdownTimer = do_CreateInstance(NS_TIMER_CONTRACTID);
