@@ -1,7 +1,7 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  d4dd0e4f97f8dcd7ffbe7ac120b34ac19287c083
-Bug 1217544 - Implement one-off BackgroundSync API. Part 7: BackgroundSyncService. r=baku
+# Parent  0b42378c6972727f1c7e9d13c85e9dff0e98f29f
+Bug 1217544 - Implement one-off BackgroundSync API. Part 9: BackgroundSyncService. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSyncChild.cpp b/dom/backgroundsync/BackgroundSyncChild.cpp
 --- a/dom/backgroundsync/BackgroundSyncChild.cpp
@@ -1680,7 +1680,7 @@ diff --git a/dom/workers/PServiceWorkerManager.ipdl b/dom/workers/PServiceWorker
 diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
 --- a/dom/workers/ServiceWorkerManager.cpp
 +++ b/dom/workers/ServiceWorkerManager.cpp
-@@ -1028,17 +1028,17 @@ ServiceWorkerManager::SendNotificationCl
+@@ -1032,17 +1032,17 @@ ServiceWorkerManager::SendNotificationCl
  NS_IMETHODIMP
  ServiceWorkerManager::SendBackgroundSyncEvent(const nsACString& aOrigin,
                                                const nsACString& aScope,
