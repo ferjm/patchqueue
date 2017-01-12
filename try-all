@@ -1,5 +1,5 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  f9f172fe9d95b65fa69fbbc242889121fd86917f
-try: -b do -p all -u all -t none
+# Parent  2131c6a2ca38242b648e0b9d342c5b20aa92afca
+try: -b do -p linux -u all -t none
 
