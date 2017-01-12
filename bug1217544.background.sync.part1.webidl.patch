@@ -395,3 +395,25 @@ diff --git a/dom/workers/WorkerPrefs.h b/dom/workers/WorkerPrefs.h
  WORKER_PREF("intl.accept_languages", PrefLanguagesChanged)
  WORKER_PREF("general.appname.override", AppNameOverrideChanged)
  WORKER_PREF("general.appversion.override", AppVersionOverrideChanged)
+diff --git a/dom/workers/test/serviceworkers/test_serviceworker_interfaces.js b/dom/workers/test/serviceworkers/test_serviceworker_interfaces.js
+--- a/dom/workers/test/serviceworkers/test_serviceworker_interfaces.js
++++ b/dom/workers/test/serviceworkers/test_serviceworker_interfaces.js
+@@ -72,16 +72,18 @@ var ecmaGlobals =
+   ];
+ // IMPORTANT: Do not change the list above without review from
+ //            a JavaScript Engine peer!
+ 
+ // IMPORTANT: Do not change the list below without review from a DOM peer!
+ var interfaceNamesInGlobalScope =
+   [
+ // IMPORTANT: Do not change this list without review from a DOM peer!
++    {name: "BackgroundSync", disabled: true},
++// IMPORTANT: Do not change this list without review from a DOM peer!
+     "Blob",
+ // IMPORTANT: Do not change this list without review from a DOM peer!
+     "BroadcastChannel",
+ // IMPORTANT: Do not change this list without review from a DOM peer!
+     "Cache",
+ // IMPORTANT: Do not change this list without review from a DOM peer!
+     "CacheStorage",
+ // IMPORTANT: Do not change this list without review from a DOM peer!
