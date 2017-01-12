@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  9201510e07985fab93b88607a1acc6363f632889
+# Parent  8c71ea9d40a9e0fb603a4e8b0b043dc7f0b96501
 Bug 1217544 - Implement one-off BackgroundSync API. Part 4: Sync event. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
@@ -226,7 +226,7 @@ diff --git a/dom/bindings/Bindings.conf b/dom/bindings/Bindings.conf
 diff --git a/dom/interfaces/base/nsIServiceWorkerManager.idl b/dom/interfaces/base/nsIServiceWorkerManager.idl
 --- a/dom/interfaces/base/nsIServiceWorkerManager.idl
 +++ b/dom/interfaces/base/nsIServiceWorkerManager.idl
-@@ -209,19 +209,23 @@ interface nsIServiceWorkerManager : nsIS
+@@ -213,19 +213,23 @@ interface nsIServiceWorkerManager : nsIS
                                    in AString aBehavior);
  
    [optional_argc] void sendPushEvent(in ACString aOriginAttributes,
@@ -255,7 +255,7 @@ diff --git a/dom/webidl/BackgroundSyncEvent.webidl b/dom/webidl/BackgroundSyncEv
 new file mode 100644
 --- /dev/null
 +++ b/dom/webidl/BackgroundSyncEvent.webidl
-@@ -0,0 +1,20 @@
+@@ -0,0 +1,21 @@
 +/* -*- Mode: IDL; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this file,
@@ -266,7 +266,8 @@ new file mode 100644
 + */
 +
 +[Constructor(DOMString type, optional BackgroundSyncEventInit eventInitDict),
-+ Exposed=ServiceWorker]
++ Exposed=ServiceWorker,
++ Func="mozilla::dom::backgroundsync::BackgroundSync::PrefEnabled"]
 +interface BackgroundSyncEvent : ExtendableEvent {
 +  readonly attribute DOMString tag;
 +  readonly attribute boolean lastChance;
@@ -328,7 +329,7 @@ diff --git a/dom/workers/PServiceWorkerManager.ipdl b/dom/workers/PServiceWorker
 diff --git a/dom/workers/ServiceWorkerEvents.cpp b/dom/workers/ServiceWorkerEvents.cpp
 --- a/dom/workers/ServiceWorkerEvents.cpp
 +++ b/dom/workers/ServiceWorkerEvents.cpp
-@@ -1004,17 +1004,17 @@ ExtractBytesFromData(const OwningArrayBu
+@@ -1006,17 +1006,17 @@ ExtractBytesFromData(const OwningArrayBu
      return NS_OK;
    }
    if (aDataInit.IsUSVString()) {
@@ -347,7 +348,7 @@ diff --git a/dom/workers/ServiceWorkerEvents.cpp b/dom/workers/ServiceWorkerEven
  PushMessageData::~PushMessageData()
  {
  }
-@@ -1146,16 +1146,50 @@ NS_INTERFACE_MAP_END_INHERITING(Extendab
+@@ -1148,16 +1148,50 @@ NS_INTERFACE_MAP_END_INHERITING(Extendab
  NS_IMPL_CYCLE_COLLECTION_INHERITED(PushEvent, ExtendableEvent, mData)
  
  JSObject*
@@ -485,7 +486,7 @@ diff --git a/dom/workers/ServiceWorkerEvents.h b/dom/workers/ServiceWorkerEvents
 diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
 --- a/dom/workers/ServiceWorkerManager.cpp
 +++ b/dom/workers/ServiceWorkerManager.cpp
-@@ -1021,16 +1021,42 @@ ServiceWorkerManager::SendNotificationCl
+@@ -1025,16 +1025,42 @@ ServiceWorkerManager::SendNotificationCl
                                                   const nsAString& aBehavior)
  {
    return SendNotificationEvent(NS_LITERAL_STRING(NOTIFICATION_CLOSE_EVENT_NAME),
@@ -600,7 +601,7 @@ diff --git a/dom/workers/ServiceWorkerManagerChild.h b/dom/workers/ServiceWorker
 diff --git a/dom/workers/ServiceWorkerPrivate.cpp b/dom/workers/ServiceWorkerPrivate.cpp
 --- a/dom/workers/ServiceWorkerPrivate.cpp
 +++ b/dom/workers/ServiceWorkerPrivate.cpp
-@@ -1758,16 +1758,102 @@ ServiceWorkerPrivate::SendFetchEvent(nsI
+@@ -1768,16 +1768,102 @@ ServiceWorkerPrivate::SendFetchEvent(nsI
  
    if (NS_WARN_IF(!r->Dispatch())) {
      return NS_ERROR_FAILURE;
@@ -789,3 +790,27 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
  ////////////////////////////////////////////////////
  // Base class implementation
  
+diff --git a/dom/workers/test/serviceworkers/test_serviceworker_interfaces.js b/dom/workers/test/serviceworkers/test_serviceworker_interfaces.js
+--- a/dom/workers/test/serviceworkers/test_serviceworker_interfaces.js
++++ b/dom/workers/test/serviceworkers/test_serviceworker_interfaces.js
+@@ -72,17 +72,19 @@ var ecmaGlobals =
+   ];
+ // IMPORTANT: Do not change the list above without review from
+ //            a JavaScript Engine peer!
+ 
+ // IMPORTANT: Do not change the list below without review from a DOM peer!
+ var interfaceNamesInGlobalScope =
+   [
+ // IMPORTANT: Do not change this list without review from a DOM peer!
+-    {name: "BackgroundSync", disabled: true},
++    { name: "BackgroundSync", disabled: true },
++// IMPORTANT: Do not change this list without review from a DOM peer!
++    { name: "BackgroundSyncEvent", disabled: true },
+ // IMPORTANT: Do not change this list without review from a DOM peer!
+     "Blob",
+ // IMPORTANT: Do not change this list without review from a DOM peer!
+     "BroadcastChannel",
+ // IMPORTANT: Do not change this list without review from a DOM peer!
+     "Cache",
+ // IMPORTANT: Do not change this list without review from a DOM peer!
+     "CacheStorage",
