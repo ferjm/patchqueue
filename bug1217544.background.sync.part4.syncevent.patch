@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  8c71ea9d40a9e0fb603a4e8b0b043dc7f0b96501
+# Parent  957a3725171e40406bac0a8d059110a8a068f270
 Bug 1217544 - Implement one-off BackgroundSync API. Part 4: Sync event. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
@@ -790,27 +790,3 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
  ////////////////////////////////////////////////////
  // Base class implementation
  
-diff --git a/dom/workers/test/serviceworkers/test_serviceworker_interfaces.js b/dom/workers/test/serviceworkers/test_serviceworker_interfaces.js
---- a/dom/workers/test/serviceworkers/test_serviceworker_interfaces.js
-+++ b/dom/workers/test/serviceworkers/test_serviceworker_interfaces.js
-@@ -72,17 +72,19 @@ var ecmaGlobals =
-   ];
- // IMPORTANT: Do not change the list above without review from
- //            a JavaScript Engine peer!
- 
- // IMPORTANT: Do not change the list below without review from a DOM peer!
- var interfaceNamesInGlobalScope =
-   [
- // IMPORTANT: Do not change this list without review from a DOM peer!
--    {name: "BackgroundSync", disabled: true},
-+    { name: "BackgroundSync", disabled: true },
-+// IMPORTANT: Do not change this list without review from a DOM peer!
-+    { name: "BackgroundSyncEvent", disabled: true },
- // IMPORTANT: Do not change this list without review from a DOM peer!
-     "Blob",
- // IMPORTANT: Do not change this list without review from a DOM peer!
-     "BroadcastChannel",
- // IMPORTANT: Do not change this list without review from a DOM peer!
-     "Cache",
- // IMPORTANT: Do not change this list without review from a DOM peer!
-     "CacheStorage",
