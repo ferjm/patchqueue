@@ -1247,7 +1247,7 @@ new file mode 100644
 +public:
 +  NS_DECL_THREADSAFE_ISUPPORTS
 +
-+  InitRunnable(ChromeStorageManager* aManager)
++  explicit InitRunnable(ChromeStorageManager* aManager)
 +    : mManager(aManager)
 +    , mInitiatingThread(do_GetCurrentThread())
 +  {
@@ -1309,7 +1309,7 @@ new file mode 100644
 +public:
 +  NS_DECL_THREADSAFE_ISUPPORTS
 +
-+  ShutdownRunnable(mozIStorageConnection* aConn)
++  explicit ShutdownRunnable(mozIStorageConnection* aConn)
 +    : mDBConn(aConn)
 +  {}
 +
