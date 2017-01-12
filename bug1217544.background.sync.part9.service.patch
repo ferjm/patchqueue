@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  0b42378c6972727f1c7e9d13c85e9dff0e98f29f
+# Parent  c1d218aa045556e2b2cc2dac381820152393e838
 Bug 1217544 - Implement one-off BackgroundSync API. Part 9: BackgroundSyncService. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSyncChild.cpp b/dom/backgroundsync/BackgroundSyncChild.cpp
@@ -270,7 +270,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncService.cpp
-@@ -0,0 +1,689 @@
+@@ -0,0 +1,688 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -494,8 +494,7 @@ new file mode 100644
 +  MOZ_ASSERT(mBackgroundSyncActors.Length() == 0);
 +  MOZ_ASSERT(mStorageManagers.Count() == 0);
 +  MOZ_ASSERT(mChromeStorageManagers.Count() == 0);
-+
-+  mOnlineStateObserver->Shutdown(this);
++  MOZ_ASSERT(!mOnlineStateObserver);
 +
 +  sInstance = nullptr;
 +}
