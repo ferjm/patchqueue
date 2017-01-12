@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  59610e848db33c3f3fbe8015c5f7a7655c1e4471
+# Parent  158fc2a37dc65ed5be641ac1410e13da77dcb829
 Bug 1217544 - Implement one-off BackgroundSync API. Part 1: BackgroundSync interface. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
@@ -321,7 +321,7 @@ diff --git a/dom/tests/mochitest/general/test_interfaces.html b/dom/tests/mochit
  // IMPORTANT: Do not change this list without review from a DOM peer!
      "AudioStreamTrack",
  // IMPORTANT: Do not change this list without review from a DOM peer!
-+    "BackgroundSync",
++    {name: "BackgroundSync", disabled: true},
 +// IMPORTANT: Do not change this list without review from a DOM peer!
      "BarProp",
  // IMPORTANT: Do not change this list without review from a DOM peer!
