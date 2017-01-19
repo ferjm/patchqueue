@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  3cad205e81c17f5ada08a0d1518250e5557d9092
+# Parent  27c048949db9d6d0a617792d9b9a05f70a8da251
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: Storage. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
@@ -1149,7 +1149,7 @@ diff --git a/dom/backgroundsync/ChromeStorageManager.cpp b/dom/backgroundsync/Ch
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/ChromeStorageManager.cpp
-@@ -0,0 +1,403 @@
+@@ -0,0 +1,592 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -1241,22 +1241,23 @@ new file mode 100644
 +//-----------------------------------------------------------------------------
 +// IO thread
 +
-+class InitRunnable final : public nsIRunnable,
-+                           public nsICancelableRunnable
++class ContinueInitRunnable final : public nsIRunnable
++                                 , public nsICancelableRunnable
 +{
 +public:
 +  NS_DECL_THREADSAFE_ISUPPORTS
 +
-+  explicit InitRunnable(ChromeStorageManager* aManager)
++  ContinueInitRunnable(ChromeStorageManager* aManager,
++                       nsIThread* aBackgroundThread)
 +    : mManager(aManager)
-+    , mInitiatingThread(do_GetCurrentThread())
++    , mBackgroundThread(aBackgroundThread)
 +  {
 +  }
 +
 +  NS_IMETHODIMP
 +  Run() override
 +  {
-+    if (mInitiatingThread == nsCOMPtr<nsIThread>(do_GetCurrentThread())) {
++    if (mBackgroundThread == nsCOMPtr<nsIThread>(do_GetCurrentThread())) {
 +      MOZ_ASSERT(mDBConn);
 +      mManager->OnInitialized(mDBConn);
 +      return NS_OK;
@@ -1267,7 +1268,7 @@ new file mode 100644
 +                                         getter_AddRefs(dbFile));
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
-+    rv = dbFile->AppendNative(NS_LITERAL_CSTRING("backgroundsync.sqlite"));
++    rv = dbFile->AppendNative(NS_LITERAL_CSTRING("backgroundsync_chrome.sqlite"));
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +    nsCOMPtr<mozIStorageService> storage =
@@ -1282,7 +1283,8 @@ new file mode 100644
 +    chromedb::CreateOrMigrateSchema(mDBConn);
 +    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
-+    rv = mInitiatingThread->Dispatch(this, nsIThread::DISPATCH_NORMAL);
++    rv = mBackgroundThread->Dispatch(this, nsIThread::DISPATCH_NORMAL);
++    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
 +
 +    return rv;
 +  }
@@ -1294,14 +1296,142 @@ new file mode 100644
 +  }
 +
 +private:
-+  ~InitRunnable() {};
++  ~ContinueInitRunnable() {};
 +
 +  nsCOMPtr<mozIStorageConnection> mDBConn;
 +  RefPtr<ChromeStorageManager> mManager;
-+  nsCOMPtr<nsIThread> mInitiatingThread;
++  nsCOMPtr<nsIThread> mBackgroundThread;
 +};
 +
-+NS_IMPL_ISUPPORTS(InitRunnable, nsICancelableRunnable, nsIRunnable)
++NS_IMPL_ISUPPORTS(ContinueInitRunnable, nsICancelableRunnable, nsIRunnable)
++
++//-----------------------------------------------------------------------------
++// Main thread
++
++class XPCOMShutdownObserver final : public nsIRunnable
++                                  , public nsIObserver
++{
++public:
++  NS_DECL_THREADSAFE_ISUPPORTS
++
++  XPCOMShutdownObserver(ChromeStorageManager* aManager, nsIThread* aIOThread)
++    : mManager(aManager)
++    , mIOThread(aIOThread)
++    , mBackgroundThread(do_GetCurrentThread())
++  {
++    AssertIsOnBackgroundThread();
++  }
++
++  NS_IMETHODIMP
++  Run() override
++  {
++    if (mBackgroundThread == nsCOMPtr<nsIThread>(do_GetCurrentThread())) {
++      MOZ_ASSERT(mManager);
++      mManager->Shutdown();
++      return NS_OK;
++    }
++
++    AssertIsOnMainThread();
++
++    nsCOMPtr<nsIObserverService> os = services::GetObserverService();
++    if (NS_WARN_IF(!os)) {
++      return NS_ERROR_FAILURE;
++    }
++
++    nsresult rv = os->AddObserver(this, "xpcom-shutdown",
++                                  /* holdsWeak */ false);
++    NS_ENSURE_SUCCESS(rv, rv);
++
++    RefPtr<ContinueInitRunnable> runnable =
++      new ContinueInitRunnable(mManager, mBackgroundThread);
++    rv = mIOThread->Dispatch(runnable, nsIThread::DISPATCH_NORMAL);
++    NS_ENSURE_SUCCESS(rv, rv);
++
++    return NS_OK;
++  }
++
++  NS_IMETHODIMP
++  Observe(nsISupports* aSubject,
++          const char* aTopic, const char16_t* aData) override
++  {
++    AssertIsOnMainThread();
++
++    MOZ_ASSERT(!strcmp(aTopic, "xpcom-shutdown"));
++
++    nsresult rv = mBackgroundThread->Dispatch(this, nsIThread::DISPATCH_NORMAL);
++    if (NS_WARN_IF(NS_FAILED(rv))) { return rv; }
++
++    return rv;
++  }
++
++private:
++  ~XPCOMShutdownObserver()
++  {
++    AssertIsOnBackgroundThread();
++  };
++
++  RefPtr<ChromeStorageManager> mManager;
++  nsCOMPtr<nsIThread> mIOThread;
++  nsCOMPtr<nsIThread> mBackgroundThread;
++};
++
++NS_IMPL_ISUPPORTS(XPCOMShutdownObserver, nsIRunnable, nsIObserver)
++
++class ContinueShutdownRunnable final : public nsIRunnable
++                                     , public nsICancelableRunnable
++{
++public:
++  NS_DECL_THREADSAFE_ISUPPORTS
++
++  ContinueShutdownRunnable(ChromeStorageManager* aManager,
++                           XPCOMShutdownObserver* aObserver,
++                           nsIThread* aBackgroundThread)
++    : mManager(aManager)
++    , mObserver(aObserver)
++    , mBackgroundThread(aBackgroundThread)
++  {
++  }
++
++  NS_IMETHODIMP
++  Run() override
++  {
++    if (mBackgroundThread == nsCOMPtr<nsIThread>(do_GetCurrentThread())) {
++      mManager->FinishShutdown();
++      return NS_OK;
++    }
++
++    AssertIsOnMainThread();
++
++    nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
++    if (obs) {
++      obs->RemoveObserver(mObserver, "xpcom-shutdown");
++    }
++
++    nsresult rv =
++      mBackgroundThread->Dispatch(this, nsIThread::DISPATCH_NORMAL);
++    NS_ENSURE_SUCCESS(rv, rv);
++
++    return NS_OK;
++  }
++
++  NS_IMETHODIMP
++  Cancel() override
++  {
++    return NS_OK;
++  }
++
++private:
++  ~ContinueShutdownRunnable() {};
++
++  RefPtr<ChromeStorageManager> mManager;
++  RefPtr<XPCOMShutdownObserver> mObserver;
++  nsCOMPtr<nsIThread> mBackgroundThread;
++};
++
++NS_IMPL_ISUPPORTS(ContinueShutdownRunnable, nsICancelableRunnable, nsIRunnable)
++
++//-----------------------------------------------------------------------------
++// IO thread
 +
 +class ShutdownRunnable : public nsIRunnable,
 +                         public nsICancelableRunnable
@@ -1309,16 +1439,34 @@ new file mode 100644
 +public:
 +  NS_DECL_THREADSAFE_ISUPPORTS
 +
-+  explicit ShutdownRunnable(mozIStorageConnection* aConn)
-+    : mDBConn(aConn)
-+  {}
++  explicit ShutdownRunnable(ChromeStorageManager* aManager,
++                            mozIStorageConnection* aConn,
++                            XPCOMShutdownObserver* aObserver)
++    : mManager(aManager)
++    , mDBConn(aConn)
++    , mObserver(aObserver)
++    , mBackgroundThread(do_GetCurrentThread())
++  {
++    AssertIsOnBackgroundThread();
++  }
 +
 +  NS_IMETHODIMP
 +  Run() override
 +  {
 +    MOZ_ASSERT(mDBConn);
 +
-+    return mDBConn->Close();
++    nsresult rv;
++    if (mDBConn) {
++      rv = mDBConn->Close();
++      NS_ENSURE_SUCCESS(rv, rv);
++    }
++
++    RefPtr<ContinueShutdownRunnable> runnable =
++      new ContinueShutdownRunnable(mManager, mObserver, mBackgroundThread);
++    rv = NS_DispatchToMainThread(runnable, nsIThread::DISPATCH_NORMAL);
++    NS_ENSURE_SUCCESS(rv, rv);
++
++    return NS_OK;
 +  }
 +
 +  NS_IMETHODIMP
@@ -1330,7 +1478,10 @@ new file mode 100644
 +private:
 +  ~ShutdownRunnable() {};
 +
++  RefPtr<ChromeStorageManager> mManager;
 +  nsCOMPtr<mozIStorageConnection> mDBConn;
++  RefPtr<XPCOMShutdownObserver> mObserver;
++  nsCOMPtr<nsIThread> mBackgroundThread;
 +};
 +
 +NS_IMPL_ISUPPORTS(ShutdownRunnable, nsICancelableRunnable, nsIRunnable)
@@ -1425,33 +1576,6 @@ new file mode 100644
 +//-----------------------------------------------------------------------------
 +// PBackground thread
 +
-+ChromeStorageManager::ChromeStorageManager()
-+{
-+  AssertIsOnBackgroundThread();
-+
-+  Init();
-+}
-+
-+ChromeStorageManager::~ChromeStorageManager()
-+{
-+  AssertIsOnBackgroundThread();
-+
-+  if (mDBConn) {
-+    RefPtr<ShutdownRunnable> runnable = new ShutdownRunnable(mDBConn);
-+    mIOThread->Dispatch(runnable, nsIThread::DISPATCH_NORMAL);
-+    mDBConn = nullptr;
-+  }
-+
-+  mPendingActions.Clear();
-+
-+  nsCOMPtr<nsIThread> ioThread;
-+  mIOThread.swap(ioThread);
-+  MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(
-+        NewRunnableMethod(ioThread, &nsIThread::Shutdown)));
-+
-+  csmInstance = nullptr;
-+}
-+
 +// static
 +already_AddRefed<ChromeStorageManager>
 +ChromeStorageManager::GetOrCreate()
@@ -1465,16 +1589,42 @@ new file mode 100644
 +  return instance.forget();
 +}
 +
++ChromeStorageManager::ChromeStorageManager()
++  : mShuttingDown(false)
++{
++  AssertIsOnBackgroundThread();
++
++  Init();
++}
++
++ChromeStorageManager::~ChromeStorageManager()
++{
++  AssertIsOnBackgroundThread();
++
++  MOZ_ASSERT(!mShutdownObserver);
++  MOZ_ASSERT(!mDBConn);
++  MOZ_ASSERT(mPendingActions.IsEmpty());
++
++  csmInstance = nullptr;
++  //XXX mService = nullptr;
++}
++
 +void
 +ChromeStorageManager::Init()
 +{
 +  AssertIsOnBackgroundThread();
 +
++  // During the initialization process we create the IO thread and jump to
++  // the main thread to observe for xpcom-shutdown. Then we jump to the IO
++  // thread to open the DB and jump back to the PBackground thread with the
++  // DB connection reference.
++
 +  nsresult rv = NS_NewNamedThread("BSyncChIOThread", getter_AddRefs(mIOThread));
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return; }
 +
-+  RefPtr<InitRunnable> runnable = new InitRunnable(this);
-+  mIOThread->Dispatch(runnable, nsIThread::DISPATCH_NORMAL);
++  mShutdownObserver = new XPCOMShutdownObserver(this, mIOThread);
++  NS_WARNING_ASSERTION(NS_SUCCEEDED(NS_DispatchToMainThread(mShutdownObserver)),
++                       "Failed to dispatch runnable to main thread");
 +}
 +
 +void
@@ -1492,9 +1642,48 @@ new file mode 100644
 +}
 +
 +void
++ChromeStorageManager::Shutdown()
++{
++  AssertIsOnBackgroundThread();
++
++  // During the shutdown process we jump to the IO thread to close the DB.
++  // Then jump to the main thread to stop observing for xpcom-shutdown and
++  // to shutdown the IO thread. After that we jump back to the PBackground
++  // thread to clean up the rest of resources and close the door.
++
++  if (mShuttingDown) {
++    return;
++  }
++
++  mShuttingDown = true;
++
++  RefPtr<ShutdownRunnable> runnable =
++    new ShutdownRunnable(this, mDBConn, mShutdownObserver);
++  mIOThread->Dispatch(runnable, nsIThread::DISPATCH_NORMAL);
++  mDBConn = nullptr;
++}
++
++void
++ChromeStorageManager::FinishShutdown()
++{
++  AssertIsOnBackgroundThread();
++
++  mPendingActions.Clear();
++
++  nsCOMPtr<nsIThread> ioThread;
++  mIOThread.swap(ioThread);
++  MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(
++        NewRunnableMethod(ioThread, &nsIThread::Shutdown)));
++}
++
++void
 +ChromeStorageManager::ExecuteStorageAction(ChromeStorageAction* aAction)
 +{
 +  AssertIsOnBackgroundThread();
++
++  if (mShuttingDown) {
++    return;
++  }
 +
 +  if (!mDBConn) {
 +    mPendingActions.AppendElement(aAction);
@@ -1557,7 +1746,7 @@ diff --git a/dom/backgroundsync/ChromeStorageManager.h b/dom/backgroundsync/Chro
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/ChromeStorageManager.h
-@@ -0,0 +1,68 @@
+@@ -0,0 +1,78 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -1587,11 +1776,14 @@ new file mode 100644
 +
 +class ChromeStorageAction;
 +class Registration;
++class XPCOMShutdownObserver;
 +
 +class ChromeStorageManager final
 +{
-+  friend class InitRunnable;
++  friend class ContinueInitRunnable;
++  friend class ContinueShutdownRunnable;
 +  friend class StorageActionRunnable;
++  friend class XPCOMShutdownObserver;
 +
 +public:
 +  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(ChromeStorageManager)
@@ -1610,15 +1802,22 @@ new file mode 100644
 +  void Init();
 +  void OnInitialized(mozIStorageConnection* aConn);
 +
++  void Shutdown();
++  void FinishShutdown();
++
 +  void ExecuteStorageAction(ChromeStorageAction* aAction);
 +
 +  void OnRequestComplete(const nsID& aRequestId,
 +                         const SyncOpResponse& aResponse);
 +
++  RefPtr<XPCOMShutdownObserver> mShutdownObserver;
++
 +  nsCOMPtr<nsIThread> mIOThread;
 +  nsCOMPtr<mozIStorageConnection> mDBConn;
 +
 +  nsTArray<RefPtr<ChromeStorageAction>> mPendingActions;
++
++  bool mShuttingDown;
 +};
 +
 +} // namespace backgroundsync
