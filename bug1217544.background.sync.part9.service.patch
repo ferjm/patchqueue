@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  0783802689ad6f29a2dd30a1adc8f3ac92e144af
+# Parent  a77de1f88046eb98d729a56363ff1a0f8eea8a95
 Bug 1217544 - Implement one-off BackgroundSync API. Part 9: BackgroundSyncService. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSyncChild.cpp b/dom/backgroundsync/BackgroundSyncChild.cpp
@@ -1099,16 +1099,18 @@ new file mode 100644
 diff --git a/dom/backgroundsync/ChromeStorageManager.cpp b/dom/backgroundsync/ChromeStorageManager.cpp
 --- a/dom/backgroundsync/ChromeStorageManager.cpp
 +++ b/dom/backgroundsync/ChromeStorageManager.cpp
-@@ -269,18 +269,20 @@ private:
- };
- 
- NS_IMPL_ISUPPORTS(StorageActionRunnable, nsICancelableRunnable, nsIRunnable)
- 
- //-----------------------------------------------------------------------------
- // PBackground thread
+@@ -433,33 +433,35 @@ ChromeStorageManager::GetOrCreate()
+   RefPtr<ChromeStorageManager> instance = csmInstance;
+   if (!instance) {
+     instance = new ChromeStorageManager();
+   }
+   return instance.forget();
+ }
  
  ChromeStorageManager::ChromeStorageManager()
+-  : mShuttingDown(false)
 +  : mService(BackgroundSyncService::GetOrCreate())
++  , mShuttingDown(false)
  {
    AssertIsOnBackgroundThread();
 +  MOZ_ASSERT(mService);
@@ -1120,25 +1122,22 @@ diff --git a/dom/backgroundsync/ChromeStorageManager.cpp b/dom/backgroundsync/Ch
  {
    AssertIsOnBackgroundThread();
  
-@@ -293,16 +295,17 @@ ChromeStorageManager::~ChromeStorageMana
-   mPendingActions.Clear();
- 
-   nsCOMPtr<nsIThread> ioThread;
-   mIOThread.swap(ioThread);
-   MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(
-         NewRunnableMethod(ioThread, &nsIThread::Shutdown)));
+   MOZ_ASSERT(!mShutdownObserver);
+   MOZ_ASSERT(!mDBConn);
+   MOZ_ASSERT(mPendingActions.IsEmpty());
  
    csmInstance = nullptr;
+-  //XXX mService = nullptr;
 +  mService = nullptr;
  }
  
- // static
- already_AddRefed<ChromeStorageManager>
- ChromeStorageManager::GetOrCreate()
+ void
+ ChromeStorageManager::Init()
  {
    AssertIsOnBackgroundThread();
  
-@@ -389,15 +392,16 @@ ChromeStorageManager::GetAll(const nsID&
+   // During the initialization process we create the IO thread and jump to
+@@ -578,15 +580,16 @@ ChromeStorageManager::GetAll(const nsID&
    ExecuteStorageAction(action);
  }
  
@@ -1159,9 +1158,9 @@ diff --git a/dom/backgroundsync/ChromeStorageManager.cpp b/dom/backgroundsync/Ch
 diff --git a/dom/backgroundsync/ChromeStorageManager.h b/dom/backgroundsync/ChromeStorageManager.h
 --- a/dom/backgroundsync/ChromeStorageManager.h
 +++ b/dom/backgroundsync/ChromeStorageManager.h
-@@ -50,16 +50,18 @@ private:
-   void Init();
-   void OnInitialized(mozIStorageConnection* aConn);
+@@ -56,16 +56,18 @@ private:
+   void Shutdown();
+   void FinishShutdown();
  
    void ExecuteStorageAction(ChromeStorageAction* aAction);
  
@@ -1170,14 +1169,14 @@ diff --git a/dom/backgroundsync/ChromeStorageManager.h b/dom/backgroundsync/Chro
  
 +  RefPtr<BackgroundSyncService> mService;
 +
+   RefPtr<XPCOMShutdownObserver> mShutdownObserver;
+ 
    nsCOMPtr<nsIThread> mIOThread;
    nsCOMPtr<mozIStorageConnection> mDBConn;
  
    nsTArray<RefPtr<ChromeStorageAction>> mPendingActions;
- };
  
- } // namespace backgroundsync
- } // namespace dom
+   bool mShuttingDown;
 diff --git a/dom/backgroundsync/StorageManager.cpp b/dom/backgroundsync/StorageManager.cpp
 --- a/dom/backgroundsync/StorageManager.cpp
 +++ b/dom/backgroundsync/StorageManager.cpp
