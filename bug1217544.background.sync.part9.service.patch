@@ -270,7 +270,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncService.cpp
-@@ -0,0 +1,689 @@
+@@ -0,0 +1,687 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -457,21 +457,23 @@ new file mode 100644
 +// ----------------------------------------------------------------------------
 +// ChromeStorageManager
 +
-+void
-+BackgroundSyncService::AddChromeStorageManagerRef(
-+    const nsID& aRequestId, ChromeStorageManager* aChromeStorageManager)
++BackgroundSyncService::AddChromeStorageRequest(const nsID& aRequestId)
 +{
 +  AssertIsOnBackgroundThread();
 +
-+  mChromeStorageManagers.Put(aRequestId, aChromeStorageManager);
++  mPendingChromeStorageRequest.AppendElement(aRequestId);
 +}
 +
 +void
-+BackgroundSyncService::ReleaseChromeStorageManagerRef(const nsID& aRequestId)
++BackgroundSyncService::RemoveChromeStorageRequest(const nsID& aRequestId)
 +{
 +  AssertIsOnBackgroundThread();
 +
-+  mChromeStorageManagers.Remove(aRequestId);
++  mPendingChromeStorageRequest.RemoveElement(aRequestId);
++
++  if (mPendingChromeStorageRequest.IsEmpty()) {
++    MaybeShutdown();
++  }
 +}
 +
 +// ----------------------------------------------------------------------------
@@ -489,11 +491,11 @@ new file mode 100644
 +
 +BackgroundSyncService::~BackgroundSyncService()
 +{
-+  AssertIsOnBackgroundThread();
 +  MOZ_ASSERT(sInstance == this);
 +  MOZ_ASSERT(mBackgroundSyncActors.Length() == 0);
 +  MOZ_ASSERT(mStorageManagers.Count() == 0);
-+  MOZ_ASSERT(mChromeStorageManagers.Count() == 0);
++  MOZ_ASSERT(!mChromeStorageManager);
++  MOZ_ASSERT(mPendingChromeStorageRequest.IsEmpty());
 +  MOZ_ASSERT(!mOnlineStateObserver);
 +
 +  sInstance = nullptr;
@@ -517,6 +519,7 @@ new file mode 100644
 +BackgroundSyncService::Init()
 +{
 +  mOnlineStateObserver = OnlineStateObserver::Init(this);
++  mChromeStorageManager = ChromeStorageManager::GetOrCreate();
 +}
 +
 +void
@@ -527,9 +530,11 @@ new file mode 100644
 +  if (mBackgroundSyncActors.Length() == 0 &&
 +      mServiceWorkerManagerActors.Length() == 0 &&
 +      mStorageManagers.Count() == 0 &&
-+      mChromeStorageManagers.Count() == 0) {
++      mPendingChromeStorageRequest.IsEmpty()) {
 +    mOnlineStateObserver->Shutdown(this);
 +    mOnlineStateObserver = nullptr;
++    mChromeStorageManager->Shutdown();
++    mChromeStorageManager = nullptr;
 +  }
 +}
 +
@@ -694,12 +699,10 @@ new file mode 100644
 +      // it in the 'origins' db before we can release the StorageManager and
 +      // progress the response to the DOM side.
 +      if (aResponse.get_SyncRegisterResponse().mFirstRegistration()) {
-+        RefPtr<ChromeStorageManager> manager =
-+          ChromeStorageManager::GetOrCreate();
-+        AddChromeStorageManagerRef(aRequestId, manager);
-+        manager->Register(aRequestId,
++        AddChromeStorageRequest(aRequestId);
++        mChromeStorageManager->Register(aRequestId,
 +            aResponse.get_SyncRegisterResponse().mRegistration());
-+        return;
++        break;
 +      }
 +      // If this is not the first registration for this origin, we can
 +      // directly try to trigger the sync event.
@@ -719,11 +722,8 @@ new file mode 100644
 +        // this origin. If that's the case, we need to remove that origin from
 +        // the 'origins' DB before we can progress the response to the DOM side.
 +        if (!origin.IsEmpty()) {
-+          RefPtr<ChromeStorageManager> manager =
-+            ChromeStorageManager::GetOrCreate();
-+          AddChromeStorageManagerRef(aRequestId, manager);
-+          manager->Unregister(aRequestId, origin);
-+          return;
++          AddChromeStorageRequest(aRequestId);
++          mChromeStorageManager->Unregister(aRequestId, origin);
 +        }
 +      }
 +      break;
@@ -732,7 +732,7 @@ new file mode 100644
 +        // If we went offline while getting the origins, we don't care about
 +        // getting the sync registrations anymore, so we bail out here.
 +        if (mOnlineState !=  OnlineStateObserver::eOnline) {
-+          return;
++          break;
 +        }
 +
 +        // If we are still online, we need to get the list of sync registrations
@@ -756,7 +756,7 @@ new file mode 100644
 +        // useless to continue, as no sync event will be triggered for these
 +        // registrations. So we just bail out here.
 +        if (mOnlineState !=  OnlineStateObserver::eOnline) {
-+          return;
++          break;
 +        }
 +
 +        // If we are still online, we try to trigger a sync event per each
@@ -774,7 +774,7 @@ new file mode 100644
 +        Registration registration =
 +          aResponse.get_SyncChangeStateResponse().mRegistration();
 +        if (registration.mState() != RegistrationState::eFiring) {
-+          return;
++          break;
 +        }
 +
 +        // If we changed the state to eFiring, that means that we are trying to
@@ -789,7 +789,7 @@ new file mode 100644
 +                               RegistrationState::ePending)));
 +          NS_WARNING_ASSERTION(NS_SUCCEEDED(NS_DispatchToMainThread(runnable)),
 +                               "NS_DispatchToMainThread failed");
-+          return;
++          break;
 +        }
 +
 +        ContinueTriggeringSyncEvent(registration);
@@ -806,8 +806,8 @@ new file mode 100644
 +    Response(actorId, aRequestId, aResponse);
 +  } else {
 +    // Otherwise, this is a response to an internal request and we just need to
-+    // release the associated ChromeStorageManager reference.
-+    ReleaseChromeStorageManagerRef(aRequestId);
++    // remove the request from the pending request list.
++    RemoveChromeStorageRequest(aRequestId);
 +  }
 +}
 +
@@ -904,10 +904,8 @@ new file mode 100644
 +    return;
 +  }
 +
-+  RefPtr<ChromeStorageManager> manager = ChromeStorageManager::GetOrCreate();
-+  AddChromeStorageManagerRef(id, manager);
-+
-+  manager->GetAll(id);
++  AddChromeStorageRequest(id);
++  mChromeStorageManager->GetAll(id);
 +}
 +
 +// --------------------------------------------------------------------------
@@ -964,7 +962,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.h b/dom/backgroundsync/Bac
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncService.h
-@@ -0,0 +1,131 @@
+@@ -0,0 +1,129 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -1062,13 +1060,11 @@ new file mode 100644
 +  // --------------------------------------------------------------------------
 +  // ChromeStorageManager
 +
-+  void AddChromeStorageManagerRef(const nsID& aRequestId,
-+                                  ChromeStorageManager* aChromeStorageManager);
-+  void ReleaseChromeStorageManagerRef(const nsID& aRequestId);
++  RefPtr<ChromeStorageManager> mChromeStorageManager;
++  nsTArray<nsID> mPendingChromeStorageRequest;
 +
-+  // References to the ChromeStorageManager managing the system principal
-+  // storage.
-+  nsRefPtrHashtable<nsIDHashKey, ChromeStorageManager> mChromeStorageManagers;
++  void AddChromeStorageRequest(const nsID& aRequestId);
++  void RemoveChromeStorageRequest(const nsID& aRequestId);
 +
 +  // --------------------------------------------------------------------------
 +  // OnlineStateObserver::Listener method
@@ -1155,7 +1151,25 @@ diff --git a/dom/backgroundsync/ChromeStorageManager.cpp b/dom/backgroundsync/Ch
 diff --git a/dom/backgroundsync/ChromeStorageManager.h b/dom/backgroundsync/ChromeStorageManager.h
 --- a/dom/backgroundsync/ChromeStorageManager.h
 +++ b/dom/backgroundsync/ChromeStorageManager.h
-@@ -56,16 +56,18 @@ private:
+@@ -26,16 +26,17 @@ namespace dom {
+ namespace backgroundsync {
+ 
+ class ChromeStorageAction;
+ class Registration;
+ class XPCOMShutdownObserver;
+ 
+ class ChromeStorageManager final
+ {
++  friend class BackgroundSyncService;
+   friend class ContinueInitRunnable;
+   friend class ContinueShutdownRunnable;
+   friend class StorageActionRunnable;
+   friend class XPCOMShutdownObserver;
+ 
+ public:
+   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(ChromeStorageManager)
+ 
+@@ -56,16 +57,18 @@ private:
    void Shutdown();
    void FinishShutdown();
  
