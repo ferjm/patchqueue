@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  a77de1f88046eb98d729a56363ff1a0f8eea8a95
+# Parent  cde64c74326865bb4dac0ccc8efaa914d1670b4d
 Bug 1217544 - Implement one-off BackgroundSync API. Part 9: BackgroundSyncService. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSyncChild.cpp b/dom/backgroundsync/BackgroundSyncChild.cpp
@@ -1099,7 +1099,7 @@ new file mode 100644
 diff --git a/dom/backgroundsync/ChromeStorageManager.cpp b/dom/backgroundsync/ChromeStorageManager.cpp
 --- a/dom/backgroundsync/ChromeStorageManager.cpp
 +++ b/dom/backgroundsync/ChromeStorageManager.cpp
-@@ -433,33 +433,35 @@ ChromeStorageManager::GetOrCreate()
+@@ -428,30 +428,33 @@ ChromeStorageManager::GetOrCreate()
    RefPtr<ChromeStorageManager> instance = csmInstance;
    if (!instance) {
      instance = new ChromeStorageManager();
@@ -1120,14 +1120,11 @@ diff --git a/dom/backgroundsync/ChromeStorageManager.cpp b/dom/backgroundsync/Ch
  
  ChromeStorageManager::~ChromeStorageManager()
  {
-   AssertIsOnBackgroundThread();
- 
    MOZ_ASSERT(!mShutdownObserver);
    MOZ_ASSERT(!mDBConn);
    MOZ_ASSERT(mPendingActions.IsEmpty());
  
    csmInstance = nullptr;
--  //XXX mService = nullptr;
 +  mService = nullptr;
  }
  
@@ -1137,7 +1134,7 @@ diff --git a/dom/backgroundsync/ChromeStorageManager.cpp b/dom/backgroundsync/Ch
    AssertIsOnBackgroundThread();
  
    // During the initialization process we create the IO thread and jump to
-@@ -578,15 +580,16 @@ ChromeStorageManager::GetAll(const nsID&
+@@ -572,15 +575,16 @@ ChromeStorageManager::GetAll(const nsID&
    ExecuteStorageAction(action);
  }
  
