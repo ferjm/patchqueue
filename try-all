@@ -1,27 +1,5 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  60ee3ed9655850c04b2f7fa821df05aed1dd1f13
-try: -b do -p linux -u all -t none
+# Parent  2d647d0113f9719cf01fc2ac2dcbe050ca6cc4b8
+try: -b do -p all -u all -t none
 
-diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
---- a/dom/backgroundsync/BackgroundSync.cpp
-+++ b/dom/backgroundsync/BackgroundSync.cpp
-@@ -331,17 +331,17 @@ public:
-       mManager->Shutdown();
-     }
-     return true;
-   }
- 
- private:
-   ~BackgroundSyncHolder()
-   {
--    MOZ_COUNT_CTOR(BackgroundSyncHolder);
-+    MOZ_COUNT_DTOR(BackgroundSyncHolder);
-   }
- };
- 
- // BackgroundSync
- 
- // static
- already_AddRefed<BackgroundSync>
- BackgroundSync::CreateOnMainThread(nsIGlobalObject* aGlobal,
