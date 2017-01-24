@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  1ec5885b072639a13f63c64fcc6f9e2ac45131d2
+# Parent  41508c83a610de0b0e0386ef3aa135a6ef8b63a4
 Bug 1217544 - Implement one-off BackgroundSync API. Part 3: IPC. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
@@ -149,7 +149,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
 +private:
 +  ~BackgroundSyncHolder()
 +  {
-+    MOZ_COUNT_CTOR(BackgroundSyncHolder);
++    MOZ_COUNT_DTOR(BackgroundSyncHolder);
 +  }
 +};
 +
