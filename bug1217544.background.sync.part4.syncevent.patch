@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  957a3725171e40406bac0a8d059110a8a068f270
+# Parent  f7cd4ce4c9ec7ce70bea1a8c167f4698806b59ce
 Bug 1217544 - Implement one-off BackgroundSync API. Part 4: Sync event. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
@@ -226,7 +226,7 @@ diff --git a/dom/bindings/Bindings.conf b/dom/bindings/Bindings.conf
 diff --git a/dom/interfaces/base/nsIServiceWorkerManager.idl b/dom/interfaces/base/nsIServiceWorkerManager.idl
 --- a/dom/interfaces/base/nsIServiceWorkerManager.idl
 +++ b/dom/interfaces/base/nsIServiceWorkerManager.idl
-@@ -213,19 +213,23 @@ interface nsIServiceWorkerManager : nsIS
+@@ -215,19 +215,23 @@ interface nsIServiceWorkerManager : nsIS
                                    in AString aBehavior);
  
    [optional_argc] void sendPushEvent(in ACString aOriginAttributes,
@@ -301,18 +301,12 @@ diff --git a/dom/webidl/moz.build b/dom/webidl/moz.build
 diff --git a/dom/workers/PServiceWorkerManager.ipdl b/dom/workers/PServiceWorkerManager.ipdl
 --- a/dom/workers/PServiceWorkerManager.ipdl
 +++ b/dom/workers/PServiceWorkerManager.ipdl
-@@ -28,18 +28,22 @@ parent:
-   async PropagateRemove(nsCString host);
- 
-   async PropagateRemoveAll();
- 
+@@ -32,14 +32,17 @@ parent:
    async Shutdown();
  
  child:
    async NotifyRegister(ServiceWorkerRegistrationData data);
--  async NotifySoftUpdate(PrincipalOriginAttributes originAttributes, nsString scope);
-+  async NotifySoftUpdate(PrincipalOriginAttributes originAttributes,
-+                         nsString scope);
+   async NotifySoftUpdate(OriginAttributes originAttributes, nsString scope);
    async NotifyUnregister(PrincipalInfo principalInfo, nsString scope);
    async NotifyRemove(nsCString host);
    async NotifyRemoveAll();
@@ -329,7 +323,7 @@ diff --git a/dom/workers/PServiceWorkerManager.ipdl b/dom/workers/PServiceWorker
 diff --git a/dom/workers/ServiceWorkerEvents.cpp b/dom/workers/ServiceWorkerEvents.cpp
 --- a/dom/workers/ServiceWorkerEvents.cpp
 +++ b/dom/workers/ServiceWorkerEvents.cpp
-@@ -1006,17 +1006,17 @@ ExtractBytesFromData(const OwningArrayBu
+@@ -1010,17 +1010,17 @@ ExtractBytesFromData(const OwningArrayBu
      return NS_OK;
    }
    if (aDataInit.IsUSVString()) {
@@ -348,7 +342,7 @@ diff --git a/dom/workers/ServiceWorkerEvents.cpp b/dom/workers/ServiceWorkerEven
  PushMessageData::~PushMessageData()
  {
  }
-@@ -1148,16 +1148,50 @@ NS_INTERFACE_MAP_END_INHERITING(Extendab
+@@ -1152,16 +1152,50 @@ NS_INTERFACE_MAP_END_INHERITING(Extendab
  NS_IMPL_CYCLE_COLLECTION_INHERITED(PushEvent, ExtendableEvent, mData)
  
  JSObject*
@@ -486,7 +480,7 @@ diff --git a/dom/workers/ServiceWorkerEvents.h b/dom/workers/ServiceWorkerEvents
 diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
 --- a/dom/workers/ServiceWorkerManager.cpp
 +++ b/dom/workers/ServiceWorkerManager.cpp
-@@ -1025,16 +1025,42 @@ ServiceWorkerManager::SendNotificationCl
+@@ -1103,16 +1103,42 @@ ServiceWorkerManager::SendNotificationCl
                                                   const nsAString& aBehavior)
  {
    return SendNotificationEvent(NS_LITERAL_STRING(NOTIFICATION_CLOSE_EVENT_NAME),
@@ -501,7 +495,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
 +                                              const bool aLastChance)
 +{
 +  nsAutoCString originNoSuffix;
-+  PrincipalOriginAttributes attrs;
++  OriginAttributes attrs;
 +  if (!attrs.PopulateFromOrigin(aOrigin, originNoSuffix)) {
 +    return NS_ERROR_INVALID_ARG;
 +  }
@@ -532,12 +526,12 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
 diff --git a/dom/workers/ServiceWorkerManagerChild.cpp b/dom/workers/ServiceWorkerManagerChild.cpp
 --- a/dom/workers/ServiceWorkerManagerChild.cpp
 +++ b/dom/workers/ServiceWorkerManagerChild.cpp
-@@ -90,11 +90,40 @@ ServiceWorkerManagerChild::RecvNotifyRem
- 
+@@ -97,11 +97,40 @@ ServiceWorkerManagerChild::RecvNotifyRem
    RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
-   MOZ_ASSERT(swm);
+   if (swm) {
+     swm->RemoveAll();
+   }
  
-   swm->RemoveAll();
    return IPC_OK();
  }
  
@@ -601,7 +595,7 @@ diff --git a/dom/workers/ServiceWorkerManagerChild.h b/dom/workers/ServiceWorker
 diff --git a/dom/workers/ServiceWorkerPrivate.cpp b/dom/workers/ServiceWorkerPrivate.cpp
 --- a/dom/workers/ServiceWorkerPrivate.cpp
 +++ b/dom/workers/ServiceWorkerPrivate.cpp
-@@ -1768,16 +1768,102 @@ ServiceWorkerPrivate::SendFetchEvent(nsI
+@@ -1766,16 +1766,102 @@ ServiceWorkerPrivate::SendFetchEvent(nsI
  
    if (NS_WARN_IF(!r->Dispatch())) {
      return NS_ERROR_FAILURE;
@@ -752,7 +746,7 @@ diff --git a/dom/workers/ServiceWorkerPrivate.h b/dom/workers/ServiceWorkerPriva
 diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWorkerRegistration.cpp
 --- a/dom/workers/ServiceWorkerRegistration.cpp
 +++ b/dom/workers/ServiceWorkerRegistration.cpp
-@@ -897,17 +897,17 @@ ServiceWorkerRegistrationMainThread::Get
+@@ -900,17 +900,17 @@ ServiceWorkerRegistrationMainThread::Get
  
      nsCOMPtr<nsIPrincipal> principal = document->NodePrincipal();
      if (!principal) {
@@ -771,7 +765,7 @@ diff --git a/dom/workers/ServiceWorkerRegistration.cpp b/dom/workers/ServiceWork
  ////////////////////////////////////////////////////
  // Worker Thread implementation
  
-@@ -1417,17 +1417,17 @@ ServiceWorkerRegistrationWorkerThread::G
+@@ -1351,17 +1351,17 @@ ServiceWorkerRegistrationWorkerThread::G
    return ret.forget();
  }
  
