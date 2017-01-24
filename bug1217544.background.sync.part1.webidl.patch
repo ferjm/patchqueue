@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  158fc2a37dc65ed5be641ac1410e13da77dcb829
+# Parent  bcbb1d8a9e232ed5c16076f8392c925c95f1b4d5
 Bug 1217544 - Implement one-off BackgroundSync API. Part 1: BackgroundSync interface. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
@@ -291,7 +291,7 @@ diff --git a/dom/bindings/Bindings.conf b/dom/bindings/Bindings.conf
 diff --git a/dom/moz.build b/dom/moz.build
 --- a/dom/moz.build
 +++ b/dom/moz.build
-@@ -33,16 +33,17 @@ interfaces = [
+@@ -32,16 +32,17 @@ interfaces = [
  ]
  
  DIRS += ['interfaces/' + i for i in interfaces]
@@ -306,9 +306,9 @@ diff --git a/dom/moz.build b/dom/moz.build
      'browser-element',
      'cache',
      'canvas',
+     'commandhandler',
      'crypto',
      'devicestorage',
-     'encoding',
 diff --git a/dom/tests/mochitest/general/test_interfaces.html b/dom/tests/mochitest/general/test_interfaces.html
 --- a/dom/tests/mochitest/general/test_interfaces.html
 +++ b/dom/tests/mochitest/general/test_interfaces.html
