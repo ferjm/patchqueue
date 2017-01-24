@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  27c048949db9d6d0a617792d9b9a05f70a8da251
+# Parent  4a5103ca8fea9b056c1f8ecf71b1113d104cd728
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: Storage. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
@@ -1615,8 +1615,8 @@ new file mode 100644
 +  if (NS_WARN_IF(NS_FAILED(rv))) { return; }
 +
 +  mShutdownObserver = new XPCOMShutdownObserver(this, mIOThread);
-+  NS_WARNING_ASSERTION(NS_SUCCEEDED(NS_DispatchToMainThread(mShutdownObserver)),
-+                       "Failed to dispatch runnable to main thread");
++  rv = NS_DispatchToMainThread(mShutdownObserver);
++  NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "Failed dispatching to main thread");
 +}
 +
 +void
