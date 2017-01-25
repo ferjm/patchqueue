@@ -1265,7 +1265,7 @@ new file mode 100644
 +    return rv;
 +  }
 +
-+  NS_IMETHODIMP
++  nsresult
 +  Cancel() override
 +  {
 +    return NS_OK;
@@ -1387,7 +1387,7 @@ new file mode 100644
 +    return NS_OK;
 +  }
 +
-+  NS_IMETHODIMP
++  nsresult
 +  Cancel() override
 +  {
 +    return NS_OK;
@@ -1440,7 +1440,7 @@ new file mode 100644
 +    return NS_OK;
 +  }
 +
-+  NS_IMETHODIMP
++  nsresult
 +  Cancel() override
 +  {
 +    return NS_OK;
@@ -1526,7 +1526,7 @@ new file mode 100644
 +    return rv;
 +  }
 +
-+  NS_IMETHODIMP
++  nsresult
 +  Cancel() override
 +  {
 +    return NS_OK;
