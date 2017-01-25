@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  4a5103ca8fea9b056c1f8ecf71b1113d104cd728
+# Parent  1a56115902523c70225172304f680e4d9742ce29
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: Storage. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
@@ -24,30 +24,8 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
  #include "mozilla/Preferences.h"
  #include "nsISupportsPrimitives.h"
  #include "nsIGlobalObject.h"
-@@ -48,44 +47,241 @@ public:
- 
-   void SetActor(BackgroundSyncChild* aActor)
-   {
-     MOZ_ASSERT(!mActor);
-     MOZ_ASSERT(aActor);
-     mActor = aActor;
-   }
- 
--  NS_IMETHOD Run() override
-+  NS_IMETHOD
-+  Run() override
-   {
-     MOZ_ASSERT(mActor);
-     if (mActor->IsActorDestroyed()) {
-       return NS_OK;
-     }
- 
-     return mActor->ExecuteOp(mPromise, mOp);
-   }
- 
--  NS_IMETHOD Cancel() override
-+  NS_IMETHOD
-+  Cancel() override
+@@ -66,26 +65,219 @@ public:
+   nsresult Cancel() override
    {
      mActor = nullptr;
      mPromise = nullptr;
@@ -199,8 +177,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
 +   * back on the worker thread to continue with the execution of the sync
 +   * operation.
 +   */
-+  NS_IMETHOD
-+  Run() override
++  NS_IMETHOD Run() override
 +  {
 +    if (NS_IsMainThread()) {
 +      Execute();
@@ -215,8 +192,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
 +    return NS_OK;
 +  }
 +
-+  NS_IMETHOD
-+  Cancel() override
++  nsresult Cancel() override
 +  {
 +    return NS_OK;
 +  }
@@ -268,7 +244,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
  
    explicit TeardownRunnable(BackgroundSyncChild* aActor)
      : mActor(aActor)
-@@ -335,17 +531,18 @@ BackgroundSync::ActorCreated(PBackground
+@@ -335,17 +527,18 @@ BackgroundSync::ActorCreated(PBackground
    MOZ_ASSERT(IsBackgroundSyncThread());
    MOZ_ASSERT(aActor);
    MOZ_ASSERT(!mActor);
@@ -288,7 +264,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
      RefPtr<SyncOpRunnable> runnable = mPendingOperations[i];
      MOZ_ASSERT(runnable);
      runnable->SetActor(mActor);
-@@ -383,65 +580,112 @@ BackgroundSync::Observe(nsISupports* aSu
+@@ -383,65 +576,112 @@ BackgroundSync::Observe(nsISupports* aSu
      }
    }
  
@@ -4148,7 +4124,7 @@ diff --git a/dom/quota/ActorsParent.cpp b/dom/quota/ActorsParent.cpp
  #include "mozilla/ipc/BackgroundParent.h"
  #include "mozilla/ipc/BackgroundUtils.h"
  #include "mozilla/IntegerRange.h"
-@@ -3140,25 +3141,27 @@ QuotaManager::Init(const nsAString& aBas
+@@ -3173,25 +3174,27 @@ QuotaManager::Init(const nsAString& aBas
    // Make a timer here to avoid potential failures later. We don't actually
    // initialize the timer until shutdown.
    mShutdownTimer = do_CreateInstance(NS_TIMER_CONTRACTID);
