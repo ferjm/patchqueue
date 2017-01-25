@@ -7,3 +7,6 @@ ebe0042e96b91a41a95aa090f7b3954839020687:bug1217544.background.sync.part5.quotac
 8b9e5550c9d0fe277523ebe02d7fa44ea5ccbcf5:bug1217544.background.sync.part7.managerid.patch
 1c4eb9fbf138099d58bbacb0da858949530b13eb:bug1217544.background.sync.part8.onlineobserver.patch
 0d08107803112d068733ce2816105002ee985e50:bug1217544.background.sync.part9.service.patch
+7db13039c21913f6f80b833f8c236c3a0819c512:bug1217544.background.sync.tests.patch
+d22192045072cc18bdc360445c8a23681483ef6e:bug1300844.cache.quotaclient.helpers.patch
+f169c98a2000f78a8d00c5db7f29139e83bb86f4:bug1308447.cache.mozstorage.common.patch

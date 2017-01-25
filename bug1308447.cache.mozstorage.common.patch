@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  6991edf9ce52fbe77ff13f54c813ddad8658c14b
+# Parent  d22192045072cc18bdc360445c8a23681483ef6e
 Bug 1308447 - Use mozStorageConnectionUtils and IncrementalVacuumConnection in dom/cache. r=bkelly
 
 diff --git a/dom/cache/Connection.h b/dom/cache/Connection.h
@@ -744,7 +744,7 @@ diff --git a/dom/cache/DBSchema.cpp b/dom/cache/DBSchema.cpp
 -      }
 -    }
 -
--#if !defined(RELEASE_OR_BETA)
+-#if defined(DEBUG) || !defined(RELEASE_OR_BETA)
 -    int32_t lastVersion = currentVersion;
 -#endif
 -    rv = aConn->GetSchemaVersion(&currentVersion);
