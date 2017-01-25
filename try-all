@@ -1,5 +1,5 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  2d647d0113f9719cf01fc2ac2dcbe050ca6cc4b8
-try: -b do -p all -u all -t none
+# Parent  0ff7cfaa19bf4a8c05807a1bc64ab82d53745330
+try: -b do -p win32,win32-clang,win64,win64-clang -u all -t none
 
