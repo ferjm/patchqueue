@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  1c4eb9fbf138099d58bbacb0da858949530b13eb
+# Parent  a2596f0d54259d42f8bd3dbab063ac9a5d673987
 Bug 1217544 - Implement one-off BackgroundSync API. Part 9: BackgroundSyncService. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSyncChild.cpp b/dom/backgroundsync/BackgroundSyncChild.cpp
@@ -382,7 +382,7 @@ new file mode 100644
 +    return NS_OK;
 +  }
 +
-+  NS_IMETHOD
++  nsresult
 +  Cancel() override
 +  {
 +    return NS_OK;
