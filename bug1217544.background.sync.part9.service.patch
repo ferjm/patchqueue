@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  def1db8463269371a6ebdaf8eb2666b24de5b94a
+# Parent  1c4eb9fbf138099d58bbacb0da858949530b13eb
 Bug 1217544 - Implement one-off BackgroundSync API. Part 9: BackgroundSyncService. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSyncChild.cpp b/dom/backgroundsync/BackgroundSyncChild.cpp
@@ -1669,12 +1669,12 @@ diff --git a/dom/backgroundsync/moz.build b/dom/backgroundsync/moz.build
 diff --git a/dom/workers/PServiceWorkerManager.ipdl b/dom/workers/PServiceWorkerManager.ipdl
 --- a/dom/workers/PServiceWorkerManager.ipdl
 +++ b/dom/workers/PServiceWorkerManager.ipdl
-@@ -33,17 +33,17 @@ parent:
+@@ -32,17 +32,17 @@ parent:
+   async Shutdown();
  
  child:
    async NotifyRegister(ServiceWorkerRegistrationData data);
-   async NotifySoftUpdate(PrincipalOriginAttributes originAttributes,
-                          nsString scope);
+   async NotifySoftUpdate(OriginAttributes originAttributes, nsString scope);
    async NotifyUnregister(PrincipalInfo principalInfo, nsString scope);
    async NotifyRemove(nsCString host);
    async NotifyRemoveAll();
@@ -1691,7 +1691,7 @@ diff --git a/dom/workers/PServiceWorkerManager.ipdl b/dom/workers/PServiceWorker
 diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
 --- a/dom/workers/ServiceWorkerManager.cpp
 +++ b/dom/workers/ServiceWorkerManager.cpp
-@@ -1032,17 +1032,17 @@ ServiceWorkerManager::SendNotificationCl
+@@ -1110,17 +1110,17 @@ ServiceWorkerManager::SendNotificationCl
  NS_IMETHODIMP
  ServiceWorkerManager::SendBackgroundSyncEvent(const nsACString& aOrigin,
                                                const nsACString& aScope,
@@ -1699,7 +1699,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
                                                const bool aLastChance)
  {
    nsAutoCString originNoSuffix;
-   PrincipalOriginAttributes attrs;
+   OriginAttributes attrs;
 -  if (!attrs.PopulateFromOrigin(aOrigin, originNoSuffix)) {
 +  if (NS_WARN_IF(!attrs.PopulateFromOrigin(aOrigin, originNoSuffix))) {
      return NS_ERROR_INVALID_ARG;
@@ -1713,10 +1713,10 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
 diff --git a/dom/workers/ServiceWorkerManagerChild.cpp b/dom/workers/ServiceWorkerManagerChild.cpp
 --- a/dom/workers/ServiceWorkerManagerChild.cpp
 +++ b/dom/workers/ServiceWorkerManagerChild.cpp
-@@ -92,38 +92,27 @@ ServiceWorkerManagerChild::RecvNotifyRem
-   MOZ_ASSERT(swm);
+@@ -99,38 +99,27 @@ ServiceWorkerManagerChild::RecvNotifyRem
+     swm->RemoveAll();
+   }
  
-   swm->RemoveAll();
    return IPC_OK();
  }
  
@@ -1795,7 +1795,7 @@ diff --git a/dom/workers/ServiceWorkerManagerParent.cpp b/dom/workers/ServiceWor
  #include "mozilla/ipc/BackgroundUtils.h"
  #include "mozilla/Unused.h"
  #include "nsThreadUtils.h"
-@@ -145,21 +146,23 @@ private:
+@@ -155,21 +156,23 @@ private:
    PrincipalInfo mPrincipalInfo;
    RefPtr<Runnable> mCallback;
    nsCOMPtr<nsIThread> mBackgroundThread;
@@ -1821,11 +1821,11 @@ diff --git a/dom/workers/ServiceWorkerManagerParent.cpp b/dom/workers/ServiceWor
  }
  
  mozilla::ipc::IPCResult
-@@ -231,87 +234,96 @@ ServiceWorkerManagerParent::RecvUnregist
+@@ -241,87 +244,96 @@ ServiceWorkerManagerParent::RecvUnregist
  }
  
  mozilla::ipc::IPCResult
- ServiceWorkerManagerParent::RecvPropagateSoftUpdate(const PrincipalOriginAttributes& aOriginAttributes,
+ ServiceWorkerManagerParent::RecvPropagateSoftUpdate(const OriginAttributes& aOriginAttributes,
                                                      const nsString& aScope)
  {
    AssertIsOnBackgroundThread();
@@ -1938,7 +1938,7 @@ diff --git a/dom/workers/ServiceWorkerManagerParent.h b/dom/workers/ServiceWorke
 +++ b/dom/workers/ServiceWorkerManagerParent.h
 @@ -13,16 +13,21 @@ namespace mozilla {
  
- class PrincipalOriginAttributes;
+ class OriginAttributes;
  
  namespace ipc {
  class BackgroundParentImpl;
