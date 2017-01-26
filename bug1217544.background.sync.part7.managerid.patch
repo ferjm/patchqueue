@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  1a56115902523c70225172304f680e4d9742ce29
+# Parent  a2d5d8f11b60b48de7fa6187f95cb22ae4458a1f
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: Storage. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
@@ -865,7 +865,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncTypes.h b/dom/backgroundsync/Backg
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncTypes.h
-@@ -0,0 +1,44 @@
+@@ -0,0 +1,39 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -874,11 +874,6 @@ new file mode 100644
 +
 +#ifndef mozilla_dom_BackgroundSyncTypes_h
 +#define mozilla_dom_BackgroundSyncTypes_h
-+
-+#include <stdint.h>
-+#include "nsCOMPtr.h"
-+#include "nsIFile.h"
-+#include "nsString.h"
 +
 +namespace mozilla {
 +namespace dom {
