@@ -1,5 +1,30 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
 # Parent  3fadaa78105c538723e3e298a295070103451c1e
-try: -b do -p android-api-15,android-api-15-gradle-dependencies,android-api-15-frontend,android-x86 -u all -t none
+try: -b o -p win32 -u none -t none
 
+diff --git a/dom/backgroundsync/BackgroundSyncTypes.h b/dom/backgroundsync/BackgroundSyncTypes.h
+--- a/dom/backgroundsync/BackgroundSyncTypes.h
++++ b/dom/backgroundsync/BackgroundSyncTypes.h
+@@ -2,21 +2,16 @@
+ /* vim: set ts=8 sts=2 et sw=2 tw=80: */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #ifndef mozilla_dom_BackgroundSyncTypes_h
+ #define mozilla_dom_BackgroundSyncTypes_h
+ 
+-#include <stdint.h>
+-#include "nsCOMPtr.h"
+-#include "nsIFile.h"
+-#include "nsString.h"
+-
+ namespace mozilla {
+ namespace dom {
+ namespace backgroundsync {
+ 
+ enum RegistrationState
+ {
+   ePending = 1,
+   eWaiting,
