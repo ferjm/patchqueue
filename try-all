@@ -1,181 +1,70 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  3fadaa78105c538723e3e298a295070103451c1e
+# Parent  a2533bc01797f092eb09397d5153ebbc31c7e1b2
 try: -b o -p win32 -u none -t none
 
-diff --git a/dom/backgroundsync/BackgroundSyncChild.cpp b/dom/backgroundsync/BackgroundSyncChild.cpp
---- a/dom/backgroundsync/BackgroundSyncChild.cpp
-+++ b/dom/backgroundsync/BackgroundSyncChild.cpp
-@@ -1,16 +1,17 @@
- /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
+--- a/dom/backgroundsync/BackgroundSync.cpp
++++ b/dom/backgroundsync/BackgroundSync.cpp
+@@ -2,16 +2,17 @@
  /* vim: set ts=8 sts=2 et sw=2 tw=80: */
  /* This Source Code Form is subject to the terms of the Mozilla Public
   * License, v. 2.0. If a copy of the MPL was not distributed with this file,
   * You can obtain one at http://mozilla.org/MPL/2.0/. */
  
+ #include "BackgroundSync.h"
  #include "BackgroundSyncChild.h"
  
-+#include "mozilla/dom/Promise.h"
- #include "mozilla/Unused.h"
- #include "mozilla/ipc/PBackgroundChild.h"
- #include "nsContentUtils.h"
- 
- namespace mozilla {
- 
- using namespace ipc;
- 
-diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/BackgroundSyncService.cpp
---- a/dom/backgroundsync/BackgroundSyncService.cpp
-+++ b/dom/backgroundsync/BackgroundSyncService.cpp
-@@ -18,21 +18,24 @@
- 
- #include "BackgroundSyncService.h"
- #include "ChromeStorageManager.h"
- #include "StorageManager.h"
- 
++#include "mozilla/dom/backgroundsync/BackgroundSyncIPCTypes.h"
+ #include "mozilla/dom/Promise.h"
+ #include "mozilla/dom/PromiseWorkerProxy.h"
+ #include "mozilla/dom/BackgroundSyncBinding.h"
+ #include "mozilla/ipc/BackgroundChild.h"
  #include "mozilla/ipc/BackgroundUtils.h"
- #include "nsContentUtils.h"
- #include "nsIScriptSecurityManager.h"
-+#include "ServiceWorkerManagerParent.h"
+ #include "mozilla/ipc/PBackgroundChild.h"
+ #include "mozilla/Unused.h"
+ #include "mozilla/Preferences.h"
+diff --git a/dom/backgroundsync/BackgroundSync.h b/dom/backgroundsync/BackgroundSync.h
+--- a/dom/backgroundsync/BackgroundSync.h
++++ b/dom/backgroundsync/BackgroundSync.h
+@@ -5,21 +5,21 @@
+  * You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #ifndef mozilla_dom_BackgroundSync_h
+ #define mozilla_dom_BackgroundSync_h
+ 
+ #include "jsapi.h"
+ #include "mozilla/AlreadyAddRefed.h"
+ #include "mozilla/ErrorResult.h"
+-#include "mozilla/dom/backgroundsync/BackgroundSyncIPCTypes.h"
+ #include "mozilla/dom/BindingDeclarations.h"
+ #include "nsCOMPtr.h"
+ #include "nsIIPCBackgroundChildCreateCallback.h"
+ #include "nsIObserver.h"
++#include "nsIThread.h"
+ #include "nsWrapperCache.h"
+ 
+ class nsIGlobalObject;
+ class nsIPrincipal;
  
  namespace mozilla {
- namespace dom {
+ 
+ namespace ipc {
+@@ -33,16 +33,17 @@ namespace workers {
+   class WorkerPrivate;
+ } // namespace workers
+ 
+ class Promise;
+ 
  namespace backgroundsync {
  
-+using mozilla::dom::workers::ServiceWorkerManagerParent;
-+
- namespace {
- BackgroundSyncService* sInstance = nullptr;
- } // namespace
+ class BackgroundSyncChild;
++class SyncOpArgs;
+ class SyncOpRunnable;
  
- // ----------------------------------------------------------------------------
- 
- class GetStorageManagerRunnable final : public CancelableRunnable
+ class BackgroundSync final : public nsIIPCBackgroundChildCreateCallback
+                            , public nsIObserver
+                            , public nsWrapperCache
  {
-diff --git a/dom/backgroundsync/BackgroundSyncTypes.h b/dom/backgroundsync/BackgroundSyncTypes.h
---- a/dom/backgroundsync/BackgroundSyncTypes.h
-+++ b/dom/backgroundsync/BackgroundSyncTypes.h
-@@ -2,21 +2,16 @@
- /* vim: set ts=8 sts=2 et sw=2 tw=80: */
- /* This Source Code Form is subject to the terms of the Mozilla Public
-  * License, v. 2.0. If a copy of the MPL was not distributed with this
-  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+   friend class RegisterHelper;
  
- #ifndef mozilla_dom_BackgroundSyncTypes_h
- #define mozilla_dom_BackgroundSyncTypes_h
- 
--#include <stdint.h>
--#include "nsCOMPtr.h"
--#include "nsIFile.h"
--#include "nsString.h"
--
- namespace mozilla {
- namespace dom {
- namespace backgroundsync {
- 
- enum RegistrationState
- {
-   ePending = 1,
-   eWaiting,
-diff --git a/dom/backgroundsync/ChromeStorageManager.cpp b/dom/backgroundsync/ChromeStorageManager.cpp
---- a/dom/backgroundsync/ChromeStorageManager.cpp
-+++ b/dom/backgroundsync/ChromeStorageManager.cpp
-@@ -12,16 +12,17 @@
- #include "nsIThread.h"
- #include "nsThreadUtils.h"
- 
- namespace mozilla {
- namespace dom {
- namespace backgroundsync {
- 
- using mozilla::ipc::AssertIsOnBackgroundThread;
-+using workers::AssertIsOnMainThread;
- 
- namespace {
-   ChromeStorageManager* csmInstance = nullptr;
- } // namespace
- 
- //-----------------------------------------------------------------------------
- 
- class ChromeStorageAction
-diff --git a/dom/backgroundsync/OnlineStateObserver.cpp b/dom/backgroundsync/OnlineStateObserver.cpp
---- a/dom/backgroundsync/OnlineStateObserver.cpp
-+++ b/dom/backgroundsync/OnlineStateObserver.cpp
-@@ -7,16 +7,18 @@
- #include "OnlineStateObserver.h"
- 
- #include "mozilla/ipc/BackgroundParent.h"
- #include "nsIOService.h"
- 
- namespace mozilla {
- namespace dom {
- 
-+using workers::AssertIsOnMainThread;
-+
- /**
-  * ShutdownRunnable
-  */
- class ShutdownRunnable final : public Runnable
- {
- public:
-   explicit ShutdownRunnable(OnlineStateObserver* aObserver)
-     : mObserver(aObserver)
-diff --git a/dom/backgroundsync/StorageManagerId.cpp b/dom/backgroundsync/StorageManagerId.cpp
---- a/dom/backgroundsync/StorageManagerId.cpp
-+++ b/dom/backgroundsync/StorageManagerId.cpp
-@@ -3,16 +3,17 @@
- /* This Source Code Form is subject to the terms of the Mozilla Public
-  * License, v. 2.0. If a copy of the MPL was not distributed with this
-  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
- 
- #include "StorageManagerId.h"
- 
- #include "mozilla/ipc/BackgroundParent.h"
- #include "mozilla/dom/quota/QuotaManager.h"
-+#include "nsProxyRelease.h"
- 
- namespace mozilla {
- namespace dom {
- namespace backgroundsync {
- 
- /**
-  * StorageManagerIdFactory
-  */
-diff --git a/dom/backgroundsync/moz.build b/dom/backgroundsync/moz.build
---- a/dom/backgroundsync/moz.build
-+++ b/dom/backgroundsync/moz.build
-@@ -6,30 +6,33 @@
- EXPORTS.mozilla.dom.backgroundsync += [
-     'BackgroundSync.h',
-     'BackgroundSyncService.h',
-     'BackgroundSyncTypes.h',
-     'QuotaClient.h'
- ]
- 
- UNIFIED_SOURCES += [
--    'BackgroundSync.cpp',
-     'BackgroundSyncChild.cpp',
-     'BackgroundSyncParent.cpp',
-     'BackgroundSyncService.cpp',
-     'ChromeDBSchema.cpp',
-     'ChromeStorageManager.cpp',
-     'DBAction.cpp',
-     'DBSchema.cpp',
-     'OnlineStateObserver.cpp',
-     'QuotaClient.cpp',
-     'StorageManager.cpp',
-     'StorageManagerId.cpp'
- ]
- 
-+SOURCES += [
-+    'BackgroundSync.cpp'
-+]
-+
- IPDL_SOURCES += [
-     'BackgroundSyncIPCTypes.ipdlh',
-     'PBackgroundSync.ipdl'
- ]
- 
- MOCHITEST_MANIFESTS += [
-     'tests/mochitest.ini'
- ]
