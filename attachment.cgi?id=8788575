@@ -1,0 +1,314 @@
+# HG changeset patch
+# User Fernando Jimenez <ferjmoreno@gmail.com>
+# Parent  163df56e617fe897305b28f31756966f2b8433e3
+Bug 1217544 - Implement one-off BackgroundSync API. Tests. r=baku
+
+diff --git a/dom/backgroundsync/moz.build b/dom/backgroundsync/moz.build
+--- a/dom/backgroundsync/moz.build
++++ b/dom/backgroundsync/moz.build
+@@ -27,16 +27,20 @@ UNIFIED_SOURCES += [
+     'StorageManagerId.cpp'
+ ]
+ 
+ IPDL_SOURCES += [
+     'BackgroundSyncIPCTypes.ipdlh',
+     'PBackgroundSync.ipdl'
+ ]
+ 
++MOCHITEST_MANIFESTS += [
++    'tests/mochitest.ini'
++]
++
+ LOCAL_INCLUDES += [
+     '/dom/workers',
+     '/netwerk/base'
+ ]
+ 
+ include('/ipc/chromium/chromium-config.mozbuild')
+ 
+ FINAL_LIBRARY = 'xul'
+diff --git a/dom/backgroundsync/tests/mochitest.ini b/dom/backgroundsync/tests/mochitest.ini
+new file mode 100644
+--- /dev/null
++++ b/dom/backgroundsync/tests/mochitest.ini
+@@ -0,0 +1,7 @@
++[DEFAULT]
++support-files=
++  test_utils.js
++  worker.js
++
++[test_basic.html]
++[test_preference.html]
+diff --git a/dom/backgroundsync/tests/test_basic.html b/dom/backgroundsync/tests/test_basic.html
+new file mode 100644
+--- /dev/null
++++ b/dom/backgroundsync/tests/test_basic.html
+@@ -0,0 +1,113 @@
++<!DOCTYPE HTML>
++<html>
++<!--
++Bug 1217544: Background Sync.
++
++Any copyright is dedicated to the Public Domain.
++http://creativecommons.org/licenses/publicdomain/
++
++-->
++<head>
++  <title>Test for Bug 1217544</title>
++  <script type="text/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
++  <script type="text/javascript" src="/tests/SimpleTest/SpawnTask.js"></script>
++  <script type="text/javascript" src="/tests/dom/backgroundsync/tests/test_utils.js"></script>
++  <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
++  <meta http-equiv="Content-type" content="text/html;charset=UTF-8">
++</head>
++<a target="_blank" href="https://bugzilla.mozilla.org/show_bug.cgi?id=1217544">Mozilla Bug 1217544</a>
++<p id="display"></p>
++<div id="content" style="display: none">
++
++</div>
++<pre id="test">
++</pre>
++
++<script class="testbody" type="text/javascript">
++
++  // Load chrome script to change offline status in the
++  // parent process.
++  var chromeScript = SpecialPowers.loadChromeScript(_ => {
++    var { classes: Cc, interfaces: Ci } = Components;
++    var ioService = Cc["@mozilla.org/network/io-service;1"]
++                      .getService(Ci.nsIIOService);
++    addMessageListener("change-status", function(offline) {
++      ioService.offline = offline;
++    });
++  });
++
++  function offlineObserver(res) {
++    this._res = res;
++  }
++  offlineObserver.prototype = {
++    _res: null,
++
++    observe: function(subject, topic, data) {
++      debug("observe: " + subject + " " + topic + " " + data);
++      if (topic === "network:offline-status-changed") {
++        var obsService = SpecialPowers.Cc["@mozilla.org/observer-service;1"]
++                           .getService(SpecialPowers.Ci.nsIObserverService);
++        obsService.removeObserver(this, topic);
++        this._res(null);
++      }
++    }
++  }
++
++  function changeOfflineState(offline) {
++    return new Promise(function(res, rej) {
++      var obsService = SpecialPowers.Cc["@mozilla.org/observer-service;1"]
++                         .getService(SpecialPowers.Ci.nsIObserverService);
++      obsService.addObserver(SpecialPowers.wrapCallbackObject(new offlineObserver(res)),
++                             "network:offline-status-changed",
++                             false);
++      chromeScript.sendAsyncMessage("change-status", offline);
++    });
++  }
++
++  var registration;
++  add_task(function* start() {
++    yield setupPrefs(true /* backgroundSyncEnabled */);
++    var url = "worker.js" + "?" + (Math.random());
++    registration = yield navigator.serviceWorker.register(url, {scope: "."});
++  });
++
++  add_task(function* goOffline() {
++    yield changeOfflineState(true);
++  });
++
++  add_task(function* subscribe() {
++    yield registration.sync.register("tag");
++    var tags = yield registration.sync.getTags();
++    is(tags.length, 1, "Should have 1 registered tag");
++    is(tags[0], "tag", "Should have a tag named 'tag' registered");
++  });
++
++  add_task(function* subscribeFromWorker() {
++    var result = yield sendRequestToWorker({
++      type: "subscribe"
++    });
++    is(result.tags.length, 2, "Should have 2 registered tags");
++    ok(result.tags.indexOf("workerTag") > -1,
++       "Should have a tag named 'workerTag' registered");
++  });
++
++  add_task(function* goOnline() {
++    yield changeOfflineState(false);
++  });
++
++  add_task(function* getSyncEvents() {
++    yield sendRequestToWorker({
++      type: "waitForEvents",
++      expectedEvents: ["tag", "workerTag"]
++    });
++  });
++
++  add_task(function* testNoRegistrations() {
++    var tags = yield registration.sync.getTags();
++    is(tags.length, 0, "Should have 0 registered tag");
++    yield unregisterWorker(".");
++  });
++
++</script>
++</body>
++</html>
+diff --git a/dom/backgroundsync/tests/test_preference.html b/dom/backgroundsync/tests/test_preference.html
+new file mode 100644
+--- /dev/null
++++ b/dom/backgroundsync/tests/test_preference.html
+@@ -0,0 +1,38 @@
++<!DOCTYPE HTML>
++<html>
++<!--
++Bug 1217544: Background Sync.
++
++Any copyright is dedicated to the Public Domain.
++http://creativecommons.org/licenses/publicdomain/
++
++-->
++<head>
++  <title>Test for Bug 1217544</title>
++  <script type="text/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
++  <script type="text/javascript" src="/tests/SimpleTest/SpawnTask.js"></script>
++  <script type="text/javascript" src="/tests/dom/backgroundsync/tests/test_utils.js"></script>
++  <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
++  <meta http-equiv="Content-type" content="text/html;charset=UTF-8">
++</head>
++<a target="_blank" href="https://bugzilla.mozilla.org/show_bug.cgi?id=1217544">Mozilla Bug 1217544</a>
++<p id="display"></p>
++<div id="content" style="display: none">
++
++</div>
++<pre id="test">
++</pre>
++
++<script class="testbody" type="text/javascript">
++
++  add_task(function* testPermission() {
++    yield setupPrefs(false /* backgroundSyncEnabled */);
++    var url = "worker.js" + "?" + (Math.random());
++    var registration = yield navigator.serviceWorker.register(url, {scope: "."});
++    is(registration.sync, undefined, "Background Sync API is undefined");
++    yield unregisterWorker(".");
++  });
++
++</script>
++</body>
++</html>
+diff --git a/dom/backgroundsync/tests/test_utils.js b/dom/backgroundsync/tests/test_utils.js
+new file mode 100644
+--- /dev/null
++++ b/dom/backgroundsync/tests/test_utils.js
+@@ -0,0 +1,41 @@
++function debug(str) {
++  console.log(str);
++}
++
++// Remove permissions and prefs when the test finishes.
++SimpleTest.registerCleanupFunction(() =>
++  new Promise(resolve => {
++    SpecialPowers.flushPermissions(_ => {
++      SpecialPowers.flushPrefEnv(resolve);
++    });
++  })
++);
++
++function setupPrefs(backgroundSyncEnabled) {
++  return new Promise(resolve => {
++    SpecialPowers.pushPrefEnv({"set": [
++      ["dom.backgroundSync.enabled", backgroundSyncEnabled],
++      ["dom.serviceWorkers.exemptFromPerDomainMax", true],
++      ["dom.serviceWorkers.enabled", true],
++      ["dom.serviceWorkers.testing.enabled", true]
++      ]}, resolve);
++  });
++}
++
++function sendRequestToWorker(request) {
++  return navigator.serviceWorker.ready.then(registration => {
++    return new Promise((resolve, reject) => {
++      var channel = new MessageChannel();
++      channel.port1.onmessage = e => {
++        (e.data.error ? reject : resolve)(e.data);
++      };
++      registration.active.postMessage(request, [channel.port2]);
++    });
++  });
++}
++
++function unregisterWorker(scope) {
++  return navigator.serviceWorker.getRegistration(scope).then(registration => {
++    return registration.unregister();
++  });
++}
+diff --git a/dom/backgroundsync/tests/worker.js b/dom/backgroundsync/tests/worker.js
+new file mode 100644
+--- /dev/null
++++ b/dom/backgroundsync/tests/worker.js
+@@ -0,0 +1,61 @@
++// Any copyright is dedicated to the Public Domain.
++// http://creativecommons.org/licenses/publicdomain/
++
++function assert(value, message) {
++  if (!value) {
++    throw new Error(message);
++  }
++}
++
++var waitForEventsPort;
++var expectedEvents;
++var receivedEvents = [];
++
++function checkExpectedEventsReceived() {
++  assert(waitForEventsPort);
++  assert(expectedEvents);
++
++  if (expectedEvents.toString() == receivedEvents.toString()) {
++    waitForEventsPort.postMessage({});
++  }
++}
++
++function reply(event, promise) {
++  event.waitUntil(Promise.resolve(promise).then(result => {
++    event.ports[0].postMessage(result);
++  }).catch(error => {
++    event.ports[0].postMessage({
++      error: String(error),
++    });
++  }));
++}
++
++self.addEventListener("message", function(event) {
++  switch (event.data.type) {
++    case "subscribe":
++      reply(event, self.registration.sync.register("workerTag").then(
++        () => {
++          return self.registration.sync.getTags();
++        }
++      ).then(tags => {
++        return {
++          tags: tags
++        };
++      }));
++      break;
++    case "waitForEvents":
++      waitForEventsPort = event.ports[0];
++      expectedEvents = event.data.expectedEvents;
++      checkExpectedEventsReceived();
++      break;
++    default:
++      reply(event, Promise.reject("Invalid message type: " + event.data.type));
++      break;
++  }
++});
++
++self.addEventListener("sync", function(event) {
++  console.log("Got sync event", event.tag);
++  receivedEvents.push(event.tag);
++  checkExpectedEventsReceived();
++});

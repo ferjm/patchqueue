@@ -3,6 +3,71 @@
 # Parent  c253f7fc6a97e8992bef147fdacf3715e7272aef
 Bug 1217544 - Implement one-off BackgroundSync API. Part 7: BackgroundSyncService. r=baku
 
+diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
+--- a/dom/backgroundsync/BackgroundSync.cpp
++++ b/dom/backgroundsync/BackgroundSync.cpp
+@@ -2,16 +2,17 @@
+ /* vim: set ts=8 sts=2 et sw=2 tw=80: */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+  * You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "BackgroundSync.h"
+ #include "BackgroundSyncChild.h"
+ 
++#include "mozilla/dom/backgroundsync/BackgroundSyncIPCTypes.h"
+ #include "mozilla/dom/Promise.h"
+ #include "mozilla/dom/PromiseWorkerProxy.h"
+ #include "mozilla/dom/BackgroundSyncBinding.h"
+ #include "mozilla/ipc/BackgroundChild.h"
+ #include "mozilla/ipc/BackgroundUtils.h"
+ #include "mozilla/ipc/PBackgroundChild.h"
+ #include "mozilla/Unused.h"
+ #include "mozilla/Preferences.h"
+diff --git a/dom/backgroundsync/BackgroundSync.h b/dom/backgroundsync/BackgroundSync.h
+--- a/dom/backgroundsync/BackgroundSync.h
++++ b/dom/backgroundsync/BackgroundSync.h
+@@ -5,21 +5,21 @@
+  * You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #ifndef mozilla_dom_BackgroundSync_h
+ #define mozilla_dom_BackgroundSync_h
+ 
+ #include "jsapi.h"
+ #include "mozilla/AlreadyAddRefed.h"
+ #include "mozilla/ErrorResult.h"
+-#include "mozilla/dom/backgroundsync/BackgroundSyncIPCTypes.h"
+ #include "mozilla/dom/BindingDeclarations.h"
+ #include "nsCOMPtr.h"
+ #include "nsIIPCBackgroundChildCreateCallback.h"
+ #include "nsIObserver.h"
++#include "nsIThread.h"
+ #include "nsWrapperCache.h"
+ 
+ class nsIGlobalObject;
+ class nsIPrincipal;
+ 
+ namespace mozilla {
+ 
+ namespace ipc {
+@@ -33,16 +33,17 @@ namespace workers {
+   class WorkerPrivate;
+ } // namespace workers
+ 
+ class Promise;
+ 
+ namespace backgroundsync {
+ 
+ class BackgroundSyncChild;
++class SyncOpArgs;
+ class SyncOpRunnable;
+ 
+ class BackgroundSync final : public nsIIPCBackgroundChildCreateCallback
+                            , public nsIObserver
+                            , public nsWrapperCache
+ {
+   friend class RegisterHelper;
+ 
 diff --git a/dom/backgroundsync/BackgroundSyncChild.cpp b/dom/backgroundsync/BackgroundSyncChild.cpp
 --- a/dom/backgroundsync/BackgroundSyncChild.cpp
 +++ b/dom/backgroundsync/BackgroundSyncChild.cpp
@@ -59,7 +124,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
    explicit PendingRequest(const nsID& aRequestId,
                            const SyncOp& aOp)
      : mRequestId(aRequestId)
-@@ -39,95 +44,120 @@ public:
+@@ -39,95 +44,121 @@ public:
  private:
    ~PendingRequest() {}
  
@@ -108,7 +173,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
 +  mActorDestroyed = true;
 +}
 +
-+bool
++mozilla::ipc::IPCResult
  BackgroundSyncParent::ExecuteRequest(const nsID& aRequestId,
                                       const SyncOp& aOp)
  {
@@ -116,7 +181,8 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
 -  // XXX Progress request to BackgroundSyncService.
 +  MOZ_ASSERT(mService);
 +
-+  return mService->Request(mId, mStorageManagerId, aRequestId, aOp);
++  return mService->Request(mId, mStorageManagerId, aRequestId, aOp) ?
++    IPC_OK() : IPC_FAIL_NO_REASON(this);
  }
  
  mozilla::ipc::IPCResult
@@ -135,7 +201,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
  
 -  ExecuteRequest(aRequestId, aOp);
 -  return IPC_OK();
-+  return ExecuteRequest(aRequestId, aOp);
++  return ExecuteRequest(aRequestId, aOp) ? IPC_OK() : IPC_FAIL_NO_REASON(this);
  }
  
  mozilla::ipc::IPCResult
@@ -190,7 +256,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
 diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/BackgroundSyncParent.h
 --- a/dom/backgroundsync/BackgroundSyncParent.h
 +++ b/dom/backgroundsync/BackgroundSyncParent.h
-@@ -19,45 +19,70 @@ namespace mozilla {
+@@ -19,45 +19,71 @@ namespace mozilla {
  namespace ipc {
    class BackgroundParentImpl;
    class PrincipalInfo;
@@ -239,7 +305,8 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/Back
 -  void ExecuteRequest(const nsID& aRequestId, const SyncOp& aOp);
 +  void Shutdown();
 +
-+  bool ExecuteRequest(const nsID& aRequestId, const SyncOp& aOp);
++  mozilla::ipc::IPCResult
++  ExecuteRequest(const nsID& aRequestId, const SyncOp& aOp);
  
    // StorageManagerId method
    virtual void
@@ -268,7 +335,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.cpp b/dom/backgroundsync/B
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncService.cpp
-@@ -0,0 +1,685 @@
+@@ -0,0 +1,688 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -293,6 +360,7 @@ new file mode 100644
 +
 +#include "mozilla/ipc/BackgroundUtils.h"
 +#include "nsContentUtils.h"
++#include "nsIScriptSecurityManager.h"
 +
 +namespace mozilla {
 +namespace dom {
@@ -304,20 +372,18 @@ new file mode 100644
 +
 +// ----------------------------------------------------------------------------
 +
-+class GetStorageManagerRunnable final : public nsIRunnable
-+                                      , public nsICancelableRunnable
++class GetStorageManagerRunnable final : public CancelableRunnable
 +{
 +public:
-+  NS_DECL_THREADSAFE_ISUPPORTS
-+
 +  GetStorageManagerRunnable(BackgroundSyncService* aService,
 +                            const nsString& aOrigin,
 +                            const SyncInternalOp& aOp)
 +    : mService(aService)
-+    , mOrigins(nsTArray<nsString>())
 +    , mInitiatingThread(do_GetCurrentThread())
 +    , mOp(aOp)
 +  {
++    AssertIsOnBackgroundThread();
++
 +    mOrigins.AppendElement(aOrigin);
 +  }
 +
@@ -329,6 +395,7 @@ new file mode 100644
 +    , mInitiatingThread(do_GetCurrentThread())
 +    , mOp(aOp)
 +  {
++    AssertIsOnBackgroundThread();
 +  }
 +
 +  NS_IMETHOD
@@ -356,12 +423,15 @@ new file mode 100644
 +    // StorageManagers for a GetAll operation.
 +    for (uint32_t i = 0; i < mOrigins.Length(); i++) {
 +      nsCOMPtr<nsIPrincipal> principal;
-+      securityManager->CreateCodebasePrincipalFromOrigin(
++      nsresult rv = securityManager->CreateCodebasePrincipalFromOrigin(
 +        NS_ConvertUTF16toUTF8(mOrigins[i]), getter_AddRefs(principal));
++      if (NS_WARN_IF(NS_FAILED(rv))) {
++        continue;
++      }
 +
 +      MOZ_ASSERT(principal);
 +
-+      nsresult rv = PrincipalToPrincipalInfo(principal, &mPrincipalInfo);
++      rv = PrincipalToPrincipalInfo(principal, &mPrincipalInfo);
 +      if (NS_WARN_IF(NS_FAILED(rv))) {
 +        continue;
 +      }
@@ -377,7 +447,7 @@ new file mode 100644
 +    return NS_OK;
 +  }
 +
-+  NS_IMETHOD
++  nsresult
 +  Cancel() override
 +  {
 +    return NS_OK;
@@ -392,8 +462,6 @@ new file mode 100644
 +  const SyncInternalOp mOp;
 +  PrincipalInfo mPrincipalInfo;
 +};
-+
-+NS_IMPL_ISUPPORTS(GetStorageManagerRunnable, nsICancelableRunnable, nsIRunnable)
 +
 +// ----------------------------------------------------------------------------
 +
@@ -455,20 +523,23 @@ new file mode 100644
 +// ChromeStorageManager
 +
 +void
-+BackgroundSyncService::AddChromeStorageManagerRef(
-+    const nsID& aRequestId, ChromeStorageManager* aChromeStorageManager)
++BackgroundSyncService::AddChromeStorageRequest(const nsID& aRequestId)
 +{
 +  AssertIsOnBackgroundThread();
 +
-+  mChromeStorageManagers.Put(aRequestId, aChromeStorageManager);
++  mPendingChromeStorageRequest.AppendElement(aRequestId);
 +}
 +
 +void
-+BackgroundSyncService::ReleaseChromeStorageManagerRef(const nsID& aRequestId)
++BackgroundSyncService::RemoveChromeStorageRequest(const nsID& aRequestId)
 +{
 +  AssertIsOnBackgroundThread();
 +
-+  mChromeStorageManagers.Remove(aRequestId);
++  mPendingChromeStorageRequest.RemoveElement(aRequestId);
++
++  if (mPendingChromeStorageRequest.IsEmpty()) {
++    MaybeShutdown();
++  }
 +}
 +
 +// ----------------------------------------------------------------------------
@@ -486,13 +557,12 @@ new file mode 100644
 +
 +BackgroundSyncService::~BackgroundSyncService()
 +{
-+  AssertIsOnBackgroundThread();
 +  MOZ_ASSERT(sInstance == this);
 +  MOZ_ASSERT(mBackgroundSyncActors.Length() == 0);
 +  MOZ_ASSERT(mStorageManagers.Count() == 0);
-+  MOZ_ASSERT(mChromeStorageManagers.Count() == 0);
-+
-+  mOnlineStateObserver->Shutdown(this);
++  MOZ_ASSERT(!mChromeStorageManager);
++  MOZ_ASSERT(mPendingChromeStorageRequest.IsEmpty());
++  MOZ_ASSERT(!mOnlineStateObserver);
 +
 +  sInstance = nullptr;
 +}
@@ -515,6 +585,7 @@ new file mode 100644
 +BackgroundSyncService::Init()
 +{
 +  mOnlineStateObserver = OnlineStateObserver::Init(this);
++  mChromeStorageManager = ChromeStorageManager::GetOrCreate();
 +}
 +
 +void
@@ -523,10 +594,13 @@ new file mode 100644
 +  AssertIsOnBackgroundThread();
 +
 +  if (mBackgroundSyncActors.Length() == 0 &&
++      mServiceWorkerManagerActors.Length() == 0 &&
 +      mStorageManagers.Count() == 0 &&
-+      mChromeStorageManagers.Count() == 0) {
++      mPendingChromeStorageRequest.IsEmpty()) {
 +    mOnlineStateObserver->Shutdown(this);
 +    mOnlineStateObserver = nullptr;
++    mChromeStorageManager->Shutdown();
++    mChromeStorageManager = nullptr;
 +  }
 +}
 +
@@ -691,18 +765,15 @@ new file mode 100644
 +      // it in the 'origins' db before we can release the StorageManager and
 +      // progress the response to the DOM side.
 +      if (aResponse.get_SyncRegisterResponse().mFirstRegistration()) {
-+        RefPtr<ChromeStorageManager> manager =
-+          ChromeStorageManager::GetOrCreate(this);
-+        AddChromeStorageManagerRef(aRequestId, manager);
-+        manager->Register(aRequestId,
++        AddChromeStorageRequest(aRequestId);
++        mChromeStorageManager->Register(aRequestId,
 +            aResponse.get_SyncRegisterResponse().mRegistration());
-+        return;
-+      } else {
-+        // If this is not the first registration for this origin, we can
-+        // directly try to trigger the sync event.
-+        MaybeTriggerSyncEvent(
-+            aResponse.get_SyncRegisterResponse().mRegistration());
++        break;
 +      }
++      // If this is not the first registration for this origin, we can
++      // directly try to trigger the sync event.
++      MaybeTriggerSyncEvent(
++          aResponse.get_SyncRegisterResponse().mRegistration());
 +      break;
 +    case SyncOpResponse::TSyncRegisterOriginResponse:
 +      // Once we have registered the origin for the sync request, we can try
@@ -717,11 +788,8 @@ new file mode 100644
 +        // this origin. If that's the case, we need to remove that origin from
 +        // the 'origins' DB before we can progress the response to the DOM side.
 +        if (!origin.IsEmpty()) {
-+          RefPtr<ChromeStorageManager> manager =
-+            ChromeStorageManager::GetOrCreate(this);
-+          AddChromeStorageManagerRef(aRequestId, manager);
-+          manager->Unregister(aRequestId, origin);
-+          return;
++          AddChromeStorageRequest(aRequestId);
++          mChromeStorageManager->Unregister(aRequestId, origin);
 +        }
 +      }
 +      break;
@@ -730,7 +798,7 @@ new file mode 100644
 +        // If we went offline while getting the origins, we don't care about
 +        // getting the sync registrations anymore, so we bail out here.
 +        if (mOnlineState !=  OnlineStateObserver::eOnline) {
-+          return;
++          break;
 +        }
 +
 +        // If we are still online, we need to get the list of sync registrations
@@ -739,12 +807,13 @@ new file mode 100644
 +        // Once we have each appropriate StorageManager, the GetAll operation
 +        // will be executed at OnStorageManagerIdCreated. That's why we pass here
 +        // the SyncInteralOp with SyncGetAllArgs.
-+        nsTArray<nsString> origins(
-+          aResponse.get_SyncGetAllOriginsResponse().mOrigins());
++        const nsTArray<nsString>& origins =
++          aResponse.get_SyncGetAllOriginsResponse().mOrigins();
 +        RefPtr<GetStorageManagerRunnable> runnable =
 +          new GetStorageManagerRunnable(this, origins,
 +              SyncInternalOp(SyncGetAllArgs()));
-+        MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(runnable));
++        nsresult rv = NS_DispatchToMainThread(runnable);
++        if (NS_FAILED(rv)) { NS_WARNING("NS_DispatchToMainThread failed"); }
 +      }
 +      break;
 +    case SyncOpResponse::TSyncGetAllResponse:
@@ -753,13 +822,13 @@ new file mode 100644
 +        // useless to continue, as no sync event will be triggered for these
 +        // registrations. So we just bail out here.
 +        if (mOnlineState !=  OnlineStateObserver::eOnline) {
-+          return;
++          break;
 +        }
 +
 +        // If we are still online, we try to trigger a sync event per each
 +        // registration.
-+        nsTArray<Registration> registrations(
-+            aResponse.get_SyncGetAllResponse().mRegistrations());
++        const nsTArray<Registration>& registrations =
++            aResponse.get_SyncGetAllResponse().mRegistrations();
 +        for (uint32_t i = 0; i < registrations.Length(); i++) {
 +          MaybeTriggerSyncEvent(registrations[i]);
 +        }
@@ -767,25 +836,26 @@ new file mode 100644
 +      break;
 +    case SyncOpResponse::TSyncChangeStateResponse:
 +      {
-+        // For now we only care about a change of state to FIRING.
++        // For now we only care about a change of state to eFiring.
 +        Registration registration =
 +          aResponse.get_SyncChangeStateResponse().mRegistration();
-+        if (registration.mState() != RegistrationState::FIRING) {
-+          return;
++        if (registration.mState() != RegistrationState::eFiring) {
++          break;
 +        }
 +
-+        // If we changed the state to FIRING, that means that we are trying to
++        // If we changed the state to eFiring, that means that we are trying to
 +        // trigger a sync event for a specific registration.
 +        // In that case, we need to check if we still are online and so we can
 +        // continue with the process of firing the sync event. Otherwise, we
-+        // need to get back to the PENDING state and bail out here.
++        // need to get back to the ePending state and bail out here.
 +        if (mOnlineState != OnlineStateObserver::eOnline) {
 +          RefPtr<GetStorageManagerRunnable> runnable =
 +            new GetStorageManagerRunnable(this, registration.mOrigin(),
 +                SyncInternalOp(SyncChangeStateArgs(registration.mId(),
-+                               RegistrationState::PENDING)));
-+          MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(runnable));
-+          return;
++                               RegistrationState::ePending)));
++          nsresult rv = NS_DispatchToMainThread(runnable);
++          if (NS_FAILED(rv)) { NS_WARNING("NS_DispatchToMainThread failed"); }
++          break;
 +        }
 +
 +        ContinueTriggeringSyncEvent(registration);
@@ -802,8 +872,8 @@ new file mode 100644
 +    Response(actorId, aRequestId, aResponse);
 +  } else {
 +    // Otherwise, this is a response to an internal request and we just need to
-+    // release the associated ChromeStorageManager reference.
-+    ReleaseChromeStorageManagerRef(aRequestId);
++    // remove the request from the pending request list.
++    RemoveChromeStorageRequest(aRequestId);
 +  }
 +}
 +
@@ -819,10 +889,10 @@ new file mode 100644
 +  }
 +
 +  // First thing we need to do is to change the state of the registration to
-+  // FIRING.
++  // eFiring.
 +
-+  // We only can do that if the registration is in PENDING state though.
-+  if (NS_WARN_IF(aRegistration.mState() != RegistrationState::PENDING)) {
++  // We only can do that if the registration is in ePending state though.
++  if (NS_WARN_IF(aRegistration.mState() != RegistrationState::ePending)) {
 +    return;
 +  }
 +
@@ -830,9 +900,10 @@ new file mode 100644
 +  // so we need to jump to the main thread for that.
 +  RefPtr<GetStorageManagerRunnable> runnable =
 +    new GetStorageManagerRunnable(this, aRegistration.mOrigin(), SyncInternalOp(
-+      SyncChangeStateArgs(aRegistration.mId(),RegistrationState::FIRING)
++      SyncChangeStateArgs(aRegistration.mId(),RegistrationState::eFiring)
 +    ));
-+  MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(runnable));
++  nsresult rv = NS_DispatchToMainThread(runnable);
++  if (NS_FAILED(rv)) { NS_WARNING("NS_DispatchToMainThread failed"); }
 +}
 +
 +void
@@ -842,12 +913,13 @@ new file mode 100644
 +  AssertIsOnBackgroundThread();
 +
 +  if (mOnlineState != OnlineStateObserver::eOnline) {
-+    if (aRegistration.mState() == RegistrationState::FIRING) {
++    if (aRegistration.mState() == RegistrationState::eFiring) {
 +      RefPtr<GetStorageManagerRunnable> runnable =
 +        new GetStorageManagerRunnable(this, aRegistration.mOrigin(), SyncInternalOp(
-+          SyncChangeStateArgs(aRegistration.mId(),RegistrationState::FIRING)
++          SyncChangeStateArgs(aRegistration.mId(),RegistrationState::eFiring)
 +        ));
-+      MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(runnable));
++      nsresult rv = NS_DispatchToMainThread(runnable);
++      if (NS_FAILED(rv)) { NS_WARNING("NS_DispatchToMainThread failed"); }
 +    }
 +    return;
 +  }
@@ -855,7 +927,7 @@ new file mode 100644
 +  for (uint32_t i = 0, len = mServiceWorkerManagerActors.Length(); i < len; ++i) {
 +    RefPtr<ServiceWorkerManagerParent> parent = mServiceWorkerManagerActors[i];
 +    MOZ_ASSERT(parent);
-+    Unused << parent->SendNotifyBackgroundSyncEvent(aRegistration.mOriginSuffix(),
++    Unused << parent->SendNotifyBackgroundSyncEvent(aRegistration.mOrigin(),
 +                                                    aRegistration.mScope(),
 +                                                    aRegistration.mTag(),
 +                                                    aRegistration.mLastChance());
@@ -867,7 +939,8 @@ new file mode 100644
 +  RefPtr<GetStorageManagerRunnable> runnable =
 +    new GetStorageManagerRunnable(this, aRegistration.mOrigin(),
 +        SyncInternalOp(SyncRemoveArgs(aRegistration.mId())));
-+  MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(runnable));
++  nsresult rv = NS_DispatchToMainThread(runnable);
++  if (NS_FAILED(rv)) { NS_WARNING("NS_DispatchToMainThread failed"); }
 +}
 +
 +// --------------------------------------------------------------------------
@@ -897,11 +970,8 @@ new file mode 100644
 +    return;
 +  }
 +
-+  RefPtr<ChromeStorageManager> manager =
-+    ChromeStorageManager::GetOrCreate(this);
-+  AddChromeStorageManagerRef(id, manager);
-+
-+  manager->GetAll(id);
++  AddChromeStorageRequest(id);
++  mChromeStorageManager->GetAll(id);
 +}
 +
 +// --------------------------------------------------------------------------
@@ -958,7 +1028,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncService.h b/dom/backgroundsync/Bac
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncService.h
-@@ -0,0 +1,132 @@
+@@ -0,0 +1,129 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -990,7 +1060,7 @@ new file mode 100644
 +class SyncOp;
 +
 +class BackgroundSyncService final : public OnlineStateObserver::Listener
-+                                  , StorageManagerIdFactory::Listener
++                                  , public StorageManagerIdFactory::Listener
 +{
 +  friend class ChromeStorageManager;
 +  friend class StorageManager;
@@ -1007,10 +1077,9 @@ new file mode 100644
 +  void RegisterActor(workers::ServiceWorkerManagerParent* aParent);
 +  void UnregisterActor(workers::ServiceWorkerManagerParent* aParent);
 +
-+  bool Request(const uint64_t aActorId,
-+               StorageManagerId* aManagerId,
-+               const nsID& aRequestId,
-+               const SyncOp& aOp);
++  bool
++  Request(const uint64_t aActorId, StorageManagerId* aManagerId,
++          const nsID& aRequestId, const SyncOp& aOp);
 +
 +private:
 +  BackgroundSyncService();
@@ -1021,9 +1090,9 @@ new file mode 100644
 +
 +  // --------------------------------------------------------------------------
 +
-+  bool Response(const uint64_t aActorId,
-+                const nsID& aRequestId,
-+                const SyncOpResponse& aResponse);
++  bool
++  Response(const uint64_t aActorId, const nsID& aRequestId,
++           const SyncOpResponse& aResponse);
 +
 +  void OnRequestComplete(const nsID& aRequestId,
 +                         const SyncOpResponse& aResponse);
@@ -1057,13 +1126,11 @@ new file mode 100644
 +  // --------------------------------------------------------------------------
 +  // ChromeStorageManager
 +
-+  void AddChromeStorageManagerRef(const nsID& aRequestId,
-+                                  ChromeStorageManager* aChromeStorageManager);
-+  void ReleaseChromeStorageManagerRef(const nsID& aRequestId);
++  RefPtr<ChromeStorageManager> mChromeStorageManager;
++  nsTArray<nsID> mPendingChromeStorageRequest;
 +
-+  // References to the ChromeStorageManager managing the system principal
-+  // storage.
-+  nsRefPtrHashtable<nsIDHashKey, ChromeStorageManager> mChromeStorageManagers;
++  void AddChromeStorageRequest(const nsID& aRequestId);
++  void RemoveChromeStorageRequest(const nsID& aRequestId);
 +
 +  // --------------------------------------------------------------------------
 +  // OnlineStateObserver::Listener method
@@ -1094,37 +1161,21 @@ new file mode 100644
 diff --git a/dom/backgroundsync/ChromeStorageManager.cpp b/dom/backgroundsync/ChromeStorageManager.cpp
 --- a/dom/backgroundsync/ChromeStorageManager.cpp
 +++ b/dom/backgroundsync/ChromeStorageManager.cpp
-@@ -423,42 +423,46 @@ private:
- 
- NS_IMPL_ISUPPORTS(StorageActionRunnable, nsICancelableRunnable, nsIRunnable)
- 
- //-----------------------------------------------------------------------------
- // PBackground thread
- 
- // static
- already_AddRefed<ChromeStorageManager>
--ChromeStorageManager::GetOrCreate()
-+ChromeStorageManager::GetOrCreate(BackgroundSyncService* aService)
- {
-   AssertIsOnBackgroundThread();
-+  MOZ_ASSERT(aService);
- 
+@@ -435,30 +435,33 @@ ChromeStorageManager::GetOrCreate()
    RefPtr<ChromeStorageManager> instance = csmInstance;
    if (!instance) {
--    instance = new ChromeStorageManager();
-+    instance = new ChromeStorageManager(aService);
+     instance = new ChromeStorageManager();
    }
    return instance.forget();
  }
  
--ChromeStorageManager::ChromeStorageManager()
+ ChromeStorageManager::ChromeStorageManager()
 -  : mShuttingDown(false)
-+ChromeStorageManager::ChromeStorageManager(BackgroundSyncService* aService)
-+  : mService(aService)
++  : mService(BackgroundSyncService::GetOrCreate())
 +  , mShuttingDown(false)
  {
    AssertIsOnBackgroundThread();
-+  MOZ_ASSERT(aService);
++  MOZ_ASSERT(mService);
  
    Init();
  }
@@ -1145,7 +1196,7 @@ diff --git a/dom/backgroundsync/ChromeStorageManager.cpp b/dom/backgroundsync/Ch
    AssertIsOnBackgroundThread();
  
    // During the initialization process we create the IO thread and jump to
-@@ -579,15 +583,16 @@ ChromeStorageManager::GetAll(const nsID&
+@@ -579,15 +582,16 @@ ChromeStorageManager::GetAll(const nsID&
    ExecuteStorageAction(action);
  }
  
@@ -1166,7 +1217,17 @@ diff --git a/dom/backgroundsync/ChromeStorageManager.cpp b/dom/backgroundsync/Ch
 diff --git a/dom/backgroundsync/ChromeStorageManager.h b/dom/backgroundsync/ChromeStorageManager.h
 --- a/dom/backgroundsync/ChromeStorageManager.h
 +++ b/dom/backgroundsync/ChromeStorageManager.h
-@@ -35,37 +35,39 @@ class ChromeStorageManager final
+@@ -26,16 +26,17 @@ namespace dom {
+ namespace backgroundsync {
+ 
+ class ChromeStorageAction;
+ class Registration;
+ class XPCOMShutdownObserver;
+ 
+ class ChromeStorageManager final
+ {
++  friend class BackgroundSyncService;
+   friend class ContinueInitRunnable;
    friend class ContinueShutdownRunnable;
    friend class StorageActionRunnable;
    friend class XPCOMShutdownObserver;
@@ -1174,22 +1235,7 @@ diff --git a/dom/backgroundsync/ChromeStorageManager.h b/dom/backgroundsync/Chro
  public:
    NS_INLINE_DECL_THREADSAFE_REFCOUNTING(ChromeStorageManager)
  
-   static already_AddRefed<ChromeStorageManager>
--  GetOrCreate();
-+  GetOrCreate(BackgroundSyncService* aService);
- 
-   void Register(const nsID& aRequestId, const Registration& aRegistration);
-   void Unregister(const nsID& aRequestId, const nsAString& aOrigin);
-   void GetAll(const nsID& aRequestId);
- 
- private:
--  ChromeStorageManager();
-+  ChromeStorageManager(BackgroundSyncService* aService);
-   ~ChromeStorageManager();
- 
-   void Init();
-   void OnInitialized(mozIStorageConnection* aConn);
- 
+@@ -56,16 +57,18 @@ private:
    void Shutdown();
    void FinishShutdown();
  
@@ -1421,7 +1467,7 @@ diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageMan
  namespace backgroundsync {
  
  using quota::shared::ClientContext;
-+using quota::ClientAction;
++using quota::shared::ClientAction;
  
  /**
   * The StorageManager class is responsible for managing the storage of sync
@@ -1430,7 +1476,7 @@ diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageMan
   * process.
   *
   * There should be exactly one StorageManager object for each origin or app
-@@ -28,20 +29,22 @@ using quota::shared::ClientContext;
+@@ -28,20 +29,23 @@ using quota::shared::ClientContext;
   *
   * The StorageManager instances are kept alive by the BackgroundSyncService,
   * which keeps a reference to the StorageManager dealing with a storage request
@@ -1440,6 +1486,7 @@ diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageMan
  class StorageManager final : public ClientContext::Listener
  {
 +  friend class BackgroundSyncService;
++
  public:
    NS_INLINE_DECL_REFCOUNTING(StorageManager, override)
  
@@ -1454,7 +1501,7 @@ diff --git a/dom/backgroundsync/StorageManager.h b/dom/backgroundsync/StorageMan
      Closing
    };
  
-@@ -57,49 +60,52 @@ public:
+@@ -57,49 +61,52 @@ public:
    }
  
    // Synchronously shutdown.  This spins the event loop.
@@ -1797,7 +1844,23 @@ diff --git a/dom/workers/ServiceWorkerManagerChild.h b/dom/workers/ServiceWorker
 diff --git a/dom/workers/ServiceWorkerManagerParent.cpp b/dom/workers/ServiceWorkerManagerParent.cpp
 --- a/dom/workers/ServiceWorkerManagerParent.cpp
 +++ b/dom/workers/ServiceWorkerManagerParent.cpp
-@@ -155,21 +155,23 @@ private:
+@@ -1,14 +1,15 @@
+ /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+ /* vim: set ts=8 sts=2 et sw=2 tw=80: */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
++#include "BackgroundSyncService.h"
+ #include "ServiceWorkerManagerParent.h"
+ #include "ServiceWorkerManagerService.h"
+ #include "mozilla/dom/ContentParent.h"
+ #include "mozilla/dom/ServiceWorkerRegistrar.h"
+ #include "mozilla/ipc/BackgroundParent.h"
+ #include "mozilla/ipc/BackgroundUtils.h"
+ #include "mozilla/Unused.h"
+ #include "nsThreadUtils.h"
+@@ -155,21 +156,23 @@ private:
    PrincipalInfo mPrincipalInfo;
    RefPtr<Runnable> mCallback;
    nsCOMPtr<nsIThread> mBackgroundThread;
@@ -1823,7 +1886,7 @@ diff --git a/dom/workers/ServiceWorkerManagerParent.cpp b/dom/workers/ServiceWor
  }
  
  mozilla::ipc::IPCResult
-@@ -241,87 +243,96 @@ ServiceWorkerManagerParent::RecvUnregist
+@@ -241,87 +244,96 @@ ServiceWorkerManagerParent::RecvUnregist
  }
  
  mozilla::ipc::IPCResult
@@ -1919,10 +1982,11 @@ diff --git a/dom/workers/ServiceWorkerManagerParent.cpp b/dom/workers/ServiceWor
  
 -  if (mService) {
 -    // This object is about to be released and with it, also mService will be
-+  if (mServiceWorkerService) {
-+    // This object is about to be released and with it, also mServiceWorkerService will be
-     // released too.
+-    // released too.
 -    mService->UnregisterActor(this);
++  if (mServiceWorkerService) {
++    // This object is about to be released and with it, also
++    // mServiceWorkerService will be released too.
 +    mServiceWorkerService->UnregisterActor(this);
 +  }
 +
