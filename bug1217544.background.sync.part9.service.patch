@@ -1,8 +1,73 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  a2596f0d54259d42f8bd3dbab063ac9a5d673987
+# Parent  2dba766b8b98272fe45f944f529520f559cd65b8
 Bug 1217544 - Implement one-off BackgroundSync API. Part 9: BackgroundSyncService. r=baku
 
+diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
+--- a/dom/backgroundsync/BackgroundSync.cpp
++++ b/dom/backgroundsync/BackgroundSync.cpp
+@@ -2,16 +2,17 @@
+ /* vim: set ts=8 sts=2 et sw=2 tw=80: */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+  * You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "BackgroundSync.h"
+ #include "BackgroundSyncChild.h"
+ 
++#include "mozilla/dom/backgroundsync/BackgroundSyncIPCTypes.h"
+ #include "mozilla/dom/Promise.h"
+ #include "mozilla/dom/PromiseWorkerProxy.h"
+ #include "mozilla/dom/BackgroundSyncBinding.h"
+ #include "mozilla/ipc/BackgroundChild.h"
+ #include "mozilla/ipc/BackgroundUtils.h"
+ #include "mozilla/ipc/PBackgroundChild.h"
+ #include "mozilla/Unused.h"
+ #include "mozilla/Preferences.h"
+diff --git a/dom/backgroundsync/BackgroundSync.h b/dom/backgroundsync/BackgroundSync.h
+--- a/dom/backgroundsync/BackgroundSync.h
++++ b/dom/backgroundsync/BackgroundSync.h
+@@ -5,21 +5,21 @@
+  * You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #ifndef mozilla_dom_BackgroundSync_h
+ #define mozilla_dom_BackgroundSync_h
+ 
+ #include "jsapi.h"
+ #include "mozilla/AlreadyAddRefed.h"
+ #include "mozilla/ErrorResult.h"
+-#include "mozilla/dom/backgroundsync/BackgroundSyncIPCTypes.h"
+ #include "mozilla/dom/BindingDeclarations.h"
+ #include "nsCOMPtr.h"
+ #include "nsIIPCBackgroundChildCreateCallback.h"
+ #include "nsIObserver.h"
++#include "nsIThread.h"
+ #include "nsWrapperCache.h"
+ 
+ class nsIGlobalObject;
+ class nsIPrincipal;
+ 
+ namespace mozilla {
+ 
+ namespace ipc {
+@@ -33,16 +33,17 @@ namespace workers {
+   class WorkerPrivate;
+ } // namespace workers
+ 
+ class Promise;
+ 
+ namespace backgroundsync {
+ 
+ class BackgroundSyncChild;
++class SyncOpArgs;
+ class SyncOpRunnable;
+ 
+ class BackgroundSync final : public nsIIPCBackgroundChildCreateCallback
+                            , public nsIObserver
+                            , public nsWrapperCache
+ {
+   friend class RegisterHelper;
+ 
 diff --git a/dom/backgroundsync/BackgroundSyncChild.cpp b/dom/backgroundsync/BackgroundSyncChild.cpp
 --- a/dom/backgroundsync/BackgroundSyncChild.cpp
 +++ b/dom/backgroundsync/BackgroundSyncChild.cpp
@@ -1096,7 +1161,7 @@ new file mode 100644
 diff --git a/dom/backgroundsync/ChromeStorageManager.cpp b/dom/backgroundsync/ChromeStorageManager.cpp
 --- a/dom/backgroundsync/ChromeStorageManager.cpp
 +++ b/dom/backgroundsync/ChromeStorageManager.cpp
-@@ -428,30 +428,33 @@ ChromeStorageManager::GetOrCreate()
+@@ -435,30 +435,33 @@ ChromeStorageManager::GetOrCreate()
    RefPtr<ChromeStorageManager> instance = csmInstance;
    if (!instance) {
      instance = new ChromeStorageManager();
@@ -1131,7 +1196,7 @@ diff --git a/dom/backgroundsync/ChromeStorageManager.cpp b/dom/backgroundsync/Ch
    AssertIsOnBackgroundThread();
  
    // During the initialization process we create the IO thread and jump to
-@@ -572,15 +575,16 @@ ChromeStorageManager::GetAll(const nsID&
+@@ -579,15 +582,16 @@ ChromeStorageManager::GetAll(const nsID&
    ExecuteStorageAction(action);
  }
  
