@@ -248,7 +248,7 @@ new file mode 100644
 +  void Shutdown(Listener* aListener);
 +
 +private:
-+  OnlineStateObserver(Listener* aListener);
++  explicit OnlineStateObserver(Listener* aListener);
 +  ~OnlineStateObserver();
 +
 +  // Weak reference cleared by Shutdown().
