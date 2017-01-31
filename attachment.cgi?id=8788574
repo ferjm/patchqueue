@@ -1,7 +1,7 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  c253f7fc6a97e8992bef147fdacf3715e7272aef
-Bug 1217544 - Implement one-off BackgroundSync API. Part 7: BackgroundSyncService. r=baku
+# Parent  135c0292691056e35b2f36f23808a3b903f75a3e
+Bug 1217544 - Implement one-off BackgroundSync API. Part 9: BackgroundSyncService
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
 --- a/dom/backgroundsync/BackgroundSync.cpp
