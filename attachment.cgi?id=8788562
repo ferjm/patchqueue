@@ -255,7 +255,7 @@ diff --git a/dom/webidl/BackgroundSyncEvent.webidl b/dom/webidl/BackgroundSyncEv
 new file mode 100644
 --- /dev/null
 +++ b/dom/webidl/BackgroundSyncEvent.webidl
-@@ -0,0 +1,20 @@
+@@ -0,0 +1,21 @@
 +/* -*- Mode: IDL; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this file,
@@ -266,7 +266,8 @@ new file mode 100644
 + */
 +
 +[Constructor(DOMString type, optional BackgroundSyncEventInit eventInitDict),
-+ Exposed=ServiceWorker]
++ Exposed=ServiceWorker,
++ Func="mozilla::dom::backgroundsync::BackgroundSync::PrefEnabled"]
 +interface BackgroundSyncEvent : ExtendableEvent {
 +  readonly attribute DOMString tag;
 +  readonly attribute boolean lastChance;
@@ -479,7 +480,7 @@ diff --git a/dom/workers/ServiceWorkerEvents.h b/dom/workers/ServiceWorkerEvents
 diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
 --- a/dom/workers/ServiceWorkerManager.cpp
 +++ b/dom/workers/ServiceWorkerManager.cpp
-@@ -1103,16 +1103,41 @@ ServiceWorkerManager::SendNotificationCl
+@@ -1103,16 +1103,42 @@ ServiceWorkerManager::SendNotificationCl
                                                   const nsAString& aBehavior)
  {
    return SendNotificationEvent(NS_LITERAL_STRING(NOTIFICATION_CLOSE_EVENT_NAME),
@@ -488,13 +489,14 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
  }
  
  NS_IMETHODIMP
-+ServiceWorkerManager::SendBackgroundSyncEvent(const nsACString& aOriginAttributes,
++ServiceWorkerManager::SendBackgroundSyncEvent(const nsACString& aOrigin,
 +                                              const nsACString& aScope,
 +                                              const nsAString& aTag,
 +                                              const bool aLastChance)
 +{
-+  PrincipalOriginAttributes attrs;
-+  if (!attrs.PopulateFromSuffix(aOriginAttributes)) {
++  nsAutoCString originNoSuffix;
++  OriginAttributes attrs;
++  if (!attrs.PopulateFromOrigin(aOrigin, originNoSuffix)) {
 +    return NS_ERROR_INVALID_ARG;
 +  }
 +
@@ -533,24 +535,24 @@ diff --git a/dom/workers/ServiceWorkerManagerChild.cpp b/dom/workers/ServiceWork
    return IPC_OK();
  }
  
-+bool
++mozilla::ipc::IPCResult
 +ServiceWorkerManagerChild::RecvNotifyBackgroundSyncEvent(
 +    const PrincipalInfo& aPrincipalInfo, const nsString& aScope,
 +    const nsString& aTag, const bool& aLastChance)
 +{
 +  if (mShuttingDown) {
-+    return true;
++    return IPC_OK();
 +  }
 +
 +  nsCOMPtr<nsIPrincipal> principal = PrincipalInfoToPrincipal(aPrincipalInfo);
 +  if (NS_WARN_IF(!principal)) {
-+    return true;
++    return IPC_OK();
 +  }
 +
 +  nsAutoCString originSuffix;
 +  nsresult rv = principal->GetOriginSuffix(originSuffix);
 +  if (NS_WARN_IF(NS_FAILED(rv))) {
-+    return true;
++    return IPC_OK();
 +  }
 +
 +  RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
@@ -559,7 +561,7 @@ diff --git a/dom/workers/ServiceWorkerManagerChild.cpp b/dom/workers/ServiceWork
 +  swm->SendBackgroundSyncEvent(originSuffix,
 +                               NS_ConvertUTF16toUTF8(aScope),
 +                               aTag, aLastChance);
-+  return true;
++  return IPC_OK();
 +}
 +
  } // namespace workers
@@ -577,10 +579,10 @@ diff --git a/dom/workers/ServiceWorkerManagerChild.h b/dom/workers/ServiceWorker
  
    virtual mozilla::ipc::IPCResult RecvNotifyRemoveAll() override;
  
-+  virtual bool RecvNotifyBackgroundSyncEvent(const PrincipalInfo& aPrincipalInfo,
-+                                             const nsString& aScope,
-+                                             const nsString& aTag,
-+                                             const bool& aLastChance) override;
++  virtual mozilla::ipc::IPCResult RecvNotifyBackgroundSyncEvent(const PrincipalInfo& aPrincipalInfo,
++                                                                const nsString& aScope,
++                                                                const nsString& aTag,
++                                                                const bool& aLastChance) override;
 +
  private:
    ServiceWorkerManagerChild()
