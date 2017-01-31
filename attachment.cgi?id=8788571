@@ -1,0 +1,299 @@
+# HG changeset patch
+# User Fernando Jimenez <ferjmoreno@gmail.com>
+# Parent  9bbb2a307415811b5aa115f1a15c2b2def31bebf
+Bug 1217544 - Implement one-off BackgroundSync API. Part 6: Online state observer. r=baku
+
+diff --git a/dom/backgroundsync/OnlineStateObserver.cpp b/dom/backgroundsync/OnlineStateObserver.cpp
+new file mode 100644
+--- /dev/null
++++ b/dom/backgroundsync/OnlineStateObserver.cpp
+@@ -0,0 +1,186 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#include "OnlineStateObserver.h"
++
++#include "mozilla/ipc/BackgroundParent.h"
++#include "nsIOService.h"
++
++namespace mozilla {
++namespace dom {
++
++/**
++ * ShutdownRunnable
++ */
++class ShutdownRunnable final : public Runnable
++{
++public:
++  explicit ShutdownRunnable(OnlineStateObserver* aObserver)
++    : mObserver(aObserver)
++  {}
++
++  NS_IMETHOD
++  Run() override
++  {
++    AssertIsOnMainThread();
++
++    nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
++    if (obs) {
++      obs->RemoveObserver(mObserver, NS_IOSERVICE_OFFLINE_STATUS_TOPIC);
++      obs->RemoveObserver(mObserver, "xpcom-shutdown");
++    }
++    return NS_OK;
++  }
++
++private:
++  ~ShutdownRunnable() {};
++
++  RefPtr<OnlineStateObserver> mObserver;
++};
++
++/**
++ * OnlineStateChangeNotification
++ */
++class OnlineStateChangeNotification final : public Runnable
++{
++public:
++  OnlineStateChangeNotification(OnlineStateObserver::Listener* aListener,
++                                const OnlineStateObserver::OnlineState aState)
++    : mListener(aListener)
++    , mState(aState)
++  {
++    MOZ_ASSERT(mListener);
++  }
++
++  NS_IMETHOD
++  Run() override
++  {
++    AssertIsOnBackgroundThread();
++    MOZ_ASSERT(mListener);
++
++    mListener->OnOnlineStateChanged(mState);
++
++    return NS_OK;
++  }
++
++private:
++  ~OnlineStateChangeNotification() {}
++
++  OnlineStateObserver::Listener* mListener;
++  OnlineStateObserver::OnlineState mState;
++};
++
++/**
++ * OnlineStateObserver
++ */
++
++// static
++already_AddRefed<OnlineStateObserver>
++OnlineStateObserver::Init(Listener* aListener)
++{
++  AssertIsOnBackgroundThread();
++
++  RefPtr<OnlineStateObserver> observer = new OnlineStateObserver(aListener);
++
++  MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(observer));
++
++  return observer.forget();
++}
++
++OnlineStateObserver::OnlineStateObserver(Listener* aListener)
++  : mListener(aListener)
++  , mInitiatingThread(NS_GetCurrentThread())
++  , mShuttingDown(false)
++{
++  AssertIsOnBackgroundThread();
++  MOZ_ASSERT(mInitiatingThread);
++  MOZ_ASSERT(mListener);
++}
++
++OnlineStateObserver::~OnlineStateObserver()
++{
++  MOZ_ASSERT(!mListener);
++}
++
++void
++OnlineStateObserver::Shutdown(Listener* aListener)
++{
++  MOZ_ASSERT(aListener == mListener);
++  mShuttingDown = true;
++  mListener = nullptr;
++
++  // We need to remove the observers so we can be destroyed.
++  MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(new ShutdownRunnable(this)));
++}
++
++NS_IMETHODIMP
++OnlineStateObserver::Observe(nsISupports* aSubject, const char* aTopic,
++                             const char16_t* aData)
++{
++  AssertIsOnMainThread();
++  MOZ_ASSERT(!strcmp(aTopic, NS_IOSERVICE_OFFLINE_STATUS_TOPIC) ||
++             !strcmp(aTopic, "xpcom-shutdown"));
++
++  // During xpcom-shutdown we do a nsIOService:SetOffline that
++  // triggers a notification that we should ignore cause the
++  // listener might already be gone.
++  if (!strcmp(aTopic, "xpcom-shutdown")) {
++    mShuttingDown = true;
++  }
++
++  if (mShuttingDown) {
++    return NS_OK;
++  }
++
++  // Here aTopic is NS_IOSERVICE_OFFLINE_STATUS_TOPIC
++
++  OnlineState state = eOffline;
++  if (nsDependentString(aData).EqualsLiteral(NS_IOSERVICE_ONLINE)) {
++    state = eOnline;
++  }
++
++  mInitiatingThread->Dispatch(
++      new OnlineStateChangeNotification(mListener, state), NS_DISPATCH_NORMAL);
++
++  return NS_OK;
++}
++
++NS_IMETHODIMP
++OnlineStateObserver::Run()
++{
++  AssertIsOnMainThread();
++
++  nsCOMPtr<nsIObserverService> os = services::GetObserverService();
++  if (NS_WARN_IF(!os)) {
++    return NS_ERROR_FAILURE;
++  }
++
++  nsresult rv = os->AddObserver(this, NS_IOSERVICE_OFFLINE_STATUS_TOPIC,
++                                /* holdsWeak */ false);
++  NS_ENSURE_SUCCESS(rv, rv);
++
++  rv = os->AddObserver(this, "xpcom-shutdown", /* holdsWeak */ false);
++  NS_ENSURE_SUCCESS(rv, rv);
++
++  nsCOMPtr<nsIIOService> ioService = services::GetIOService();
++  NS_ENSURE_STATE(ioService);
++
++  bool offline = true;
++  OnlineState state = eUnknown;
++  if (NS_SUCCEEDED(ioService->GetOffline(&offline))) {
++    state = offline ? eOffline : eOnline;
++  }
++
++  mInitiatingThread->Dispatch(
++      new OnlineStateChangeNotification(mListener, state), NS_DISPATCH_NORMAL);
++
++  return NS_OK;
++}
++
++NS_IMPL_ISUPPORTS(OnlineStateObserver, nsIRunnable, nsIObserver)
++
++} // namespace dom
++} // namespace mozilla
+diff --git a/dom/backgroundsync/OnlineStateObserver.h b/dom/backgroundsync/OnlineStateObserver.h
+new file mode 100644
+--- /dev/null
++++ b/dom/backgroundsync/OnlineStateObserver.h
+@@ -0,0 +1,66 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
++ * You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#ifndef mozilla_dom_OnlineStateObserver_h
++#define mozilla_dom_OnlineStateObserver_h
++
++#include "nsIObserver.h"
++#include "nsIRunnable.h"
++#include "nsIThread.h"
++
++namespace mozilla {
++namespace dom {
++
++class OnlineStateObserver final : public nsIRunnable
++                                , public nsIObserver
++{
++public:
++  NS_DECL_THREADSAFE_ISUPPORTS
++  NS_DECL_NSIRUNNABLE
++  NS_DECL_NSIOBSERVER
++
++  typedef enum {
++    eOnline,
++    eOffline,
++    eUnknown
++  } OnlineState;
++
++  // An interface to be implemented by code wishing to use the
++  // OnlineStateObserver.
++  // Note, the Listener implementation is responsible for calling
++  // Shutdown() on the OnlineStateObserver to clear the weak
++  // reference.
++  class Listener
++  {
++  public:
++    virtual void OnOnlineStateChanged(OnlineState aState) = 0;
++  };
++
++  static already_AddRefed<OnlineStateObserver>
++  Init(Listener* aListener);
++
++  // The Listener must call Shutdown() when it no
++  // longer need to receive online state change notifications.
++  void Shutdown(Listener* aListener);
++
++private:
++  OnlineStateObserver(Listener* aListener);
++  ~OnlineStateObserver();
++
++  // Weak reference cleared by Shutdown().
++  Listener* MOZ_NON_OWNING_REF mListener;
++  RefPtr<nsIThread> mInitiatingThread;
++
++  // On xpcom-shutdown we do a nsIOService:SetOffline that
++  // triggers a notification that we should ignore cause the
++  // listener might already be gone.
++  bool mShuttingDown;
++};
++
++} // namespace dom
++} // namespace mozilla
++
++#endif // mozilla_dom_OnlineStateObserver_h
+diff --git a/dom/backgroundsync/moz.build b/dom/backgroundsync/moz.build
+--- a/dom/backgroundsync/moz.build
++++ b/dom/backgroundsync/moz.build
+@@ -12,25 +12,27 @@ EXPORTS.mozilla.dom.backgroundsync += [
+ UNIFIED_SOURCES += [
+     'BackgroundSync.cpp',
+     'BackgroundSyncChild.cpp',
+     'BackgroundSyncParent.cpp',
+     'ChromeDBSchema.cpp',
+     'ChromeStorageManager.cpp',
+     'DBAction.cpp',
+     'DBSchema.cpp',
++    'OnlineStateObserver.cpp',
+     'QuotaClient.cpp',
+     'StorageManager.cpp',
+     'StorageManagerId.cpp'
+ ]
+ 
+ IPDL_SOURCES += [
+     'BackgroundSyncIPCTypes.ipdlh',
+     'PBackgroundSync.ipdl'
+ ]
+ 
+ LOCAL_INCLUDES += [
+-    '/dom/workers'
++    '/dom/workers',
++    '/netwerk/base'
+ ]
+ 
+ include('/ipc/chromium/chromium-config.mozbuild')
+ 
+ FINAL_LIBRARY = 'xul'

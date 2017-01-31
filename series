@@ -5,10 +5,11 @@ attachment.cgi?id=8788562
 #bug1217544.background.sync.part1.webidl.patch
 #bug1217544.background.sync.part2.serviceworkerregistration.patch
 #bug1217544.background.sync.part3.ipc.patch
-bug1217544.background.sync.part4.syncevent.patch
+#bug1217544.background.sync.part4.syncevent.patch
 bug1217544.background.sync.part5.quotaclienthelpers.patch
 bug1217544.background.sync.part6.mozstorageincrementalvacuum.patch
 bug1217544.background.sync.part7.managerid.patch
+attachment.cgi?id=8788571
 bug1217544.background.sync.part8.onlineobserver.patch
 bug1217544.background.sync.part9.service.patch
 bug1217544.background.sync.tests.patch
