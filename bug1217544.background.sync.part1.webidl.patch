@@ -266,13 +266,13 @@ new file mode 100644
 diff --git a/dom/bindings/Bindings.conf b/dom/bindings/Bindings.conf
 --- a/dom/bindings/Bindings.conf
 +++ b/dom/bindings/Bindings.conf
-@@ -98,16 +98,21 @@ DOMInterfaces = {
+@@ -94,16 +94,21 @@ DOMInterfaces = {
+ 'AudioNode' : {
+     'concrete': False,
+     'binaryNames': {
+         'channelCountMode': 'channelCountModeValue',
          'channelInterpretation': 'channelInterpretationValue',
      },
- },
- 
- 'BarProp': {
-     'headerFile': 'mozilla/dom/BarProps.h',
  },
  
 +'BackgroundSync': {
@@ -280,12 +280,12 @@ diff --git a/dom/bindings/Bindings.conf b/dom/bindings/Bindings.conf
 +    'headerFile': 'mozilla/dom/backgroundsync/BackgroundSync.h',
 +},
 +
- 'BaseAudioContext': {
-     'nativeType': 'mozilla::dom::AudioContext',
+ 'BarProp': {
+     'headerFile': 'mozilla/dom/BarProps.h',
  },
  
- 'Blob': {
-     'headerFile': 'mozilla/dom/File.h',
+ 'BaseAudioContext': {
+     'nativeType': 'mozilla::dom::AudioContext',
  },
  
 diff --git a/dom/moz.build b/dom/moz.build
