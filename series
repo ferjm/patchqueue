@@ -14,7 +14,7 @@ attachment.cgi?id=8788574
 attachment.cgi?id=8788575
 #bug1217544.background.sync.part8.onlineobserver.patch
 #bug1217544.background.sync.part9.service.patch
-bug1217544.background.sync.tests.patch
+#bug1217544.background.sync.tests.patch
 bug1300844.cache.quotaclient.helpers.patch
 bug1308447.cache.mozstorage.common.patch
 try-all
