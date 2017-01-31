@@ -321,7 +321,7 @@ diff --git a/dom/tests/mochitest/general/test_interfaces.html b/dom/tests/mochit
  // IMPORTANT: Do not change this list without review from a DOM peer!
      "AudioStreamTrack",
  // IMPORTANT: Do not change this list without review from a DOM peer!
-+    {name: "BackgroundSync", b2g: true},
++    {name: "BackgroundSync", disabled: true},
 +// IMPORTANT: Do not change this list without review from a DOM peer!
      "BarProp",
  // IMPORTANT: Do not change this list without review from a DOM peer!
