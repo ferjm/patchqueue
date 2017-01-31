@@ -1,5 +1,6 @@
 attachment.cgi?id=8788555
-bug1217544.background.sync.part1.webidl.patch
+attachment.cgi?id=8788558
+#bug1217544.background.sync.part1.webidl.patch
 bug1217544.background.sync.part2.serviceworkerregistration.patch
 bug1217544.background.sync.part3.ipc.patch
 bug1217544.background.sync.part4.syncevent.patch
