@@ -72,7 +72,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
 +    return mActor->ExecuteOp(mPromise, mOp);
 +  }
 +
-+  NS_IMETHOD Cancel() override
++  nsresult Cancel() override
 +  {
 +    mActor = nullptr;
 +    mPromise = nullptr;
@@ -111,7 +111,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
 +    return NS_OK;
 +  }
 +
-+  NS_IMETHOD Cancel() override
++  nsresult Cancel() override
 +  {
 +    mActor = nullptr;
 +    return NS_OK;
@@ -149,7 +149,7 @@ diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/Backgrou
 +private:
 +  ~BackgroundSyncHolder()
 +  {
-+    MOZ_COUNT_CTOR(BackgroundSyncHolder);
++    MOZ_COUNT_DTOR(BackgroundSyncHolder);
 +  }
 +};
 +
@@ -679,30 +679,30 @@ new file mode 100644
 +  return NS_OK;
 +}
 +
-+bool
++mozilla::ipc::IPCResult
 +BackgroundSyncChild::RecvResponse(const nsID& aRequestId,
 +                                  const SyncOpResponse& aResponse)
 +{
 +  Promise* p = GetPendingRequest(aRequestId);
 +  if (NS_WARN_IF(!p)) {
 +    // This should never happen.
-+    return false;
++    return IPC_FAIL_NO_REASON(this);
 +  }
 +
 +  switch(aResponse.type()) {
 +    case SyncOpResponse::TSyncRegisterResponse:
 +      p->MaybeResolve(true);
-+      return true;
++      return IPC_OK();
 +    case SyncOpResponse::TSyncGetTagsResponse:
 +      p->MaybeResolve(aResponse.get_SyncGetTagsResponse().mTags());
-+      return true;
++      return IPC_OK();
 +    case SyncOpResponse::TSyncOpError:
 +      p->MaybeReject(
 +          static_cast<nsresult>(aResponse.get_SyncOpError().mCode()));
-+      return true;
++      return IPC_OK();
 +    default:
 +      MOZ_CRASH("Unknown BackgroundSync response");
-+      return false;
++      return IPC_FAIL(this, "Unknown BackgroundSync response");
 +  }
 +}
 +
@@ -713,7 +713,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncChild.h b/dom/backgroundsync/Backg
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncChild.h
-@@ -0,0 +1,64 @@
+@@ -0,0 +1,65 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -755,8 +755,9 @@ new file mode 100644
 +
 +  nsresult ExecuteOp(Promise* aPromise, SyncOp* aOp);
 +
-+  virtual bool RecvResponse(const nsID& aRequestId,
-+                            const SyncOpResponse& aResponse) override;
++  virtual mozilla::ipc::IPCResult
++  RecvResponse(const nsID& aRequestId,
++               const SyncOpResponse& aResponse) override;
 +
 +private:
 +  BackgroundSyncChild();
@@ -841,7 +842,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.cpp b/dom/backgroundsync/Ba
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncParent.cpp
-@@ -0,0 +1,84 @@
+@@ -0,0 +1,86 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -875,8 +876,9 @@ new file mode 100644
 +  AssertIsOnBackgroundThread();
 +}
 +
-+bool BackgroundSyncParent::RecvRequest(const nsID& aRequestId,
-+                                       const SyncOp& aOp)
++mozilla::ipc::IPCResult
++BackgroundSyncParent::RecvRequest(const nsID& aRequestId,
++                                  const SyncOp& aOp)
 +{
 +  AssertIsOnBackgroundThread();
 +
@@ -902,16 +904,17 @@ new file mode 100644
 +      MOZ_CRASH("Unknown BackgroundSync request");
 +    }
 +  }
-+  return true;
++  return IPC_OK();
 +}
 +
-+bool BackgroundSyncParent::RecvShutdown()
++mozilla::ipc::IPCResult
++BackgroundSyncParent::RecvShutdown()
 +{
 +  AssertIsOnBackgroundThread();
 +
 +  Unused << Send__delete__(this);
 +
-+  return true;
++  return IPC_OK();
 +}
 +
 +void
@@ -930,7 +933,7 @@ diff --git a/dom/backgroundsync/BackgroundSyncParent.h b/dom/backgroundsync/Back
 new file mode 100644
 --- /dev/null
 +++ b/dom/backgroundsync/BackgroundSyncParent.h
-@@ -0,0 +1,48 @@
+@@ -0,0 +1,49 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -959,10 +962,11 @@ new file mode 100644
 +  friend class mozilla::ipc::BackgroundParentImpl;
 +
 +public:
-+  virtual bool RecvRequest(const nsID& aRequestId,
-+                           const SyncOp& aOp) override;
++  virtual mozilla::ipc::IPCResult
++  RecvRequest(const nsID& aRequestId, const SyncOp& aOp) override;
 +
-+  virtual bool RecvShutdown() override;
++  virtual mozilla::ipc::IPCResult
++  RecvShutdown() override;
 +
 +  void NotifyResponse(const nsID& aRequestId,
 +                      const SyncOpResponse& aResponse);
