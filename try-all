@@ -1,5 +1,5 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  a2533bc01797f092eb09397d5153ebbc31c7e1b2
-try: -b o -p win32 -u none -t none
+# Parent  85f20acc0761e7e99f65f967c8788fd5dd5d477d
+try: -b do -p all -u all -t none
 

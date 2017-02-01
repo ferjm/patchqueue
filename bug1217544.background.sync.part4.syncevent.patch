@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  f7cd4ce4c9ec7ce70bea1a8c167f4698806b59ce
+# Parent  691a63464cfb88fdfdec2f82a8dd1b520b741159
 Bug 1217544 - Implement one-off BackgroundSync API. Part 4: Sync event. r=baku
 
 diff --git a/dom/backgroundsync/BackgroundSync.cpp b/dom/backgroundsync/BackgroundSync.cpp
@@ -200,8 +200,8 @@ diff --git a/dom/backgroundsync/BackgroundSyncIPCTypes.ipdlh b/dom/backgroundsyn
 diff --git a/dom/bindings/Bindings.conf b/dom/bindings/Bindings.conf
 --- a/dom/bindings/Bindings.conf
 +++ b/dom/bindings/Bindings.conf
-@@ -103,16 +103,22 @@ DOMInterfaces = {
-     'headerFile': 'mozilla/dom/BarProps.h',
+@@ -99,16 +99,22 @@ DOMInterfaces = {
+     },
  },
  
  'BackgroundSync': {
@@ -215,12 +215,12 @@ diff --git a/dom/bindings/Bindings.conf b/dom/bindings/Bindings.conf
 +    'workers': True
 +},
 +
- 'BaseAudioContext': {
-     'nativeType': 'mozilla::dom::AudioContext',
+ 'BarProp': {
+     'headerFile': 'mozilla/dom/BarProps.h',
  },
  
- 'Blob': {
-     'headerFile': 'mozilla/dom/File.h',
+ 'BaseAudioContext': {
+     'nativeType': 'mozilla::dom::AudioContext',
  },
  
 diff --git a/dom/interfaces/base/nsIServiceWorkerManager.idl b/dom/interfaces/base/nsIServiceWorkerManager.idl

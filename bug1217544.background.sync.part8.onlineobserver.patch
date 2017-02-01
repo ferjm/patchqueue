@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  f3d63ca9f604f1ef27b90848f4272472215678b8
+# Parent  55e956529de1fb6d404a48f7f96265bf32cd73bd
 Bug 1217544 - Implement one-off BackgroundSync API. Part 8: Online state observer. r=baku
 
 diff --git a/dom/backgroundsync/OnlineStateObserver.cpp b/dom/backgroundsync/OnlineStateObserver.cpp
