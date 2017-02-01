@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  98e05907234c11aad78710c002a00a852d70f196
+# Parent  04879772d7718635537d15b42b2d4ad2e6943460
 Bug 1217544 - Implement one-off BackgroundSync API. Tests. r=baku
 
 diff --git a/dom/backgroundsync/moz.build b/dom/backgroundsync/moz.build
@@ -159,6 +159,74 @@ new file mode 100644
 +  });
 +
 +</script>
++</body>
++</html>
+diff --git a/dom/backgroundsync/tests/test_qm_restart_origin.html b/dom/backgroundsync/tests/test_qm_restart_origin.html
+new file mode 100644
+--- /dev/null
++++ b/dom/backgroundsync/tests/test_qm_restart_origin.html
+@@ -0,0 +1,63 @@
++<!DOCTYPE HTML>
++<html>
++<!--
++Bug 1217544: Background Sync.
++
++Any copyright is dedicated to the Public Domain.
++http://creativecommons.org/licenses/publicdomain/
++-->
++<head>
++  <meta http-equiv="Content-type" content="text/html;charset=UTF-8">
++  <title>Test BackgroundSync with QuotaManager Restart</title>
++  <script type="text/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
++  <script type="text/javascript" src="/tests/SimpleTest/SpawnTask.js"></script>
++  <script type="text/javascript" src="/tests/dom/backgroundsync/tests/test_utils.js"></script>
++  <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
++</head>
++<body>
++  <a target="_blank" href="https://bugzilla.mozilla.org/show_bug.cgi?id=1217544">
++    Mozilla Bug 1217544
++  </a>
++  <p id="display"></p>
++  <div id="content" style="display: none">
++
++  </div>
++
++  <script class="testbody" type="text/javascript">
++
++  function clearStorage() {
++    return new Promise(function(resolve, reject) {
++      var qms = SpecialPowers.Services.qms;
++      var request = qms.clear();
++      var cb = SpecialPowers.wrapCallback(resolve);
++      request.callback = cb;
++    });
++  }
++
++  var registration;
++  add_task(function* start() {
++    yield setupPrefs(true /* backgroundSyncEnabled */);
++    var url = "worker.js" + "?" + (Math.random());
++    registration = yield navigator.serviceWorker.register(url, {scope: "."});
++  });
++
++  add_task(function* goOffline() {
++    yield changeOfflineState(true);
++  });
++
++  add_task(function* subscribe() {
++    yield registration.sync.register("tag");
++    var tags = yield registration.sync.getTags();
++    is(tags.length, 1, "Should have 1 registered tag");
++    is(tags[0], "tag", "Should have a tag named 'tag' registered");
++  });
++
++  add_task(function* clearStorageAndGetTags() {
++    yield clearStorage();
++    var tags = yield registration.sync.getTags();
++    is(tags.length, 0, "Should have 0 registered tag");
++    yield unregisterWorker(".");
++  });
++  </script>
 +</body>
 +</html>
 diff --git a/dom/backgroundsync/tests/test_utils.js b/dom/backgroundsync/tests/test_utils.js
