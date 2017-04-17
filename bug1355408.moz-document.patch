@@ -360,7 +360,25 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
      /// Request a stylesheet after parsing a given `@import` rule.
      ///
      /// The called code is responsible to update the `stylesheet` rules field
-@@ -922,16 +964,18 @@ enum AtRulePrelude {
+@@ -894,16 +936,17 @@ struct TopLevelRuleParser<'a> {
+ 
+ impl<'b> TopLevelRuleParser<'b> {
+     fn nested<'a: 'b>(&'a self) -> NestedRuleParser<'a, 'b> {
+         NestedRuleParser {
+             stylesheet_origin: self.stylesheet_origin,
+             shared_lock: self.shared_lock,
+             context: &self.context,
+             namespaces: self.namespaces,
++            loader: self.loader
+         }
+     }
+ }
+ 
+ #[derive(Eq, PartialEq, Ord, PartialOrd, Copy, Clone)]
+ #[allow(missing_docs)]
+ pub enum State {
+     Start = 1,
+@@ -922,16 +965,18 @@ enum AtRulePrelude {
      /// An @supports rule, with its conditional
      Supports(SupportsCondition),
      /// A @viewport rule prelude.
@@ -379,7 +397,36 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
      type AtRule = CssRule;
  
      fn parse_prelude(&mut self, name: &str, input: &mut Parser)
-@@ -1122,16 +1166,20 @@ impl<'a, 'b> AtRuleParser for NestedRule
+@@ -1043,26 +1088,28 @@ impl<'a> QualifiedRuleParser for TopLeve
+ }
+ 
+ #[derive(Clone)]  // shallow, relatively cheap .clone
+ struct NestedRuleParser<'a, 'b: 'a> {
+     stylesheet_origin: Origin,
+     shared_lock: &'a SharedRwLock,
+     context: &'a ParserContext<'b>,
+     namespaces: &'b Namespaces,
++    loader: Option<&'a StylesheetLoader>,
+ }
+ 
+ impl<'a, 'b> NestedRuleParser<'a, 'b> {
+     fn parse_nested_rules(&self, input: &mut Parser, rule_type: CssRuleType) -> Arc<Locked<CssRules>> {
+         let context = ParserContext::new_with_rule_type(self.context, Some(rule_type));
+         let nested_parser = NestedRuleParser {
+             stylesheet_origin: self.stylesheet_origin,
+             shared_lock: self.shared_lock,
+             context: &context,
+             namespaces: self.namespaces,
++            loader: self.loader,
+         };
+         let mut iter = RuleListParser::new_for_nested_rule(input, nested_parser);
+         let mut rules = Vec::new();
+         while let Some(result) = iter.next() {
+             match result {
+                 Ok(rule) => rules.push(rule),
+                 Err(range) => {
+                     let pos = range.start;
+@@ -1122,16 +1169,20 @@ impl<'a, 'b> AtRuleParser for NestedRule
              },
              "page" => {
                  if cfg!(feature = "gecko") {
@@ -400,7 +447,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
          match prelude {
              AtRulePrelude::FontFace => {
                  let context = ParserContext::new_with_rule_type(self.context, Some(CssRuleType::FontFace));
-@@ -1166,16 +1214,24 @@ impl<'a, 'b> AtRuleParser for NestedRule
+@@ -1166,16 +1217,29 @@ impl<'a, 'b> AtRuleParser for NestedRule
              }
              AtRulePrelude::Page => {
                  let context = ParserContext::new_with_rule_type(self.context, Some(CssRuleType::Page));
@@ -410,6 +457,11 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
                  )))))
              }
 +            AtRulePrelude::Document(cond) => {
++                if let Some(_) = self.loader {
++                    println!("YAY LOADER");
++                } else {
++                    println!("CRAP");
++                }
 +                let enabled = cond.eval(self.context);
 +                Ok(CssRule::Document(Arc::new(self.shared_lock.wrap(DocumentRule {
 +                    condition: cond,
