@@ -1,0 +1,410 @@
+# HG changeset patch
+# Parent  c697e756f738ce37abc56f31bfbc48f55625d617
+stylo: Support @-moz-document rule. r=emilio
+
+diff --git a/servo/components/style/document.rs b/servo/components/style/document.rs
+new file mode 100644
+--- /dev/null
++++ b/servo/components/style/document.rs
+@@ -0,0 +1,132 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++//! [@document rules](https://www.w3.org/TR/2012/WD-css3-conditional-20120911/#at-document)
++//! initially in CSS Conditional Rules Module Level 3, @document has been postponed to the level 4.
++//! We implement the prefixed `@-moz-document`.
++
++//use regex::Regex;
++
++use cssparser::Parser;
++use parser::{Parse, ParserContext};
++use std::fmt;
++use style_traits::ToCss;
++use values::specified::url::SpecifiedUrl;
++
++/// A URL matching function for a `@document` rule's condition.
++#[derive(Debug)]
++pub enum UrlMatchingFunction {
++    /// Exact url matching function.
++    Url(SpecifiedUrl),
++    /// Url prefix matching function.
++    UrlPrefix(String),
++    /// Domain matching function.
++    Domain(String),
++    /// Regular expression matching function.
++    RegExp(String),
++}
++
++impl UrlMatchingFunction {
++    /// Parse a URL matching function for a`@document` rule's condition.
++    pub fn parse(context: &ParserContext, input: &mut Parser)
++        -> Result<UrlMatchingFunction, ()> {
++        if let Ok(url) = input.try(|input| SpecifiedUrl::parse(context, input)) {
++            Ok(UrlMatchingFunction::Url(url))
++            // TODO UrlPrefix, Domain and RegExp
++        } else {
++            Err(())
++        }
++    }
++
++    /// Evaluate a URL matching function.
++    pub fn eval(&self, _: &ParserContext) -> bool {
++        match *self {
++            /// Exact URL matching function. It evaluates to true whenever the
++            /// URL of the document being styled is exactly the URL given.
++            UrlMatchingFunction::Url(_) => {
++                false
++            },
++            /// URL prefix matching function. It evaluates to true whenever the
++            /// URL of the document being styled has the argument to the
++            /// function as an initial substring (which is true when the two
++            /// strings are equal). When the argument is the empty string,
++            /// it evaluates to true for all documents.
++            UrlMatchingFunction::UrlPrefix(_) => {
++                false
++            },
++            /// Domain matching function. It evaluates to true whenever the URL
++            /// of the document being styled has a host subcomponent and that
++            /// host subcomponent is exactly the argument to the ‘domain()’
++            /// function or a final substring of the host component is a
++            /// period (U+002E) immediately followed by the argument to the
++            /// ‘domain()’ function.
++            UrlMatchingFunction::Domain(_) => {
++                false
++            },
++            /// Regular expression matching function. It evaluates to true
++            /// whenever the regular expression matches the entirety of the URL
++            /// of the document being styled.
++            UrlMatchingFunction::RegExp(_) => {
++                false
++            },
++        }
++    }
++}
++
++impl ToCss for UrlMatchingFunction {
++    fn to_css<W>(&self, dest: &mut W) -> fmt::Result
++        where W: fmt::Write {
++        match *self {
++            UrlMatchingFunction::Url(ref url) => {
++                url.to_css(dest)
++            },
++            UrlMatchingFunction::UrlPrefix(ref url_prefix) => {
++                dest.write_str("url-prefix(")?;
++                dest.write_str(url_prefix)?;
++                dest.write_str(")")
++            },
++            UrlMatchingFunction::Domain(ref domain) => {
++                dest.write_str("domain(")?;
++                dest.write_str(domain)?;
++                dest.write_str(")")
++            },
++            UrlMatchingFunction::RegExp(ref regex) => {
++                dest.write_str("regexp(")?;
++                dest.write_str(regex)?;
++                dest.write_str(")")
++            },
++        }
++    }
++}
++
++/// A `@document` rule's condition.
++///
++/// https://www.w3.org/TR/2012/WD-css3-conditional-20120911/#at-document
++#[derive(Debug)]
++pub struct DocumentCondition {
++    /// The `@document` rule's condition is written as a comma-separated list of
++    /// URL matching functions, and the condition evaluates to true whenever any
++    /// one of those functions evaluates to true.
++    pub url_matching_functions: Vec<UrlMatchingFunction>,
++}
++
++impl DocumentCondition {
++    /// Parse a document condition.
++    pub fn parse(_: &ParserContext, _: &mut Parser)
++        -> Result<DocumentCondition, ()> {
++            Err(())
++    }
++
++    /// Evaluate a document condition.
++    pub fn eval(&self, _: &ParserContext) -> bool {
++        true
++    }
++}
++
++impl ToCss for DocumentCondition {
++    fn to_css<W>(&self, dest: &mut W) -> fmt::Result
++        where W: fmt::Write {
++            dest.write_str("TODO")
++    }
++}
+diff --git a/servo/components/style/lib.rs b/servo/components/style/lib.rs
+--- a/servo/components/style/lib.rs
++++ b/servo/components/style/lib.rs
+@@ -86,16 +86,17 @@ pub mod animation;
+ #[cfg(feature = "servo")] pub mod attr;
+ pub mod bezier;
+ pub mod bloom;
+ pub mod cache;
+ pub mod cascade_info;
+ pub mod context;
+ pub mod custom_properties;
+ pub mod data;
++pub mod document;
+ pub mod dom;
+ pub mod element_state;
+ #[cfg(feature = "servo")] mod encoding_support;
+ pub mod error_reporting;
+ pub mod font_face;
+ pub mod font_metrics;
+ #[cfg(feature = "gecko")] #[allow(unsafe_code)] pub mod gecko;
+ #[cfg(feature = "gecko")] #[allow(unsafe_code)] pub mod gecko_bindings;
+diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/stylesheets.rs
+--- a/servo/components/style/stylesheets.rs
++++ b/servo/components/style/stylesheets.rs
+@@ -5,16 +5,17 @@
+ //! Style sheets and their CSS rules.
+ 
+ #![deny(missing_docs)]
+ 
+ use {Atom, Prefix, Namespace};
+ use cssparser::{AtRuleParser, Parser, QualifiedRuleParser};
+ use cssparser::{AtRuleType, RuleListParser, SourcePosition, Token, parse_one_rule};
+ use cssparser::ToCss as ParserToCss;
++use document::DocumentCondition;
+ use error_reporting::ParseErrorReporter;
+ #[cfg(feature = "servo")]
+ use font_face::FontFaceRuleData;
+ use font_face::parse_font_face_block;
+ #[cfg(feature = "gecko")]
+ pub use gecko::rules::FontFaceRule;
+ #[cfg(feature = "gecko")]
+ use gecko_bindings::structs::URLExtraData;
+@@ -287,16 +288,17 @@ pub enum CssRule {
+     Import(Arc<Locked<ImportRule>>),
+     Style(Arc<Locked<StyleRule>>),
+     Media(Arc<Locked<MediaRule>>),
+     FontFace(Arc<Locked<FontFaceRule>>),
+     Viewport(Arc<Locked<ViewportRule>>),
+     Keyframes(Arc<Locked<KeyframesRule>>),
+     Supports(Arc<Locked<SupportsRule>>),
+     Page(Arc<Locked<PageRule>>),
++    Document(Arc<Locked<DocumentRule>>),
+ }
+ 
+ #[allow(missing_docs)]
+ #[derive(PartialEq, Eq, Copy, Clone)]
+ pub enum CssRuleType {
+     // https://drafts.csswg.org/cssom/#the-cssrule-interface
+     Style               = 1,
+     Charset             = 2,
+@@ -309,16 +311,18 @@ pub enum CssRuleType {
+     Keyframe            = 8,
+     // https://drafts.csswg.org/cssom/#the-cssrule-interface
+     Margin              = 9,
+     Namespace           = 10,
+     // https://drafts.csswg.org/css-counter-styles-3/#extentions-to-cssrule-interface
+     CounterStyle        = 11,
+     // https://drafts.csswg.org/css-conditional-3/#extentions-to-cssrule-interface
+     Supports            = 12,
++    // https://www.w3.org/TR/2012/WD-css3-conditional-20120911/#extentions-to-cssrule-interface
++    Document            = 13,
+     // https://drafts.csswg.org/css-fonts-3/#om-fontfeaturevalues
+     FontFeatureValues   = 14,
+     // https://drafts.csswg.org/css-device-adapt/#css-rule-interface
+     Viewport            = 15,
+ }
+ 
+ /// Error reporter which silently forgets errors
+ pub struct MemoryHoleReporter;
+@@ -348,16 +352,17 @@ impl CssRule {
+             CssRule::Import(_)    => CssRuleType::Import,
+             CssRule::Media(_)     => CssRuleType::Media,
+             CssRule::FontFace(_)  => CssRuleType::FontFace,
+             CssRule::Keyframes(_) => CssRuleType::Keyframes,
+             CssRule::Namespace(_) => CssRuleType::Namespace,
+             CssRule::Viewport(_)  => CssRuleType::Viewport,
+             CssRule::Supports(_)  => CssRuleType::Supports,
+             CssRule::Page(_)      => CssRuleType::Page,
++            CssRule::Document(_)  => CssRuleType::Document,
+         }
+     }
+ 
+     fn rule_state(&self) -> State {
+         match *self {
+             // CssRule::Charset(..) => State::Start,
+             CssRule::Import(..) => State::Imports,
+             CssRule::Namespace(..) => State::Namespaces,
+@@ -401,16 +406,26 @@ impl CssRule {
+                 let enabled = supports_rule.enabled;
+                 if enabled {
+                     let rules = &supports_rule.rules.read_with(guard).0;
+                     f(rules, None)
+                 } else {
+                     f(&[], None)
+                 }
+             }
++            CssRule::Document(ref lock) => {
++                let document_rule = lock.read_with(guard);
++                let enabled = document_rule.enabled;
++                if enabled {
++                    let rules = &document_rule.rules.read_with(guard).0;
++                    f(rules, None)
++                } else {
++                    f(&[], None)
++                }
++            }
+         }
+     }
+ 
+     // input state is None for a nested rule
+     // Returns a parsed CSS rule and the final state of the parser
+     #[allow(missing_docs)]
+     pub fn parse(css: &str,
+                  parent_stylesheet: &Stylesheet,
+@@ -458,16 +473,17 @@ impl ToCssWithGuard for CssRule {
+             CssRule::Import(ref lock) => lock.read_with(guard).to_css(guard, dest),
+             CssRule::Style(ref lock) => lock.read_with(guard).to_css(guard, dest),
+             CssRule::FontFace(ref lock) => lock.read_with(guard).to_css(guard, dest),
+             CssRule::Viewport(ref lock) => lock.read_with(guard).to_css(guard, dest),
+             CssRule::Keyframes(ref lock) => lock.read_with(guard).to_css(guard, dest),
+             CssRule::Media(ref lock) => lock.read_with(guard).to_css(guard, dest),
+             CssRule::Supports(ref lock) => lock.read_with(guard).to_css(guard, dest),
+             CssRule::Page(ref lock) => lock.read_with(guard).to_css(guard, dest),
++            CssRule::Document(ref lock) => lock.read_with(guard).to_css(guard, dest),
+         }
+     }
+ }
+ 
+ #[derive(Debug, PartialEq)]
+ #[allow(missing_docs)]
+ pub struct NamespaceRule {
+     /// `None` for the default Namespace
+@@ -650,16 +666,41 @@ impl ToCssWithGuard for StyleRule {
+         Ok(())
+     }
+ }
+ 
+ /// A @font-face rule
+ #[cfg(feature = "servo")]
+ pub type FontFaceRule = FontFaceRuleData;
+ 
++#[derive(Debug)]
++/// A @-moz-document rule
++pub struct DocumentRule {
++    /// The parsed condition
++    pub condition: DocumentCondition,
++    /// Child rules
++    pub rules: Arc<Locked<CssRules>>,
++    /// The result of evaluating the condition
++    pub enabled: bool,
++}
++
++impl ToCssWithGuard for DocumentRule {
++    fn to_css<W>(&self, guard: &SharedRwLockReadGuard, dest: &mut W) -> fmt::Result
++    where W: fmt::Write {
++        try!(dest.write_str("@-moz-document "));
++        try!(self.condition.to_css(dest));
++        try!(dest.write_str(" {"));
++        for rule in self.rules.read_with(guard).0.iter() {
++            try!(dest.write_str(" "));
++            try!(rule.to_css(guard, dest));
++        }
++        dest.write_str(" }")
++    }
++}
++
+ impl Stylesheet {
+     /// Updates an empty stylesheet from a given string of text.
+     pub fn update_from_str(existing: &Stylesheet,
+                            css: &str,
+                            url_data: &UrlExtraData,
+                            stylesheet_loader: Option<&StylesheetLoader>,
+                            error_reporter: &ParseErrorReporter) {
+         let mut namespaces = Namespaces::default();
+@@ -844,16 +885,17 @@ macro_rules! rule_filter {
+ rule_filter! {
+     effective_style_rules(Style => StyleRule),
+     effective_media_rules(Media => MediaRule),
+     effective_font_face_rules(FontFace => FontFaceRule),
+     effective_viewport_rules(Viewport => ViewportRule),
+     effective_keyframes_rules(Keyframes => KeyframesRule),
+     effective_supports_rules(Supports => SupportsRule),
+     effective_page_rules(Page => PageRule),
++    effective_document_rules(Document => DocumentRule),
+ }
+ 
+ /// The stylesheet loader is the abstraction used to trigger network requests
+ /// for `@import` rules.
+ pub trait StylesheetLoader {
+     /// Request a stylesheet after parsing a given `@import` rule.
+     ///
+     /// The called code is responsible to update the `stylesheet` rules field
+@@ -922,16 +964,18 @@ enum AtRulePrelude {
+     /// An @supports rule, with its conditional
+     Supports(SupportsCondition),
+     /// A @viewport rule prelude.
+     Viewport,
+     /// A @keyframes rule, with its animation name.
+     Keyframes(Atom),
+     /// A @page rule prelude.
+     Page,
++    /// A @document rule, with its conditional.
++    Document(DocumentCondition),
+ }
+ 
+ 
+ impl<'a> AtRuleParser for TopLevelRuleParser<'a> {
+     type Prelude = AtRulePrelude;
+     type AtRule = CssRule;
+ 
+     fn parse_prelude(&mut self, name: &str, input: &mut Parser)
+@@ -1122,16 +1166,22 @@ impl<'a, 'b> AtRuleParser for NestedRule
+             },
+             "page" => {
+                 if cfg!(feature = "gecko") {
+                     Ok(AtRuleType::WithBlock(AtRulePrelude::Page))
+                 } else {
+                     Err(())
+                 }
+             },
++            "-moz-document" => {
++                println!("MOZ-DOCUMENT!!!!!!");
++                let cond = DocumentCondition::parse(self.context, input)?;
++                println!("CONDITION {:?}", cond);
++                Ok(AtRuleType::WithBlock(AtRulePrelude::Document(cond)))
++            },
+             _ => Err(())
+         }
+     }
+ 
+     fn parse_block(&mut self, prelude: AtRulePrelude, input: &mut Parser) -> Result<CssRule, ()> {
+         match prelude {
+             AtRulePrelude::FontFace => {
+                 let context = ParserContext::new_with_rule_type(self.context, Some(CssRuleType::FontFace));
+@@ -1166,16 +1216,24 @@ impl<'a, 'b> AtRuleParser for NestedRule
+             }
+             AtRulePrelude::Page => {
+                 let context = ParserContext::new_with_rule_type(self.context, Some(CssRuleType::Page));
+                 let declarations = parse_property_declaration_list(&context, input);
+                 Ok(CssRule::Page(Arc::new(self.shared_lock.wrap(PageRule(
+                     Arc::new(self.shared_lock.wrap(declarations))
+                 )))))
+             }
++            AtRulePrelude::Document(cond) => {
++                let enabled = cond.eval(self.context);
++                Ok(CssRule::Document(Arc::new(self.shared_lock.wrap(DocumentRule {
++                    condition: cond,
++                    rules: self.parse_nested_rules(input, CssRuleType::Document),
++                    enabled: enabled,
++                }))))
++            }
+         }
+     }
+ }
+ 
+ impl<'a, 'b> QualifiedRuleParser for NestedRuleParser<'a, 'b> {
+     type Prelude = SelectorList<SelectorImpl>;
+     type QualifiedRule = CssRule;
+ 
