@@ -6,7 +6,7 @@ diff --git a/servo/components/style/document.rs b/servo/components/style/documen
 new file mode 100644
 --- /dev/null
 +++ b/servo/components/style/document.rs
-@@ -0,0 +1,132 @@
+@@ -0,0 +1,143 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -40,9 +40,20 @@ new file mode 100644
 +    /// Parse a URL matching function for a`@document` rule's condition.
 +    pub fn parse(context: &ParserContext, input: &mut Parser)
 +        -> Result<UrlMatchingFunction, ()> {
-+        if let Ok(url) = input.try(|input| SpecifiedUrl::parse(context, input)) {
++        if input.try(|input| input.expect_function_matching("url-prefix")).is_ok() {
++            input.parse_nested_block(|input| {
++                Ok(UrlMatchingFunction::UrlPrefix(input.expect_string()?.into_owned()))
++            })
++        } else if input.try(|input| input.expect_function_matching("domain")).is_ok() {
++            input.parse_nested_block(|input| {
++                Ok(UrlMatchingFunction::Domain(input.expect_string()?.into_owned()))
++            })
++        } else if input.try(|input| input.expect_function_matching("regexp")).is_ok() {
++            input.parse_nested_block(|input| {
++                Ok(UrlMatchingFunction::RegExp(input.expect_string()?.into_owned()))
++            })
++        } else if let Ok(url) = input.try(|input| SpecifiedUrl::parse(context, input)) {
 +            Ok(UrlMatchingFunction::Url(url))
-+            // TODO UrlPrefix, Domain and RegExp
 +        } else {
 +            Err(())
 +        }
