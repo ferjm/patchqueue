@@ -1,6 +1,6 @@
 #!/bin/bash
-cd /Volumes/mozilladev/mozilla-inbound/.hg/patches
+cd /Users/ferjm/dev/mozilla/mozilla-central/.hg/patches
 git add .
 git commit -m "qref -> auto push"
 git push origin master
-cd /Volumes/mozilladev/mozilla-inbound
+cd /Users/ferjm/dev/mozilla/mozilla-central
