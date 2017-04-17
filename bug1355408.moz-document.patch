@@ -447,7 +447,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
          match prelude {
              AtRulePrelude::FontFace => {
                  let context = ParserContext::new_with_rule_type(self.context, Some(CssRuleType::FontFace));
-@@ -1166,16 +1217,29 @@ impl<'a, 'b> AtRuleParser for NestedRule
+@@ -1166,16 +1217,25 @@ impl<'a, 'b> AtRuleParser for NestedRule
              }
              AtRulePrelude::Page => {
                  let context = ParserContext::new_with_rule_type(self.context, Some(CssRuleType::Page));
@@ -457,11 +457,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
                  )))))
              }
 +            AtRulePrelude::Document(cond) => {
-+                if let Some(_) = self.loader {
-+                    println!("YAY LOADER");
-+                } else {
-+                    println!("CRAP");
-+                }
++                self.loader.expect("Expected a stylesheet loader for @-moz-document");
 +                let enabled = cond.eval(self.context);
 +                Ok(CssRule::Document(Arc::new(self.shared_lock.wrap(DocumentRule {
 +                    condition: cond,
