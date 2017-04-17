@@ -1,0 +1,5 @@
+# HG changeset patch
+# User Fernando Jimenez <ferjmoreno@gmail.com>
+# Parent  a4df3aa93c77d99b7a8e96f3e90ecc29c5b36575
+Bug 1099234 - Link to element which a style is inherited from. r=pbro
+
