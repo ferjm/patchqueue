@@ -379,7 +379,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
      type AtRule = CssRule;
  
      fn parse_prelude(&mut self, name: &str, input: &mut Parser)
-@@ -1122,16 +1166,22 @@ impl<'a, 'b> AtRuleParser for NestedRule
+@@ -1122,16 +1166,20 @@ impl<'a, 'b> AtRuleParser for NestedRule
              },
              "page" => {
                  if cfg!(feature = "gecko") {
@@ -389,9 +389,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
                  }
              },
 +            "-moz-document" => {
-+                println!("MOZ-DOCUMENT!!!!!!");
 +                let cond = DocumentCondition::parse(self.context, input)?;
-+                println!("CONDITION {:?}", cond);
 +                Ok(AtRuleType::WithBlock(AtRulePrelude::Document(cond)))
 +            },
              _ => Err(())
@@ -402,7 +400,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
          match prelude {
              AtRulePrelude::FontFace => {
                  let context = ParserContext::new_with_rule_type(self.context, Some(CssRuleType::FontFace));
-@@ -1166,16 +1216,24 @@ impl<'a, 'b> AtRuleParser for NestedRule
+@@ -1166,16 +1214,24 @@ impl<'a, 'b> AtRuleParser for NestedRule
              }
              AtRulePrelude::Page => {
                  let context = ParserContext::new_with_rule_type(self.context, Some(CssRuleType::Page));
