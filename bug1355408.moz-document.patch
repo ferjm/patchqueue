@@ -6,7 +6,7 @@ diff --git a/servo/components/style/document.rs b/servo/components/style/documen
 new file mode 100644
 --- /dev/null
 +++ b/servo/components/style/document.rs
-@@ -0,0 +1,143 @@
+@@ -0,0 +1,151 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -123,31 +123,39 @@ new file mode 100644
 +/// A `@document` rule's condition.
 +///
 +/// https://www.w3.org/TR/2012/WD-css3-conditional-20120911/#at-document
++///
++/// The `@document` rule's condition is written as a comma-separated list of
++/// URL matching functions, and the condition evaluates to true whenever any
++/// one of those functions evaluates to true.
 +#[derive(Debug)]
-+pub struct DocumentCondition {
-+    /// The `@document` rule's condition is written as a comma-separated list of
-+    /// URL matching functions, and the condition evaluates to true whenever any
-+    /// one of those functions evaluates to true.
-+    pub url_matching_functions: Vec<UrlMatchingFunction>,
-+}
++pub struct DocumentCondition(Vec<UrlMatchingFunction>);
 +
 +impl DocumentCondition {
 +    /// Parse a document condition.
-+    pub fn parse(_: &ParserContext, _: &mut Parser)
-+        -> Result<DocumentCondition, ()> {
-+            Err(())
++    pub fn parse(context: &ParserContext, input: &mut Parser)
++        -> Result<Self, ()> {
++        input.parse_comma_separated(|input| UrlMatchingFunction::parse(context, input))
++             .map(DocumentCondition)
 +    }
 +
 +    /// Evaluate a document condition.
-+    pub fn eval(&self, _: &ParserContext) -> bool {
-+        true
++    pub fn eval(&self, context: &ParserContext) -> bool {
++        self.0.iter().any(|ref url_matching_function| url_matching_function.eval(context))
 +    }
 +}
 +
 +impl ToCss for DocumentCondition {
 +    fn to_css<W>(&self, dest: &mut W) -> fmt::Result
 +        where W: fmt::Write {
-+            dest.write_str("TODO")
++        let mut iter = self.0.iter();
++        let first = iter.next()
++            .expect("Empty DocumentCondition, should contain at least one URL matching function");
++        first.to_css(dest)?;
++        for url_matching_function in iter {
++            dest.write_str(", ")?;
++            url_matching_function.to_css(dest)?;
++        }
++        Ok(())
 +    }
 +}
 diff --git a/servo/components/style/lib.rs b/servo/components/style/lib.rs
