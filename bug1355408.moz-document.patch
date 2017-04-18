@@ -705,7 +705,7 @@ diff --git a/servo/ports/geckolib/stylesheet_loader.rs b/servo/ports/geckolib/st
  
  pub struct StylesheetLoader(*mut Loader, *mut ServoStyleSheet);
  
-@@ -40,9 +40,21 @@ impl StyleStylesheetLoader for Styleshee
+@@ -40,9 +40,20 @@ impl StyleStylesheetLoader for Styleshee
                                   Stylesheet::arc_as_borrowed(&import.stylesheet),
                                   base_url_data,
                                   spec_bytes,
@@ -716,14 +716,55 @@ diff --git a/servo/ports/geckolib/stylesheet_loader.rs b/servo/ports/geckolib/st
      }
 +
 +    fn get_document_url_as_string(&self) -> Option<String> {
-+        use style::gecko_bindings::bindings::ns_auto_cstring;
 +        ns_auto_cstring!(spec);
 +        unsafe {
-+            if Gecko_nsIURI_ToString((*(*self.0).mDocument).mDocumentURI.raw(), &mut spec) {
-+                Some(spec.into())
++            if Gecko_nsIURI_ToString((*(*self.0).mDocument).mDocumentURI.raw(), &mut *spec) {
++                Some(format!("{}", spec))
 +            } else {
 +                None
 +            }
 +        }
 +    }
  }
+diff --git a/toolkit/library/gtest/rust/Cargo.lock b/toolkit/library/gtest/rust/Cargo.lock
+--- a/toolkit/library/gtest/rust/Cargo.lock
++++ b/toolkit/library/gtest/rust/Cargo.lock
+@@ -285,16 +285,17 @@ dependencies = [
+ name = "geckoservo"
+ version = "0.0.1"
+ dependencies = [
+  "atomic_refcell 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+  "cssparser 0.12.2 (registry+https://github.com/rust-lang/crates.io-index)",
+  "env_logger 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
+  "libc 0.2.20 (registry+https://github.com/rust-lang/crates.io-index)",
+  "log 0.3.6 (registry+https://github.com/rust-lang/crates.io-index)",
++ "nsstring_vendor 0.1.0",
+  "parking_lot 0.3.8 (registry+https://github.com/rust-lang/crates.io-index)",
+  "selectors 0.18.0",
+  "style 0.0.1",
+  "style_traits 0.0.1",
+ ]
+ 
+ [[package]]
+ name = "gkrust-shared"
+diff --git a/toolkit/library/rust/Cargo.lock b/toolkit/library/rust/Cargo.lock
+--- a/toolkit/library/rust/Cargo.lock
++++ b/toolkit/library/rust/Cargo.lock
+@@ -283,16 +283,17 @@ dependencies = [
+ name = "geckoservo"
+ version = "0.0.1"
+ dependencies = [
+  "atomic_refcell 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+  "cssparser 0.12.2 (registry+https://github.com/rust-lang/crates.io-index)",
+  "env_logger 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
+  "libc 0.2.20 (registry+https://github.com/rust-lang/crates.io-index)",
+  "log 0.3.6 (registry+https://github.com/rust-lang/crates.io-index)",
++ "nsstring_vendor 0.1.0",
+  "parking_lot 0.3.8 (registry+https://github.com/rust-lang/crates.io-index)",
+  "selectors 0.18.0",
+  "style 0.0.1",
+  "style_traits 0.0.1",
+ ]
+ 
+ [[package]]
+ name = "gkrust-shared"
