@@ -279,13 +279,13 @@ new file mode 100644
 +            /// function or a final substring of the host component is a
 +            /// period (U+002E) immediately followed by the argument to the
 +            /// ‘domain()’ function.
-+            UrlMatchingFunction::Domain(_) => {
++            UrlMatchingFunction::Domain(ref domain) => {
 +                match Url::parse(document_url) {
-+                    Some(url) => match url.host_url() {
++                    Ok(url) => match url.host_str() {
 +                        Some(document_host) => document_host == domain,
 +                        None => false,
 +                    },
-+                    None => false,
++                    Err(_) => false,
 +                }
 +            },
 +            /// Regular expression matching function. It evaluates to true
@@ -850,6 +850,24 @@ diff --git a/toolkit/library/gtest/rust/Cargo.lock b/toolkit/library/gtest/rust/
  
  [[package]]
  name = "gkrust-shared"
+@@ -746,16 +747,17 @@ dependencies = [
+  "precomputed-hash 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+  "rayon 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
+  "regex 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
+  "selectors 0.18.0",
+  "smallvec 0.3.2 (registry+https://github.com/rust-lang/crates.io-index)",
+  "style_traits 0.0.1",
+  "time 0.1.36 (registry+https://github.com/rust-lang/crates.io-index)",
+  "unicode-segmentation 1.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
++ "url 1.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
+  "walkdir 1.0.7 (registry+https://github.com/rust-lang/crates.io-index)",
+ ]
+ 
+ [[package]]
+ name = "style_traits"
+ version = "0.0.1"
+ dependencies = [
+  "app_units 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
 diff --git a/toolkit/library/rust/Cargo.lock b/toolkit/library/rust/Cargo.lock
 --- a/toolkit/library/rust/Cargo.lock
 +++ b/toolkit/library/rust/Cargo.lock
@@ -871,3 +889,21 @@ diff --git a/toolkit/library/rust/Cargo.lock b/toolkit/library/rust/Cargo.lock
  
  [[package]]
  name = "gkrust-shared"
+@@ -733,16 +734,17 @@ dependencies = [
+  "precomputed-hash 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+  "rayon 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
+  "regex 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
+  "selectors 0.18.0",
+  "smallvec 0.3.2 (registry+https://github.com/rust-lang/crates.io-index)",
+  "style_traits 0.0.1",
+  "time 0.1.36 (registry+https://github.com/rust-lang/crates.io-index)",
+  "unicode-segmentation 1.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
++ "url 1.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
+  "walkdir 1.0.7 (registry+https://github.com/rust-lang/crates.io-index)",
+ ]
+ 
+ [[package]]
+ name = "style_traits"
+ version = "0.0.1"
+ dependencies = [
+  "app_units 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
