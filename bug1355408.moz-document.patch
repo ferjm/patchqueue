@@ -1,6 +1,6 @@
 # HG changeset patch
 # Parent  c697e756f738ce37abc56f31bfbc48f55625d617
-Bug 1355408 - stylo: Support @-moz-document rule. r?xidorn
+Bug 1355408 - stylo: Support @-moz-document rule. f?xidorn
 
 diff --git a/layout/style/ServoBindings.cpp b/layout/style/ServoBindings.cpp
 --- a/layout/style/ServoBindings.cpp
