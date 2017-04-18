@@ -71,7 +71,7 @@ diff --git a/layout/style/ServoBindings.h b/layout/style/ServoBindings.h
 diff --git a/servo/components/script/stylesheet_loader.rs b/servo/components/script/stylesheet_loader.rs
 --- a/servo/components/script/stylesheet_loader.rs
 +++ b/servo/components/script/stylesheet_loader.rs
-@@ -277,9 +277,13 @@ impl<'a> StyleStylesheetLoader for Style
+@@ -277,9 +277,14 @@ impl<'a> StyleStylesheetLoader for Style
  
          // TODO (mrnayak) : Whether we should use the original loader's CORS
          // setting? Fix this when spec has more details.
@@ -82,6 +82,7 @@ diff --git a/servo/components/script/stylesheet_loader.rs b/servo/components/scr
      }
 +
 +    fn get_document_url_as_string(&self) -> Option<String> {
++        // TODO (ferjm): Implement as part of @-moz-document support for Servo.
 +        None
 +    }
  }
