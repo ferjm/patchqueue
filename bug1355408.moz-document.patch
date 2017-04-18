@@ -23,7 +23,7 @@ diff --git a/layout/style/ServoBindings.cpp b/layout/style/ServoBindings.cpp
  #include "nsRuleNode.h"
  #include "nsString.h"
  #include "nsStyleStruct.h"
-@@ -1797,16 +1798,38 @@ Gecko_RegisterProfilerThread(const char*
+@@ -1797,16 +1798,23 @@ Gecko_RegisterProfilerThread(const char*
  }
  
  void
@@ -33,25 +33,10 @@ diff --git a/layout/style/ServoBindings.cpp b/layout/style/ServoBindings.cpp
  }
  
 +bool
-+Gecko_nsIURI_ToString(nsIURI* aURI, uint8_t** aOutBytes, uint32_t* aOutSize)
++Gecko_nsIURI_ToString(nsIURI* aURI, nsACString* aResult)
 +{
-+  MOZ_ASSERT(aOutBytes);
-+  MOZ_ASSERT(aOutSize);
-+
-+  nsCString spec = aURI->GetSpecOrDefault();
-+
-+  uint32_t length = spec.Length();
-+  uint8_t* tmp = reinterpret_cast<uint8_t*>(moz_xmalloc(length));
-+  if (NS_WARN_IF(!tmp)) {
-+    return false;
-+  }
-+
-+  memcpy(tmp, spec.get(), length);
-+
-+  *aOutBytes = tmp;
-+  *aOutSize = length;
-+
-+  return true;
++  nsresult rv = aURI->GetSpec(*aResult);
++  return NS_SUCCEEDED(rv);
 +}
 +
  #include "nsStyleStructList.h"
@@ -74,7 +59,7 @@ diff --git a/layout/style/ServoBindings.h b/layout/style/ServoBindings.h
  void Gecko_RegisterProfilerThread(const char* name);
  void Gecko_UnregisterProfilerThread();
  
-+bool Gecko_nsIURI_ToString(nsIURI* aURI, uint8_t** aOutBytes, uint32_t* aOutSize);
++bool Gecko_nsIURI_ToString(nsIURI* aURI, nsACString* aResult);
 +
  #define SERVO_BINDING_FUNC(name_, return_, ...) return_ name_(__VA_ARGS__);
  #include "mozilla/ServoBindingList.h"
@@ -660,15 +645,55 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
      type Prelude = SelectorList<SelectorImpl>;
      type QualifiedRule = CssRule;
  
+diff --git a/servo/ports/geckolib/Cargo.toml b/servo/ports/geckolib/Cargo.toml
+--- a/servo/ports/geckolib/Cargo.toml
++++ b/servo/ports/geckolib/Cargo.toml
+@@ -14,15 +14,16 @@ bindgen = ["style/use_bindgen"]
+ testing = ["style/testing"]
+ 
+ [dependencies]
+ atomic_refcell = "0.1"
+ cssparser = "0.12.1"
+ env_logger = {version = "0.4", default-features = false} # disable `regex` to reduce code size
+ libc = "0.2"
+ log = {version = "0.3.5", features = ["release_max_level_info"]}
++nsstring_vendor = {path = "../../components/style/gecko_bindings/nsstring_vendor"}
+ parking_lot = "0.3"
+ selectors = {path = "../../components/selectors"}
+ style = {path = "../../components/style", features = ["gecko"]}
+ style_traits = {path = "../../components/style_traits"}
+ 
+ [dev-dependencies]
+ stylo_tests = {path = "../../tests/unit/stylo"}
+diff --git a/servo/ports/geckolib/lib.rs b/servo/ports/geckolib/lib.rs
+--- a/servo/ports/geckolib/lib.rs
++++ b/servo/ports/geckolib/lib.rs
+@@ -5,16 +5,17 @@
+ #![deny(warnings)]
+ 
+ extern crate atomic_refcell;
+ extern crate cssparser;
+ extern crate env_logger;
+ extern crate libc;
+ #[macro_use] extern crate log;
+ extern crate parking_lot;
++#[macro_use] extern crate nsstring_vendor as nsstring;
+ extern crate selectors;
+ #[macro_use] extern crate style;
+ extern crate style_traits;
+ 
+ #[allow(non_snake_case)]
+ pub mod glue;
+ mod stylesheet_loader;
+ 
 diff --git a/servo/ports/geckolib/stylesheet_loader.rs b/servo/ports/geckolib/stylesheet_loader.rs
 --- a/servo/ports/geckolib/stylesheet_loader.rs
 +++ b/servo/ports/geckolib/stylesheet_loader.rs
-@@ -1,14 +1,15 @@
+@@ -1,14 +1,14 @@
  /* This Source Code Form is subject to the terms of the Mozilla Public
   * License, v. 2.0. If a copy of the MPL was not distributed with this
   * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
  
-+use std::mem;
  use std::sync::Arc;
 -use style::gecko_bindings::bindings::Gecko_LoadStyleSheet;
 +use style::gecko_bindings::bindings::{Gecko_LoadStyleSheet, Gecko_nsIURI_ToString};
@@ -680,7 +705,7 @@ diff --git a/servo/ports/geckolib/stylesheet_loader.rs b/servo/ports/geckolib/st
  
  pub struct StylesheetLoader(*mut Loader, *mut ServoStyleSheet);
  
-@@ -40,9 +41,25 @@ impl StyleStylesheetLoader for Styleshee
+@@ -40,9 +40,21 @@ impl StyleStylesheetLoader for Styleshee
                                   Stylesheet::arc_as_borrowed(&import.stylesheet),
                                   base_url_data,
                                   spec_bytes,
@@ -691,15 +716,11 @@ diff --git a/servo/ports/geckolib/stylesheet_loader.rs b/servo/ports/geckolib/st
      }
 +
 +    fn get_document_url_as_string(&self) -> Option<String> {
-+        let mut url_buffer = Vec::with_capacity(2000); // TODO get URL length in advance
-+        let mut url_len = url_buffer.len() as u32;
-+        let p_url_buffer = url_buffer.as_mut_ptr();
-+        mem::forget(url_buffer);
++        use style::gecko_bindings::bindings::ns_auto_cstring;
++        ns_auto_cstring!(spec);
 +        unsafe {
-+            if Gecko_nsIURI_ToString((*(*self.0).mDocument).mDocumentURI.raw(), p_url_buffer, &mut url_len) {
-+                let url = String::from_raw_parts(p_url_buffer as *mut _, url_len as usize, url_len as usize);
-+                println!("URL LENGTH {:?} {:?}", url_len, url);
-+                Some(url)
++            if Gecko_nsIURI_ToString((*(*self.0).mDocument).mDocumentURI.raw(), &mut spec) {
++                Some(spec.into())
 +            } else {
 +                None
 +            }
