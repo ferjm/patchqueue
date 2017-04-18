@@ -1,6 +1,0 @@
-#!/bin/bash
-cd /Users/ferjm/dev/mozilla/mozilla-central/.hg/patches
-git add .
-git commit -m "qref -> auto push"
-git push origin master
-cd /Users/ferjm/dev/mozilla/mozilla-central
