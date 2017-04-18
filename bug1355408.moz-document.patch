@@ -23,7 +23,7 @@ diff --git a/layout/style/ServoBindings.cpp b/layout/style/ServoBindings.cpp
  #include "nsRuleNode.h"
  #include "nsString.h"
  #include "nsStyleStruct.h"
-@@ -1797,16 +1798,37 @@ Gecko_RegisterProfilerThread(const char*
+@@ -1797,16 +1798,38 @@ Gecko_RegisterProfilerThread(const char*
  }
  
  void
@@ -47,6 +47,7 @@ diff --git a/layout/style/ServoBindings.cpp b/layout/style/ServoBindings.cpp
 +  }
 +
 +  memcpy(tmp, spec.get(), length);
++
 +  *aOutBytes = tmp;
 +  *aOutSize = length;
 +
@@ -102,7 +103,25 @@ diff --git a/servo/components/script/stylesheet_loader.rs b/servo/components/scr
 diff --git a/servo/components/style/build_gecko.rs b/servo/components/style/build_gecko.rs
 --- a/servo/components/style/build_gecko.rs
 +++ b/servo/components/style/build_gecko.rs
-@@ -664,16 +664,17 @@ mod bindings {
+@@ -298,16 +298,17 @@ mod bindings {
+             .include(add_include("mozilla/ServoElementSnapshot.h"))
+             .include(add_include("mozilla/dom/Element.h"))
+             .include(add_include("mozilla/dom/NameSpaceConstants.h"))
+             .include(add_include("mozilla/LookAndFeel.h"))
+             .include(add_include("mozilla/ServoBindings.h"))
+             .include(add_include("nsCSSFontFaceRule.h"))
+             .include(add_include("nsMediaFeatures.h"))
+             .include(add_include("nsMediaList.h"))
++            .include(add_include("mozilla/css/Loader.h"))
+             // FIXME(emilio): Incrementally remove these "pub use"s. Probably
+             // mozilla::css and mozilla::dom are easier.
+             .raw_line("pub use self::root::*;")
+             .raw_line("pub use self::root::mozilla::*;")
+             .raw_line("pub use self::root::mozilla::css::*;")
+             .raw_line("pub use self::root::mozilla::dom::*;")
+             .raw_line("use atomic_refcell::AtomicRefCell;")
+             .raw_line("use data::ElementData;")
+@@ -664,16 +665,17 @@ mod bindings {
              "nsCSSShadowArray",
              "nsCSSUnit",
              "nsCSSValue",
@@ -644,11 +663,12 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
 diff --git a/servo/ports/geckolib/stylesheet_loader.rs b/servo/ports/geckolib/stylesheet_loader.rs
 --- a/servo/ports/geckolib/stylesheet_loader.rs
 +++ b/servo/ports/geckolib/stylesheet_loader.rs
-@@ -1,14 +1,14 @@
+@@ -1,14 +1,15 @@
  /* This Source Code Form is subject to the terms of the Mozilla Public
   * License, v. 2.0. If a copy of the MPL was not distributed with this
   * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
  
++use std::mem;
  use std::sync::Arc;
 -use style::gecko_bindings::bindings::Gecko_LoadStyleSheet;
 +use style::gecko_bindings::bindings::{Gecko_LoadStyleSheet, Gecko_nsIURI_ToString};
@@ -660,7 +680,7 @@ diff --git a/servo/ports/geckolib/stylesheet_loader.rs b/servo/ports/geckolib/st
  
  pub struct StylesheetLoader(*mut Loader, *mut ServoStyleSheet);
  
-@@ -40,9 +40,15 @@ impl StyleStylesheetLoader for Styleshee
+@@ -40,9 +41,25 @@ impl StyleStylesheetLoader for Styleshee
                                   Stylesheet::arc_as_borrowed(&import.stylesheet),
                                   base_url_data,
                                   spec_bytes,
@@ -671,8 +691,18 @@ diff --git a/servo/ports/geckolib/stylesheet_loader.rs b/servo/ports/geckolib/st
      }
 +
 +    fn get_document_url_as_string(&self) -> Option<String> {
-+        // *const u8, usize
-+        let _ = (*self.0).mDocument;
-+        None
++        let mut url_buffer = Vec::with_capacity(2000); // TODO get URL length in advance
++        let mut url_len = url_buffer.len() as u32;
++        let p_url_buffer = url_buffer.as_mut_ptr();
++        mem::forget(url_buffer);
++        unsafe {
++            if Gecko_nsIURI_ToString((*(*self.0).mDocument).mDocumentURI.raw(), p_url_buffer, &mut url_len) {
++                let url = String::from_raw_parts(p_url_buffer as *mut _, url_len as usize, url_len as usize);
++                println!("URL LENGTH {:?} {:?}", url_len, url);
++                Some(url)
++            } else {
++                None
++            }
++        }
 +    }
  }
