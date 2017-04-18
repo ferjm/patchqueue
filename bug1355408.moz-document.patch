@@ -82,6 +82,23 @@ diff --git a/layout/style/ServoBindings.h b/layout/style/ServoBindings.h
  } // extern "C"
  
  #endif // mozilla_ServoBindings_h
+diff --git a/servo/components/script/stylesheet_loader.rs b/servo/components/script/stylesheet_loader.rs
+--- a/servo/components/script/stylesheet_loader.rs
++++ b/servo/components/script/stylesheet_loader.rs
+@@ -277,9 +277,13 @@ impl<'a> StyleStylesheetLoader for Style
+ 
+         // TODO (mrnayak) : Whether we should use the original loader's CORS
+         // setting? Fix this when spec has more details.
+         let source = StylesheetContextSource::Import(import.stylesheet.clone());
+         self.load(source, url, None, "".to_owned());
+ 
+         make_arc(import)
+     }
++
++    fn get_document_url_as_string(&self) -> Option<String> {
++        None
++    }
+ }
 diff --git a/servo/components/style/build_gecko.rs b/servo/components/style/build_gecko.rs
 --- a/servo/components/style/build_gecko.rs
 +++ b/servo/components/style/build_gecko.rs
@@ -107,7 +124,7 @@ diff --git a/servo/components/style/document.rs b/servo/components/style/documen
 new file mode 100644
 --- /dev/null
 +++ b/servo/components/style/document.rs
-@@ -0,0 +1,151 @@
+@@ -0,0 +1,164 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -161,20 +178,20 @@ new file mode 100644
 +    }
 +
 +    /// Evaluate a URL matching function.
-+    pub fn eval(&self, _: &ParserContext) -> bool {
++    pub fn eval(&self, _: &ParserContext, document_url: &str) -> bool {
 +        match *self {
 +            /// Exact URL matching function. It evaluates to true whenever the
 +            /// URL of the document being styled is exactly the URL given.
-+            UrlMatchingFunction::Url(_) => {
-+                false
++            UrlMatchingFunction::Url(ref url) => {
++                url.as_str() == document_url
 +            },
 +            /// URL prefix matching function. It evaluates to true whenever the
 +            /// URL of the document being styled has the argument to the
 +            /// function as an initial substring (which is true when the two
 +            /// strings are equal). When the argument is the empty string,
 +            /// it evaluates to true for all documents.
-+            UrlMatchingFunction::UrlPrefix(_) => {
-+                false
++            UrlMatchingFunction::UrlPrefix(ref url_prefix) => {
++                document_url.starts_with(url_prefix)
 +            },
 +            /// Domain matching function. It evaluates to true whenever the URL
 +            /// of the document being styled has a host subcomponent and that
@@ -182,7 +199,14 @@ new file mode 100644
 +            /// function or a final substring of the host component is a
 +            /// period (U+002E) immediately followed by the argument to the
 +            /// ‘domain()’ function.
-+            UrlMatchingFunction::Domain(_) => {
++            UrlMatchingFunction::Domain(ref domain) => {
++            /*    match ServoUrl::parse(document_url) {
++                    Some(url) => match url.domain() {
++                        Some(document_domain) => document_domain == domain,
++                        None => false,
++                    },
++                    None => false,
++                }*/
 +                false
 +            },
 +            /// Regular expression matching function. It evaluates to true
@@ -240,8 +264,14 @@ new file mode 100644
 +    }
 +
 +    /// Evaluate a document condition.
-+    pub fn eval(&self, context: &ParserContext) -> bool {
-+        self.0.iter().any(|ref url_matching_function| url_matching_function.eval(context))
++    pub fn eval(&self, context: &ParserContext, document_url: Option<String>) -> bool {
++        if let Some(url) = document_url {
++            self.0.iter().any(|ref url_matching_function|
++                url_matching_function.eval(context, &url)
++            )
++        } else {
++            false
++        }
 +    }
 +}
 +
@@ -461,7 +491,44 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
      /// Request a stylesheet after parsing a given `@import` rule.
      ///
      /// The called code is responsible to update the `stylesheet` rules field
-@@ -894,16 +936,17 @@ struct TopLevelRuleParser<'a> {
+@@ -862,29 +904,36 @@ pub trait StylesheetLoader {
+     /// The convoluted signature allows impls to look at MediaList and ImportRule
+     /// before they’re locked, while keeping the trait object-safe.
+     fn request_stylesheet(
+         &self,
+         media: Arc<Locked<MediaList>>,
+         make_import: &mut FnMut(Arc<Locked<MediaList>>) -> ImportRule,
+         make_arc: &mut FnMut(ImportRule) -> Arc<Locked<ImportRule>>,
+     ) -> Arc<Locked<ImportRule>>;
++
++    /// Get the URL of the document loading the stylesheet as a string.
++    fn get_document_url_as_string(&self) -> Option<String>;
+ }
+ 
+ struct NoOpLoader;
+ 
+ impl StylesheetLoader for NoOpLoader {
+     fn request_stylesheet(
+         &self,
+         media: Arc<Locked<MediaList>>,
+         make_import: &mut FnMut(Arc<Locked<MediaList>>) -> ImportRule,
+         make_arc: &mut FnMut(ImportRule) -> Arc<Locked<ImportRule>>,
+     ) -> Arc<Locked<ImportRule>> {
+         make_arc(make_import(media))
+     }
++
++    fn get_document_url_as_string(&self) -> Option<String> {
++        None
++    }
+ }
+ 
+ 
+ struct TopLevelRuleParser<'a> {
+     stylesheet_origin: Origin,
+     namespaces: &'a mut Namespaces,
+     shared_lock: &'a SharedRwLock,
+     loader: Option<&'a StylesheetLoader>,
+@@ -894,16 +943,17 @@ struct TopLevelRuleParser<'a> {
  
  impl<'b> TopLevelRuleParser<'b> {
      fn nested<'a: 'b>(&'a self) -> NestedRuleParser<'a, 'b> {
@@ -479,7 +546,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
  #[allow(missing_docs)]
  pub enum State {
      Start = 1,
-@@ -922,16 +965,18 @@ enum AtRulePrelude {
+@@ -922,16 +972,18 @@ enum AtRulePrelude {
      /// An @supports rule, with its conditional
      Supports(SupportsCondition),
      /// A @viewport rule prelude.
@@ -498,7 +565,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
      type AtRule = CssRule;
  
      fn parse_prelude(&mut self, name: &str, input: &mut Parser)
-@@ -1043,26 +1088,28 @@ impl<'a> QualifiedRuleParser for TopLeve
+@@ -1043,26 +1095,28 @@ impl<'a> QualifiedRuleParser for TopLeve
  }
  
  #[derive(Clone)]  // shallow, relatively cheap .clone
@@ -527,7 +594,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
                  Ok(rule) => rules.push(rule),
                  Err(range) => {
                      let pos = range.start;
-@@ -1122,16 +1169,20 @@ impl<'a, 'b> AtRuleParser for NestedRule
+@@ -1122,16 +1176,20 @@ impl<'a, 'b> AtRuleParser for NestedRule
              },
              "page" => {
                  if cfg!(feature = "gecko") {
@@ -548,7 +615,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
          match prelude {
              AtRulePrelude::FontFace => {
                  let context = ParserContext::new_with_rule_type(self.context, Some(CssRuleType::FontFace));
-@@ -1166,16 +1217,25 @@ impl<'a, 'b> AtRuleParser for NestedRule
+@@ -1166,16 +1224,25 @@ impl<'a, 'b> AtRuleParser for NestedRule
              }
              AtRulePrelude::Page => {
                  let context = ParserContext::new_with_rule_type(self.context, Some(CssRuleType::Page));
@@ -558,8 +625,8 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
                  )))))
              }
 +            AtRulePrelude::Document(cond) => {
-+                self.loader.expect("Expected a stylesheet loader for @-moz-document");
-+                let enabled = cond.eval(self.context);
++                let loader = self.loader.expect("Expected a stylesheet loader for @-moz-document");
++                let enabled = cond.eval(self.context, loader.get_document_url_as_string());
 +                Ok(CssRule::Document(Arc::new(self.shared_lock.wrap(DocumentRule {
 +                    condition: cond,
 +                    rules: self.parse_nested_rules(input, CssRuleType::Document),
@@ -574,3 +641,21 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
      type Prelude = SelectorList<SelectorImpl>;
      type QualifiedRule = CssRule;
  
+diff --git a/servo/ports/geckolib/stylesheet_loader.rs b/servo/ports/geckolib/stylesheet_loader.rs
+--- a/servo/ports/geckolib/stylesheet_loader.rs
++++ b/servo/ports/geckolib/stylesheet_loader.rs
+@@ -40,9 +40,14 @@ impl StyleStylesheetLoader for Styleshee
+                                  Stylesheet::arc_as_borrowed(&import.stylesheet),
+                                  base_url_data,
+                                  spec_bytes,
+                                  spec_len as u32,
+                                  media.into_strong())
+         }
+         make_arc(import)
+     }
++
++    fn get_document_url_as_string(&self) -> Option<String> {
++        // *const u8, usize
++        None
++    }
+ }
