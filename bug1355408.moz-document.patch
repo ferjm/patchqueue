@@ -85,6 +85,81 @@ diff --git a/servo/components/script/stylesheet_loader.rs b/servo/components/scr
 +        None
 +    }
  }
+diff --git a/servo/components/style/Cargo.toml b/servo/components/style/Cargo.toml
+--- a/servo/components/style/Cargo.toml
++++ b/servo/components/style/Cargo.toml
+@@ -9,17 +9,17 @@ build = "build.rs"
+ 
+ [lib]
+ name = "style"
+ path = "lib.rs"
+ doctest = false
+ 
+ [features]
+ gecko = ["nsstring_vendor", "rayon/unstable", "num_cpus"]
+-use_bindgen = ["bindgen", "regex"]
++use_bindgen = ["bindgen"]
+ servo = ["serde/unstable", "serde", "serde_derive", "heapsize", "heapsize_derive",
+          "style_traits/servo", "servo_atoms", "servo_config", "html5ever-atoms",
+          "cssparser/heapsize", "cssparser/serde", "encoding",
+          "rayon/unstable", "servo_url"]
+ testing = []
+ 
+ [dependencies]
+ app_units = "0.4"
+@@ -42,28 +42,30 @@ nsstring_vendor = {path = "gecko_binding
+ num_cpus = {version = "1.1.0", optional = true}
+ num-integer = "0.1.32"
+ num-traits = "0.1.32"
+ ordered-float = "0.4"
+ parking_lot = "0.3.3"
+ pdqsort = "0.1.0"
+ precomputed-hash = "0.1"
+ rayon = "0.6"
++regex = "0.2"
+ selectors = { path = "../selectors" }
+ serde = {version = "0.9", optional = true}
+ serde_derive = {version = "0.9", optional = true}
+ servo_atoms = {path = "../atoms", optional = true}
+ servo_config = {path = "../config", optional = true}
+ smallvec = "0.3"
+ style_traits = {path = "../style_traits"}
+ servo_url = {path = "../url", optional = true}
+ time = "0.1"
+ unicode-segmentation = "1.0"
++url = "1.2"
+ 
+ [target.'cfg(windows)'.dependencies]
+ kernel32-sys = "0.2"
+ 
+ [build-dependencies]
+ lazy_static = "0.2"
+ log = "0.3"
+ bindgen = { version = "0.22", optional = true }
+-regex = {version = "0.2", optional = true}
++regex = "0.2"
+ walkdir = "1.0"
+diff --git a/servo/components/style/build.rs b/servo/components/style/build.rs
+--- a/servo/components/style/build.rs
++++ b/servo/components/style/build.rs
+@@ -4,17 +4,16 @@
+ 
+ #[cfg(feature = "gecko")]
+ #[macro_use]
+ extern crate lazy_static;
+ #[cfg(feature = "bindgen")]
+ extern crate bindgen;
+ #[cfg(feature = "bindgen")]
+ extern crate log;
+-#[cfg(feature = "bindgen")]
+ extern crate regex;
+ extern crate walkdir;
+ 
+ use std::env;
+ use std::path::Path;
+ use std::process::{Command, exit};
+ use walkdir::WalkDir;
+ 
 diff --git a/servo/components/style/build_gecko.rs b/servo/components/style/build_gecko.rs
 --- a/servo/components/style/build_gecko.rs
 +++ b/servo/components/style/build_gecko.rs
@@ -128,7 +203,7 @@ diff --git a/servo/components/style/document.rs b/servo/components/style/documen
 new file mode 100644
 --- /dev/null
 +++ b/servo/components/style/document.rs
-@@ -0,0 +1,164 @@
+@@ -0,0 +1,168 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -137,13 +212,14 @@ new file mode 100644
 +//! initially in CSS Conditional Rules Module Level 3, @document has been postponed to the level 4.
 +//! We implement the prefixed `@-moz-document`.
 +
-+//use regex::Regex;
++use regex::Regex;
 +
 +use cssparser::Parser;
 +use parser::{Parse, ParserContext};
 +use std::fmt;
 +use style_traits::ToCss;
 +use values::specified::url::SpecifiedUrl;
++use url::Url;
 +
 +/// A URL matching function for a `@document` rule's condition.
 +#[derive(Debug)]
@@ -204,20 +280,23 @@ new file mode 100644
 +            /// period (U+002E) immediately followed by the argument to the
 +            /// ‘domain()’ function.
 +            UrlMatchingFunction::Domain(_) => {
-+            /*    match ServoUrl::parse(document_url) {
-+                    Some(url) => match url.domain() {
-+                        Some(document_domain) => document_domain == domain,
++                match Url::parse(document_url) {
++                    Some(url) => match url.host_url() {
++                        Some(document_host) => document_host == domain,
 +                        None => false,
 +                    },
 +                    None => false,
-+                }*/
-+                false
++                }
 +            },
 +            /// Regular expression matching function. It evaluates to true
 +            /// whenever the regular expression matches the entirety of the URL
 +            /// of the document being styled.
-+            UrlMatchingFunction::RegExp(_) => {
-+                false
++            UrlMatchingFunction::RegExp(ref regex_string) => {
++                if let Ok(regex) = Regex::new(regex_string) {
++                    regex.is_match(document_url)
++                } else {
++                    false
++                }
 +            },
 +        }
 +    }
@@ -296,7 +375,31 @@ new file mode 100644
 diff --git a/servo/components/style/lib.rs b/servo/components/style/lib.rs
 --- a/servo/components/style/lib.rs
 +++ b/servo/components/style/lib.rs
-@@ -86,16 +86,17 @@ pub mod animation;
+@@ -64,38 +64,41 @@ extern crate nsstring_vendor as nsstring
+ #[cfg(feature = "gecko")] extern crate num_cpus;
+ extern crate num_integer;
+ extern crate num_traits;
+ extern crate ordered_float;
+ extern crate parking_lot;
+ extern crate pdqsort;
+ #[cfg(feature = "gecko")] extern crate precomputed_hash;
+ extern crate rayon;
++extern crate regex;
+ extern crate selectors;
+ #[cfg(feature = "servo")] #[macro_use] extern crate serde_derive;
+ #[cfg(feature = "servo")] #[macro_use] extern crate servo_atoms;
+ #[cfg(feature = "servo")] extern crate servo_config;
+ #[cfg(feature = "servo")] extern crate servo_url;
+ extern crate smallvec;
+ #[macro_use]
+ extern crate style_traits;
+ extern crate time;
+ #[allow(unused_extern_crates)]
+ extern crate unicode_segmentation;
++extern crate url;
+ 
+ pub mod animation;
+ #[allow(missing_docs)] // TODO.
  #[cfg(feature = "servo")] pub mod attr;
  pub mod bezier;
  pub mod bloom;
