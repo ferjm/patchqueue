@@ -135,6 +135,27 @@ diff --git a/servo/Cargo.lock b/servo/Cargo.lock
  version = "0.0.1"
  dependencies = [
   "app_units 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
+diff --git a/servo/components/script/dom/cssrule.rs b/servo/components/script/dom/cssrule.rs
+--- a/servo/components/script/dom/cssrule.rs
++++ b/servo/components/script/dom/cssrule.rs
+@@ -79,16 +79,17 @@ impl CSSRule {
+             StyleCssRule::Style(s) => Root::upcast(CSSStyleRule::new(window, parent_stylesheet, s)),
+             StyleCssRule::FontFace(s) => Root::upcast(CSSFontFaceRule::new(window, parent_stylesheet, s)),
+             StyleCssRule::Keyframes(s) => Root::upcast(CSSKeyframesRule::new(window, parent_stylesheet, s)),
+             StyleCssRule::Media(s) => Root::upcast(CSSMediaRule::new(window, parent_stylesheet, s)),
+             StyleCssRule::Namespace(s) => Root::upcast(CSSNamespaceRule::new(window, parent_stylesheet, s)),
+             StyleCssRule::Viewport(s) => Root::upcast(CSSViewportRule::new(window, parent_stylesheet, s)),
+             StyleCssRule::Supports(s) => Root::upcast(CSSSupportsRule::new(window, parent_stylesheet, s)),
+             StyleCssRule::Page(_) => unreachable!(),
++            StyleCssRule::Document(_) => unimplemented!(), // TODO
+         }
+     }
+ 
+     /// Sets owner sheet/rule to null
+     pub fn detach(&self) {
+         self.deparent();
+         // should set parent rule to None when we add parent rule support
+     }
 diff --git a/servo/components/script/stylesheet_loader.rs b/servo/components/script/stylesheet_loader.rs
 --- a/servo/components/script/stylesheet_loader.rs
 +++ b/servo/components/script/stylesheet_loader.rs
@@ -198,7 +219,7 @@ diff --git a/servo/components/style/Cargo.toml b/servo/components/style/Cargo.to
  bitflags = "0.7"
  bit-vec = "0.4.3"
  byteorder = "1.0"
-@@ -42,28 +42,30 @@ nsstring_vendor = {path = "gecko_binding
+@@ -42,16 +42,17 @@ nsstring_vendor = {path = "gecko_binding
  num_cpus = {version = "1.1.0", optional = true}
  num-integer = "0.1.32"
  num-traits = "0.1.32"
@@ -216,9 +237,7 @@ diff --git a/servo/components/style/Cargo.toml b/servo/components/style/Cargo.to
  smallvec = "0.3"
  style_traits = {path = "../style_traits"}
  servo_url = {path = "../url", optional = true}
- time = "0.1"
- unicode-segmentation = "1.0"
-+url = "1.2"
+@@ -60,10 +61,10 @@ unicode-segmentation = "1.0"
  
  [target.'cfg(windows)'.dependencies]
  kernel32-sys = "0.2"
@@ -273,7 +292,7 @@ diff --git a/servo/components/style/document.rs b/servo/components/style/documen
 new file mode 100644
 --- /dev/null
 +++ b/servo/components/style/document.rs
-@@ -0,0 +1,195 @@
+@@ -0,0 +1,208 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -293,7 +312,8 @@ new file mode 100644
 +use std::fmt;
 +use style_traits::ToCss;
 +use values::specified::url::SpecifiedUrl;
-+use url::Url;
++#[cfg(not(feature = "gecko"))]
++use servo_url::ServoUrl;
 +
 +/// Gecko nsIDocument.
 +/// Not pretty, but we need this to be able to call nsContentUtils::IsPatternMatching
@@ -320,6 +340,19 @@ new file mode 100644
 +    } else {
 +        false
 +    }
++}
++
++#[cfg(not(feature = "gecko"))]
++fn get_document_domain(document_url: &str, _: &ParserContext) -> Result<String, ()>{
++    match ServoUrl::parse(document_url) {
++        Ok(url) => Ok(url.domain()),
++        Err(_) => {},
++    }
++}
++
++#[cfg(feature = "gecko")]
++fn get_document_domain(_: &str, _: &ParserContext) -> Result<String, ()>{
++    Err(())
 +}
 +
 +/// A URL matching function for a `@document` rule's condition.
@@ -359,7 +392,8 @@ new file mode 100644
 +    }
 +
 +    /// Evaluate a URL matching function.
-+    pub fn eval(&self, document_url: &str, document: Document) -> bool {
++    pub fn eval(&self, context: &ParserContext, document_url: &str,
++                document: Document) -> bool {
 +        match *self {
 +            /// Exact URL matching function. It evaluates to true whenever the
 +            /// URL of the document being styled is exactly the URL given.
@@ -381,12 +415,9 @@ new file mode 100644
 +            /// period (U+002E) immediately followed by the argument to the
 +            /// ‘domain()’ function.
 +            UrlMatchingFunction::Domain(ref domain) => {
-+                match Url::parse(document_url) {
-+                    Ok(url) => match url.host_str() {
-+                        Some(document_host) => document_host == domain,
-+                        None => false,
-+                    },
-+                    Err(_) => false,
++                match get_document_domain(document_url, context) {
++                    Ok(ref document_domain) => domain == document_domain,
++                    Err(_) => false
 +                }
 +            },
 +            /// Regular expression matching function. It evaluates to true
@@ -444,10 +475,11 @@ new file mode 100644
 +    }
 +
 +    /// Evaluate a document condition.
-+    pub fn eval(&self, document_url: Option<String>, document: Document) -> bool {
++    pub fn eval(&self, context: &ParserContext, document_url: Option<String>,
++                document: Document) -> bool {
 +        if let Some(url) = document_url {
 +            self.0.iter().any(|ref url_matching_function|
-+                url_matching_function.eval(&url, document)
++                url_matching_function.eval(context, &url, document)
 +            )
 +        } else {
 +            false
@@ -827,7 +859,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
          match prelude {
              AtRulePrelude::FontFace => {
                  let context = ParserContext::new_with_rule_type(self.context, Some(CssRuleType::FontFace));
-@@ -1166,16 +1231,25 @@ impl<'a, 'b> AtRuleParser for NestedRule
+@@ -1166,16 +1231,26 @@ impl<'a, 'b> AtRuleParser for NestedRule
              }
              AtRulePrelude::Page => {
                  let context = ParserContext::new_with_rule_type(self.context, Some(CssRuleType::Page));
@@ -838,7 +870,8 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
              }
 +            AtRulePrelude::Document(cond) => {
 +                let loader = self.loader.expect("Expected a stylesheet loader for @-moz-document");
-+                let enabled = cond.eval(loader.get_document_url_as_string(), loader.get_document());
++                let enabled = cond.eval(self.context, loader.get_document_url_as_string(),
++                                        loader.get_document());
 +                Ok(CssRule::Document(Arc::new(self.shared_lock.wrap(DocumentRule {
 +                    condition: cond,
 +                    rules: self.parse_nested_rules(input, CssRuleType::Document),
