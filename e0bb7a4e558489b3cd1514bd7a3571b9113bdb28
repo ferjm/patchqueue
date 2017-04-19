@@ -29,7 +29,7 @@ diff --git a/layout/style/ServoBindings.cpp b/layout/style/ServoBindings.cpp
  #include "nsRuleNode.h"
  #include "nsString.h"
  #include "nsStyleStruct.h"
-@@ -1797,16 +1798,42 @@ Gecko_RegisterProfilerThread(const char*
+@@ -1797,16 +1798,49 @@ Gecko_RegisterProfilerThread(const char*
  }
  
  void
@@ -46,7 +46,7 @@ diff --git a/layout/style/ServoBindings.cpp b/layout/style/ServoBindings.cpp
 +}
 +
 +bool
-+Gecko_isPatternMatching(const uint8_t* aValue, uint32_t aValueLength,
++Gecko_IsPatternMatching(const uint8_t* aValue, uint32_t aValueLength,
 +                        const uint8_t* aPattern, uint32_t aPatternLength,
 +                        RawGeckoDocumentBorrowedOrNull aDocument)
 +{
@@ -64,6 +64,13 @@ diff --git a/layout/style/ServoBindings.cpp b/layout/style/ServoBindings.cpp
 +    const_cast<nsIDocument*>(reinterpret_cast<const nsIDocument*>(aDocument)));
 +}
 +
++bool
++Gecko_GetURIHost(ServoBundledURI aURI, nsACString* aHost)
++{
++  nsresult rv = aURI.mExtraData->BaseURI()->GetHost(*aHost);
++  return NS_SUCCEEDED(rv);
++}
++
  #include "nsStyleStructList.h"
  
  #undef STYLE_STRUCT
@@ -75,7 +82,7 @@ diff --git a/layout/style/ServoBindings.cpp b/layout/style/ServoBindings.cpp
 diff --git a/layout/style/ServoBindings.h b/layout/style/ServoBindings.h
 --- a/layout/style/ServoBindings.h
 +++ b/layout/style/ServoBindings.h
-@@ -454,15 +454,20 @@ bool Gecko_MatchStringArgPseudo(RawGecko
+@@ -454,15 +454,21 @@ bool Gecko_MatchStringArgPseudo(RawGecko
  #include "nsStyleStructList.h"
  #undef STYLE_STRUCT
  
@@ -85,9 +92,10 @@ diff --git a/layout/style/ServoBindings.h b/layout/style/ServoBindings.h
  void Gecko_UnregisterProfilerThread();
  
 +bool Gecko_nsIURI_ToString(nsIURI* aURI, nsACString* aResult);
-+bool Gecko_isPatternMatching(const uint8_t* aValue, uint32_t aValueLength,
++bool Gecko_IsPatternMatching(const uint8_t* aValue, uint32_t aValueLength,
 +                             const uint8_t* aPattern, uint32_t aPatternLength,
 +                             RawGeckoDocumentBorrowedOrNull aDocument);
++bool Gecko_GetURIHost(ServoBundledURI aURI, nsACString* aHost);
 +
  #define SERVO_BINDING_FUNC(name_, return_, ...) return_ name_(__VA_ARGS__);
  #include "mozilla/ServoBindingList.h"
@@ -117,24 +125,6 @@ diff --git a/servo/Cargo.lock b/servo/Cargo.lock
  ]
  
  [[package]]
-@@ -2765,16 +2766,17 @@ dependencies = [
-  "serde_derive 0.9.11 (registry+https://github.com/rust-lang/crates.io-index)",
-  "servo_atoms 0.0.1",
-  "servo_config 0.0.1",
-  "servo_url 0.0.1",
-  "smallvec 0.3.2 (registry+https://github.com/rust-lang/crates.io-index)",
-  "style_traits 0.0.1",
-  "time 0.1.36 (registry+https://github.com/rust-lang/crates.io-index)",
-  "unicode-segmentation 1.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
-+ "url 1.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
-  "walkdir 1.0.7 (registry+https://github.com/rust-lang/crates.io-index)",
- ]
- 
- [[package]]
- name = "style_tests"
- version = "0.0.1"
- dependencies = [
-  "app_units 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
 diff --git a/servo/components/script/dom/cssrule.rs b/servo/components/script/dom/cssrule.rs
 --- a/servo/components/script/dom/cssrule.rs
 +++ b/servo/components/script/dom/cssrule.rs
@@ -292,7 +282,7 @@ diff --git a/servo/components/style/document.rs b/servo/components/style/documen
 new file mode 100644
 --- /dev/null
 +++ b/servo/components/style/document.rs
-@@ -0,0 +1,208 @@
+@@ -0,0 +1,215 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -305,7 +295,7 @@ new file mode 100644
 +#[cfg(feature = "gecko")]
 +use gecko_bindings::bindings::RawGeckoDocumentBorrowedOrNull;
 +#[cfg(feature = "gecko")]
-+use gecko_bindings::bindings::Gecko_isPatternMatching;
++use gecko_bindings::bindings::{Gecko_GetURIHost, Gecko_IsPatternMatching};
 +use parser::{Parse, ParserContext};
 +#[cfg(not(feature = "gecko"))]
 +use regex::Regex;
@@ -327,7 +317,7 @@ new file mode 100644
 +#[cfg(feature = "gecko")]
 +fn is_pattern_matching(document_url: &str, pattern: &str, document: Document) -> bool {
 +    unsafe {
-+        Gecko_isPatternMatching(document_url.as_ptr(), document_url.len() as u32,
++        Gecko_IsPatternMatching(document_url.as_ptr(), document_url.len() as u32,
 +                                pattern.as_ptr(), pattern.len() as u32,
 +                                document)
 +    }
@@ -342,17 +332,24 @@ new file mode 100644
 +    }
 +}
 +
-+#[cfg(not(feature = "gecko"))]
-+fn get_document_domain(document_url: &str, _: &ParserContext) -> Result<String, ()>{
-+    match ServoUrl::parse(document_url) {
-+        Ok(url) => Ok(url.domain()),
-+        Err(_) => {},
++#[cfg(feature = "gecko")]
++fn get_document_domain(document_url: &str, context: &ParserContext) -> Result<String, ()>{
++    use std::borrow::Cow;
++    let specified_url = SpecifiedUrl::parse_from_string(Cow::from(document_url), context)?;
++    ns_auto_cstring!(host);
++    unsafe {
++        if Gecko_GetURIHost(specified_url.for_ffi(), &mut *host) {
++            Ok(format!("{}", host))
++        } else {
++            Err(())
++        }
 +    }
 +}
 +
-+#[cfg(feature = "gecko")]
-+fn get_document_domain(_: &str, _: &ParserContext) -> Result<String, ()>{
-+    Err(())
++#[cfg(not(feature = "gecko"))]
++fn get_document_domain(document_url: &str, _: &ParserContext) -> Result<String, ()>{
++    let url = ServoUrl::parse(document_url)?;
++    Ok(url.domain())
 +}
 +
 +/// A URL matching function for a `@document` rule's condition.
@@ -504,7 +501,7 @@ new file mode 100644
 diff --git a/servo/components/style/lib.rs b/servo/components/style/lib.rs
 --- a/servo/components/style/lib.rs
 +++ b/servo/components/style/lib.rs
-@@ -64,38 +64,42 @@ extern crate nsstring_vendor as nsstring
+@@ -64,16 +64,18 @@ extern crate nsstring_vendor as nsstring
  #[cfg(feature = "gecko")] extern crate num_cpus;
  extern crate num_integer;
  extern crate num_traits;
@@ -523,13 +520,7 @@ diff --git a/servo/components/style/lib.rs b/servo/components/style/lib.rs
  extern crate smallvec;
  #[macro_use]
  extern crate style_traits;
- extern crate time;
- #[allow(unused_extern_crates)]
- extern crate unicode_segmentation;
-+extern crate url;
- 
- pub mod animation;
- #[allow(missing_docs)] // TODO.
+@@ -86,16 +88,17 @@ pub mod animation;
  #[cfg(feature = "servo")] pub mod attr;
  pub mod bezier;
  pub mod bloom;
@@ -997,24 +988,6 @@ diff --git a/toolkit/library/gtest/rust/Cargo.lock b/toolkit/library/gtest/rust/
  
  [[package]]
  name = "gkrust-shared"
-@@ -746,16 +747,17 @@ dependencies = [
-  "precomputed-hash 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
-  "rayon 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
-  "regex 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
-  "selectors 0.18.0",
-  "smallvec 0.3.2 (registry+https://github.com/rust-lang/crates.io-index)",
-  "style_traits 0.0.1",
-  "time 0.1.36 (registry+https://github.com/rust-lang/crates.io-index)",
-  "unicode-segmentation 1.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
-+ "url 1.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
-  "walkdir 1.0.7 (registry+https://github.com/rust-lang/crates.io-index)",
- ]
- 
- [[package]]
- name = "style_traits"
- version = "0.0.1"
- dependencies = [
-  "app_units 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
 diff --git a/toolkit/library/rust/Cargo.lock b/toolkit/library/rust/Cargo.lock
 --- a/toolkit/library/rust/Cargo.lock
 +++ b/toolkit/library/rust/Cargo.lock
@@ -1036,21 +1009,3 @@ diff --git a/toolkit/library/rust/Cargo.lock b/toolkit/library/rust/Cargo.lock
  
  [[package]]
  name = "gkrust-shared"
-@@ -733,16 +734,17 @@ dependencies = [
-  "precomputed-hash 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
-  "rayon 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
-  "regex 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
-  "selectors 0.18.0",
-  "smallvec 0.3.2 (registry+https://github.com/rust-lang/crates.io-index)",
-  "style_traits 0.0.1",
-  "time 0.1.36 (registry+https://github.com/rust-lang/crates.io-index)",
-  "unicode-segmentation 1.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
-+ "url 1.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
-  "walkdir 1.0.7 (registry+https://github.com/rust-lang/crates.io-index)",
- ]
- 
- [[package]]
- name = "style_traits"
- version = "0.0.1"
- dependencies = [
-  "app_units 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
