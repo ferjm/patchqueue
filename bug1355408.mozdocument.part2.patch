@@ -1,0 +1,27 @@
+# HG changeset patch
+# User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
+# Parent  c5b59e67b37881027a584411ea83af0e2dafcf72
+Bug 1355408 - stylo: Support @-moz-document rule. Part 2: Servo support. r=xidorn
+
+diff --git a/servo/components/script/stylesheet_loader.rs b/servo/components/script/stylesheet_loader.rs
+--- a/servo/components/script/stylesheet_loader.rs
++++ b/servo/components/script/stylesheet_loader.rs
+@@ -280,17 +280,16 @@ impl<'a> StyleStylesheetLoader for Style
+         // setting? Fix this when spec has more details.
+         let source = StylesheetContextSource::Import(import.stylesheet.clone());
+         self.load(source, url, None, "".to_owned());
+ 
+         make_arc(import)
+     }
+ 
+     fn get_document_url_as_string(&self) -> Option<String> {
+-        // TODO (ferjm): Implement as part of @-moz-document support for Servo.
+-        None
++        Some(document_from_node(self.elem).url().into_string())
+     }
+ 
+     fn get_document(&self) -> StyleDocument {
+         // This is only used by Gecko, so we return None here.
+         None
+     }
+ }

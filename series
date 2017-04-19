@@ -1,4 +1,5 @@
 e0bb7a4e558489b3cd1514bd7a3571b9113bdb28
+bug1355408.mozdocument.part2.patch
 bug1217544.background.sync.part1.webidl.patch
 bug1217544.background.sync.part2.serviceworkerregistration.patch
 bug1217544.background.sync.part3.ipc.patch
