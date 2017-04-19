@@ -282,7 +282,7 @@ diff --git a/servo/components/style/document.rs b/servo/components/style/documen
 new file mode 100644
 --- /dev/null
 +++ b/servo/components/style/document.rs
-@@ -0,0 +1,215 @@
+@@ -0,0 +1,220 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -348,8 +348,13 @@ new file mode 100644
 +
 +#[cfg(not(feature = "gecko"))]
 +fn get_document_domain(document_url: &str, _: &ParserContext) -> Result<String, ()>{
-+    let url = ServoUrl::parse(document_url)?;
-+    Ok(url.domain())
++    match ServoUrl::parse(document_url) {
++        Ok(url) => match url.domain() {
++            Some(domain) => Ok(domain.to_owned()),
++            None => Err(()),
++        },
++        Err(_) => Err(()),
++    }
 +}
 +
 +/// A URL matching function for a `@document` rule's condition.
