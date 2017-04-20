@@ -1,5 +1,49 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  27aba63c02e3853d36f7d15630c3c74e1f2d1afc
+# Parent  9c51c3798276a32d9940babb22a348ab52bb598c
 Bug 1355408 - stylo: Support @-moz-document rule. Part 3: Tests. r=xidorn
 
+diff --git a/layout/reftests/scoped-style/reftest-stylo.list b/layout/reftests/scoped-style/reftest-stylo.list
+--- a/layout/reftests/scoped-style/reftest-stylo.list
++++ b/layout/reftests/scoped-style/reftest-stylo.list
+@@ -44,15 +44,15 @@ fails == scoped-style-dynamic-011.html s
+ == scoped-style-dynamic-012.svg scoped-style-dynamic-012.svg
+ == scoped-style-dynamic-013.svg scoped-style-dynamic-013.svg
+ == scoped-style-dynamic-014.svg scoped-style-dynamic-014.svg
+ == scoped-style-dynamic-015.svg scoped-style-dynamic-015.svg
+ fails == scoped-style-import.html scoped-style-import.html
+ fails == scoped-style-media.html scoped-style-media.html
+ fails == scoped-style-namespace.html scoped-style-namespace.html
+ fails == scoped-style-charset.html scoped-style-charset.html
+-fails == scoped-style-document.html scoped-style-document.html
++== scoped-style-document.html scoped-style-document.html
+ fails HTTP(..) == scoped-style-font-face.html scoped-style-font-face.html
+ fails == scoped-style-keyframes.html scoped-style-keyframes.html
+ fails == scoped-style-supports.html scoped-style-supports.html
+ fails pref(layout.css.scope-pseudo.enabled,true) == scoped-style-pseudo-001.html scoped-style-pseudo-001.html
+ fails pref(layout.css.scope-pseudo.enabled,true) == scoped-style-pseudo-002.html scoped-style-pseudo-002.html
+ pref(layout.css.scope-pseudo.enabled,true) == scoped-style-pseudo-003.html scoped-style-pseudo-003.html
+diff --git a/layout/reftests/w3c-css/submitted/conditional3/reftest-stylo.list b/layout/reftests/w3c-css/submitted/conditional3/reftest-stylo.list
+--- a/layout/reftests/w3c-css/submitted/conditional3/reftest-stylo.list
++++ b/layout/reftests/w3c-css/submitted/conditional3/reftest-stylo.list
+@@ -20,18 +20,18 @@
+ == css-supports-019.xht css-supports-019.xht
+ == css-supports-020.xht css-supports-020.xht
+ == css-supports-021.xht css-supports-021.xht
+ == css-supports-022.xht css-supports-022.xht
+ == css-supports-023.xht css-supports-023.xht
+ == css-supports-024.xht css-supports-024.xht
+ == css-supports-025.xht css-supports-025.xht
+ == css-supports-026.xht css-supports-026.xht
+-fails == css-supports-027.xht css-supports-027.xht
+-fails == css-supports-028.xht css-supports-028.xht
++== css-supports-027.xht css-supports-027.xht
++== css-supports-028.xht css-supports-028.xht
+ == css-supports-029.xht css-supports-029.xht
+ == css-supports-030.xht css-supports-030.xht
+ == css-supports-031.xht css-supports-031.xht
+ == css-supports-032.xht css-supports-032.xht
+ == css-supports-033.xht css-supports-033.xht
+ == css-supports-034.xht css-supports-034.xht
+ == css-supports-035.xht css-supports-035.xht
+ == css-supports-036.xht css-supports-036.xht
