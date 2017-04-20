@@ -2,9 +2,11 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
 # Date 1492534783 -7200
-# Node ID e0bb7a4e558489b3cd1514bd7a3571b9113bdb28
+# Node ID 8ad5a15f1ea8eb6b59b9b131c6eb81a3ac32a78d
 # Parent  c697e756f738ce37abc56f31bfbc48f55625d617
  Bug 1355408 - stylo: Support @-moz-document rule. Part 1: Common bits and Gecko support. r=xidorn
+
+MozReview-Commit-ID: 3yLRdXrqDm3
 
 diff --git a/layout/style/ServoBindings.cpp b/layout/style/ServoBindings.cpp
 --- a/layout/style/ServoBindings.cpp
@@ -225,7 +227,8 @@ diff --git a/servo/components/style/Cargo.toml b/servo/components/style/Cargo.to
  smallvec = "0.3"
  style_traits = {path = "../style_traits"}
  servo_url = {path = "../url", optional = true}
-@@ -60,10 +61,10 @@ unicode-segmentation = "1.0"
+@@ -59,11 +60,11 @@ time = "0.1"
+ unicode-segmentation = "1.0"
  
  [target.'cfg(windows)'.dependencies]
  kernel32-sys = "0.2"
@@ -233,9 +236,9 @@ diff --git a/servo/components/style/Cargo.toml b/servo/components/style/Cargo.to
  [build-dependencies]
  lazy_static = "0.2"
  log = "0.3"
- bindgen = { version = "0.22", optional = true }
--regex = {version = "0.2", optional = true}
-+regex = "0.2"
+-bindgen = { version = "0.22", optional = true }
++bindgen = {version = "0.22", optional = true}
+ regex = {version = "0.2", optional = true}
  walkdir = "1.0"
 diff --git a/servo/components/style/build_gecko.rs b/servo/components/style/build_gecko.rs
 --- a/servo/components/style/build_gecko.rs

@@ -1,12 +1,17 @@
+
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  c5b59e67b37881027a584411ea83af0e2dafcf72
+# Date 1492696359 -7200
+# Node ID 22394afb8660e4b7a14295a5ff68eafe9d9bbee4
+# Parent  8ad5a15f1ea8eb6b59b9b131c6eb81a3ac32a78d
 Bug 1355408 - stylo: Support @-moz-document rule. Part 2: Servo support. r=xidorn
+
+MozReview-Commit-ID: 7z2ruzmgXR9
 
 diff --git a/servo/components/script/dom/bindings/trace.rs b/servo/components/script/dom/bindings/trace.rs
 --- a/servo/components/script/dom/bindings/trace.rs
 +++ b/servo/components/script/dom/bindings/trace.rs
-@@ -94,17 +94,17 @@ use std::time::{SystemTime, Instant};
+@@ -94,17 +94,17 @@
  use style::attr::{AttrIdentifier, AttrValue, LengthOrPercentageOrAuto};
  use style::context::QuirksMode;
  use style::element_state::*;
@@ -25,7 +30,7 @@ diff --git a/servo/components/script/dom/bindings/trace.rs b/servo/components/sc
  use webrender_traits::{WebGLBufferId, WebGLError, WebGLFramebufferId, WebGLProgramId};
  use webrender_traits::{WebGLRenderbufferId, WebGLShaderId, WebGLTextureId};
  use webvr_traits::WebVRGamepadHand;
-@@ -558,16 +558,22 @@ unsafe impl JSTraceable for StyleLocked<
+@@ -558,16 +558,22 @@
  }
  
  unsafe impl JSTraceable for StyleLocked<ViewportRule> {
@@ -68,7 +73,7 @@ diff --git a/servo/components/script/dom/cssconditionrule.rs b/servo/components/
  use std::sync::Arc;
  use style::shared_lock::{SharedRwLock, Locked};
  use style::stylesheets::CssRules as StyleCssRules;
-@@ -38,24 +39,28 @@ impl CSSConditionRule {
+@@ -38,24 +39,28 @@
  
  impl CSSConditionRuleMethods for CSSConditionRule {
      /// https://drafts.csswg.org/css-conditional-3/#dom-cssconditionrule-conditiontext
@@ -207,7 +212,7 @@ diff --git a/servo/components/script/dom/cssrule.rs b/servo/components/script/do
  use dom::cssnamespacerule::CSSNamespaceRule;
  use dom::cssstylerule::CSSStyleRule;
  use dom::cssstylesheet::CSSStyleSheet;
-@@ -59,16 +60,18 @@ impl CSSRule {
+@@ -59,16 +60,18 @@
          } else if let Some(rule) = self.downcast::<CSSViewportRule>() {
              rule as &SpecificCSSRule
          } else if let Some(rule) = self.downcast::<CSSKeyframeRule>() {
@@ -226,7 +231,7 @@ diff --git a/servo/components/script/dom/cssrule.rs b/servo/components/script/do
      // Given a StyleCssRule, create a new instance of a derived class of
      // CSSRule based on which rule it is
      pub fn new_specific(window: &Window, parent_stylesheet: &CSSStyleSheet,
-@@ -78,18 +81,18 @@ impl CSSRule {
+@@ -78,18 +81,18 @@
              StyleCssRule::Import(s) => Root::upcast(CSSImportRule::new(window, parent_stylesheet, s)),
              StyleCssRule::Style(s) => Root::upcast(CSSStyleRule::new(window, parent_stylesheet, s)),
              StyleCssRule::FontFace(s) => Root::upcast(CSSFontFaceRule::new(window, parent_stylesheet, s)),
@@ -249,7 +254,7 @@ diff --git a/servo/components/script/dom/cssrule.rs b/servo/components/script/do
 diff --git a/servo/components/script/dom/mod.rs b/servo/components/script/dom/mod.rs
 --- a/servo/components/script/dom/mod.rs
 +++ b/servo/components/script/dom/mod.rs
-@@ -237,16 +237,17 @@ pub mod characterdata;
+@@ -237,16 +237,17 @@
  pub mod client;
  pub mod closeevent;
  pub mod comment;
@@ -285,7 +290,7 @@ new file mode 100644
 diff --git a/servo/components/script/dom/webidls/CSSRule.webidl b/servo/components/script/dom/webidls/CSSRule.webidl
 --- a/servo/components/script/dom/webidls/CSSRule.webidl
 +++ b/servo/components/script/dom/webidls/CSSRule.webidl
-@@ -27,11 +27,14 @@ partial interface CSSRule {
+@@ -27,11 +27,14 @@
  };
  
  // https://drafts.csswg.org/css-device-adapt/#css-rule-interface
@@ -303,7 +308,7 @@ diff --git a/servo/components/script/dom/webidls/CSSRule.webidl b/servo/componen
 diff --git a/servo/components/script/stylesheet_loader.rs b/servo/components/script/stylesheet_loader.rs
 --- a/servo/components/script/stylesheet_loader.rs
 +++ b/servo/components/script/stylesheet_loader.rs
-@@ -280,17 +280,16 @@ impl<'a> StyleStylesheetLoader for Style
+@@ -280,17 +280,16 @@
          // setting? Fix this when spec has more details.
          let source = StylesheetContextSource::Import(import.stylesheet.clone());
          self.load(source, url, None, "".to_owned());
@@ -322,3 +327,4 @@ diff --git a/servo/components/script/stylesheet_loader.rs b/servo/components/scr
          None
      }
  }
+
