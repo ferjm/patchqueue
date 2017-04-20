@@ -1,7 +1,7 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  9c51c3798276a32d9940babb22a348ab52bb598c
-Bug 1355408 - stylo: Support @-moz-document rule. Part 3: Tests. r=xidorn
+# Parent  1aee54cf4e493db548584ba20b9381dd51fdba10
+Bug 1355408 - stylo: Support @-moz-document rule. Part 3: Update test expectations. r=xidorn
 
 diff --git a/layout/reftests/scoped-style/reftest-stylo.list b/layout/reftests/scoped-style/reftest-stylo.list
 --- a/layout/reftests/scoped-style/reftest-stylo.list
