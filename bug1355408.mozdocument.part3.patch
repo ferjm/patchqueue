@@ -1,0 +1,5 @@
+# HG changeset patch
+# User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
+# Parent  27aba63c02e3853d36f7d15630c3c74e1f2d1afc
+Bug 1355408 - stylo: Support @-moz-document rule. Part 3: Tests. r=xidorn
+
