@@ -47,3 +47,24 @@ diff --git a/layout/reftests/w3c-css/submitted/conditional3/reftest-stylo.list b
  == css-supports-034.xht css-supports-034.xht
  == css-supports-035.xht css-supports-035.xht
  == css-supports-036.xht css-supports-036.xht
+diff --git a/layout/style/test/stylo-failures.md b/layout/style/test/stylo-failures.md
+--- a/layout/style/test/stylo-failures.md
++++ b/layout/style/test/stylo-failures.md
+@@ -322,17 +322,16 @@ to mochitest command.
+ * test_pseudoelement_parsing.html: support parsing some pseudo-classes on some pseudo-elements [5]
+ * Unit should be preserved after parsing servo/servo#15346
+   * test_units_time.html [1]
+ * insertRule / deleteRule don't work bug 1336863
+   * test_rule_insertion.html [5]
+ * @-moz-document support bug 1355408
+   * test_rule_serialization.html [2]
+   * test_moz_document_rules.html [13]
+-  * test_bug511909.html `@-moz-document` [4]
+   * test_condition_text.html: also \@supports [7]
+ * getComputedStyle style doesn't contain custom properties bug 1336891
+   * test_variable_serialization_computed.html [35]
+   * test_variables.html `custom property name` [2]
+ * test_css_supports.html: issues around @supports syntax servo/servo#15482 [8]
+ * test_author_specified_style.html: support serializing color as author specified bug 1348165 [27]
+ * browser_newtab_share_rule_processors.js: agent style sheet sharing [1]
+ * test_selectors.html `this_better_be_unvisited`: visited handling [2]
