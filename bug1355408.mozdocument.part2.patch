@@ -3,6 +3,303 @@
 # Parent  c5b59e67b37881027a584411ea83af0e2dafcf72
 Bug 1355408 - stylo: Support @-moz-document rule. Part 2: Servo support. r=xidorn
 
+diff --git a/servo/components/script/dom/bindings/trace.rs b/servo/components/script/dom/bindings/trace.rs
+--- a/servo/components/script/dom/bindings/trace.rs
++++ b/servo/components/script/dom/bindings/trace.rs
+@@ -94,17 +94,17 @@ use std::time::{SystemTime, Instant};
+ use style::attr::{AttrIdentifier, AttrValue, LengthOrPercentageOrAuto};
+ use style::context::QuirksMode;
+ use style::element_state::*;
+ use style::keyframes::Keyframe;
+ use style::media_queries::MediaList;
+ use style::properties::PropertyDeclarationBlock;
+ use style::selector_parser::{PseudoElement, Snapshot};
+ use style::shared_lock::{SharedRwLock as StyleSharedRwLock, Locked as StyleLocked};
+-use style::stylesheets::{CssRules, FontFaceRule, KeyframesRule, MediaRule};
++use style::stylesheets::{CssRules, DocumentRule, FontFaceRule, KeyframesRule, MediaRule};
+ use style::stylesheets::{NamespaceRule, StyleRule, ImportRule, SupportsRule};
+ use style::values::specified::Length;
+ use style::viewport::ViewportRule;
+ use time::Duration;
+ use uuid::Uuid;
+ use webrender_traits::{WebGLBufferId, WebGLError, WebGLFramebufferId, WebGLProgramId};
+ use webrender_traits::{WebGLRenderbufferId, WebGLShaderId, WebGLTextureId};
+ use webvr_traits::WebVRGamepadHand;
+@@ -558,16 +558,22 @@ unsafe impl JSTraceable for StyleLocked<
+ }
+ 
+ unsafe impl JSTraceable for StyleLocked<ViewportRule> {
+     unsafe fn trace(&self, _trc: *mut JSTracer) {
+         // Do nothing.
+     }
+ }
+ 
++unsafe impl JSTraceable for StyleLocked<DocumentRule> {
++    unsafe fn trace(&self, _trc: *mut JSTracer) {
++        // Do nothing.
++    }
++}
++
+ unsafe impl JSTraceable for StyleLocked<PropertyDeclarationBlock> {
+     unsafe fn trace(&self, _trc: *mut JSTracer) {
+         // Do nothing.
+     }
+ }
+ 
+ unsafe impl JSTraceable for RwLock<SharedRt> {
+     unsafe fn trace(&self, _trc: *mut JSTracer) {
+diff --git a/servo/components/script/dom/cssconditionrule.rs b/servo/components/script/dom/cssconditionrule.rs
+--- a/servo/components/script/dom/cssconditionrule.rs
++++ b/servo/components/script/dom/cssconditionrule.rs
+@@ -1,15 +1,16 @@
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ use dom::bindings::codegen::Bindings::CSSConditionRuleBinding::CSSConditionRuleMethods;
+ use dom::bindings::inheritance::Castable;
+ use dom::bindings::str::DOMString;
++use dom::cssdocumentrule::CSSDocumentRule;
+ use dom::cssgroupingrule::CSSGroupingRule;
+ use dom::cssmediarule::CSSMediaRule;
+ use dom::cssstylesheet::CSSStyleSheet;
+ use dom::csssupportsrule::CSSSupportsRule;
+ use dom_struct::dom_struct;
+ use std::sync::Arc;
+ use style::shared_lock::{SharedRwLock, Locked};
+ use style::stylesheets::CssRules as StyleCssRules;
+@@ -38,24 +39,28 @@ impl CSSConditionRule {
+ 
+ impl CSSConditionRuleMethods for CSSConditionRule {
+     /// https://drafts.csswg.org/css-conditional-3/#dom-cssconditionrule-conditiontext
+     fn ConditionText(&self) -> DOMString {
+         if let Some(rule) = self.downcast::<CSSMediaRule>() {
+             rule.get_condition_text()
+         } else if let Some(rule) = self.downcast::<CSSSupportsRule>() {
+             rule.get_condition_text()
++        } else if let Some(rule) = self.downcast::<CSSDocumentRule>() {
++            rule.get_condition_text()
+         } else {
+             unreachable!()
+         }
+     }
+ 
+     /// https://drafts.csswg.org/css-conditional-3/#dom-cssconditionrule-conditiontext
+     fn SetConditionText(&self, text: DOMString) {
+         if let Some(rule) = self.downcast::<CSSMediaRule>() {
+             rule.set_condition_text(text)
+         } else if let Some(rule) = self.downcast::<CSSSupportsRule>() {
+             rule.set_condition_text(text)
++        } else if let Some(rule) = self.downcast::<CSSDocumentRule>() {
++            rule.set_condition_text(text)
+         } else {
+             unreachable!()
+         }
+     }
+ }
+diff --git a/servo/components/script/dom/cssdocumentrule.rs b/servo/components/script/dom/cssdocumentrule.rs
+new file mode 100644
+--- /dev/null
++++ b/servo/components/script/dom/cssdocumentrule.rs
+@@ -0,0 +1,84 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++use cssparser::Parser;
++use dom::bindings::codegen::Bindings::CSSDocumentRuleBinding;
++use dom::bindings::codegen::Bindings::WindowBinding::WindowBinding::WindowMethods;
++use dom::bindings::js::Root;
++use dom::bindings::reflector::{DomObject, reflect_dom_object};
++use dom::bindings::str::DOMString;
++use dom::cssconditionrule::CSSConditionRule;
++use dom::cssrule::SpecificCSSRule;
++use dom::cssstylesheet::CSSStyleSheet;
++use dom::window::Window;
++use dom_struct::dom_struct;
++use std::sync::Arc;
++use style::document::DocumentCondition;
++use style::parser::{LengthParsingMode, ParserContext};
++use style::shared_lock::{Locked, ToCssWithGuard};
++use style::stylesheets::{CssRuleType, DocumentRule};
++use style_traits::ToCss;
++
++#[dom_struct]
++pub struct CSSDocumentRule {
++    css_condition_rule: CSSConditionRule,
++    #[ignore_heap_size_of = "Arc"]
++    document_rule: Arc<Locked<DocumentRule>>,
++}
++
++impl CSSDocumentRule {
++    fn new_inherited(parent_stylesheet: &CSSStyleSheet,
++                     document_rule: Arc<Locked<DocumentRule>>) -> CSSDocumentRule {
++        let guard = parent_stylesheet.shared_lock().read();
++        let list = document_rule.read_with(&guard).rules.clone();
++        CSSDocumentRule {
++            css_condition_rule: CSSConditionRule::new_inherited(parent_stylesheet, list),
++            document_rule: document_rule,
++        }
++    }
++
++    #[allow(unrooted_must_root)]
++    pub fn new(window: &Window, parent_stylesheet: &CSSStyleSheet,
++               document_rule: Arc<Locked<DocumentRule>>) -> Root<CSSDocumentRule> {
++        reflect_dom_object(box CSSDocumentRule::new_inherited(parent_stylesheet, document_rule),
++                           window, CSSDocumentRuleBinding::Wrap)
++    }
++
++    pub fn get_condition_text(&self) -> DOMString {
++        let guard = self.css_condition_rule.shared_lock().read();
++        let rule = self.document_rule.read_with(&guard);
++        rule.condition.to_css_string().into()
++    }
++
++    pub fn set_condition_text(&self, text: DOMString) {
++        let mut input = Parser::new(&text);
++        let global = self.global();
++        let win = global.as_window();
++        let url = win.Document().url();
++        let context = ParserContext::new_for_cssom(&url,
++                                                   win.css_error_reporter(),
++                                                   Some(CssRuleType::Document),
++                                                   LengthParsingMode::Default);
++        let cond = DocumentCondition::parse(&context, &mut input);
++        if let Ok(cond) = cond {
++            let enabled = cond.eval(&context, Some(win.Document().url().into_string()), None);
++            let mut guard = self.css_condition_rule.shared_lock().write();
++            let rule = self.document_rule.write_with(&mut guard);
++            rule.condition = cond;
++            rule.enabled = enabled;
++        }
++    }
++}
++
++impl SpecificCSSRule for CSSDocumentRule {
++    fn ty(&self) -> u16 {
++        use dom::bindings::codegen::Bindings::CSSRuleBinding::CSSRuleConstants;
++        CSSRuleConstants::DOCUMENT_RULE
++    }
++
++    fn get_css(&self) -> DOMString {
++        let guard = self.css_condition_rule.shared_lock().read();
++        self.document_rule.read_with(&guard).to_css_string(&guard).into()
++    }
++}
+diff --git a/servo/components/script/dom/cssrule.rs b/servo/components/script/dom/cssrule.rs
+--- a/servo/components/script/dom/cssrule.rs
++++ b/servo/components/script/dom/cssrule.rs
+@@ -2,16 +2,17 @@
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ use dom::bindings::codegen::Bindings::CSSRuleBinding::CSSRuleMethods;
+ use dom::bindings::inheritance::Castable;
+ use dom::bindings::js::{JS, Root};
+ use dom::bindings::reflector::Reflector;
+ use dom::bindings::str::DOMString;
++use dom::cssdocumentrule::CSSDocumentRule;
+ use dom::cssfontfacerule::CSSFontFaceRule;
+ use dom::cssimportrule::CSSImportRule;
+ use dom::csskeyframerule::CSSKeyframeRule;
+ use dom::csskeyframesrule::CSSKeyframesRule;
+ use dom::cssmediarule::CSSMediaRule;
+ use dom::cssnamespacerule::CSSNamespaceRule;
+ use dom::cssstylerule::CSSStyleRule;
+ use dom::cssstylesheet::CSSStyleSheet;
+@@ -59,16 +60,18 @@ impl CSSRule {
+         } else if let Some(rule) = self.downcast::<CSSViewportRule>() {
+             rule as &SpecificCSSRule
+         } else if let Some(rule) = self.downcast::<CSSKeyframeRule>() {
+             rule as &SpecificCSSRule
+         } else if let Some(rule) = self.downcast::<CSSImportRule>() {
+             rule as &SpecificCSSRule
+         } else if let Some(rule) = self.downcast::<CSSSupportsRule>() {
+             rule as &SpecificCSSRule
++        } else if let Some(rule) = self.downcast::<CSSDocumentRule>() {
++            rule as &SpecificCSSRule
+         } else {
+             unreachable!()
+         }
+     }
+ 
+     // Given a StyleCssRule, create a new instance of a derived class of
+     // CSSRule based on which rule it is
+     pub fn new_specific(window: &Window, parent_stylesheet: &CSSStyleSheet,
+@@ -78,18 +81,18 @@ impl CSSRule {
+             StyleCssRule::Import(s) => Root::upcast(CSSImportRule::new(window, parent_stylesheet, s)),
+             StyleCssRule::Style(s) => Root::upcast(CSSStyleRule::new(window, parent_stylesheet, s)),
+             StyleCssRule::FontFace(s) => Root::upcast(CSSFontFaceRule::new(window, parent_stylesheet, s)),
+             StyleCssRule::Keyframes(s) => Root::upcast(CSSKeyframesRule::new(window, parent_stylesheet, s)),
+             StyleCssRule::Media(s) => Root::upcast(CSSMediaRule::new(window, parent_stylesheet, s)),
+             StyleCssRule::Namespace(s) => Root::upcast(CSSNamespaceRule::new(window, parent_stylesheet, s)),
+             StyleCssRule::Viewport(s) => Root::upcast(CSSViewportRule::new(window, parent_stylesheet, s)),
+             StyleCssRule::Supports(s) => Root::upcast(CSSSupportsRule::new(window, parent_stylesheet, s)),
++            StyleCssRule::Document(s) => Root::upcast(CSSDocumentRule::new(window, parent_stylesheet, s)),
+             StyleCssRule::Page(_) => unreachable!(),
+-            StyleCssRule::Document(_) => unimplemented!(), // TODO
+         }
+     }
+ 
+     /// Sets owner sheet/rule to null
+     pub fn detach(&self) {
+         self.deparent();
+         // should set parent rule to None when we add parent rule support
+     }
+diff --git a/servo/components/script/dom/mod.rs b/servo/components/script/dom/mod.rs
+--- a/servo/components/script/dom/mod.rs
++++ b/servo/components/script/dom/mod.rs
+@@ -237,16 +237,17 @@ pub mod characterdata;
+ pub mod client;
+ pub mod closeevent;
+ pub mod comment;
+ pub mod console;
+ mod create;
+ pub mod crypto;
+ pub mod css;
+ pub mod cssconditionrule;
++pub mod cssdocumentrule;
+ pub mod cssfontfacerule;
+ pub mod cssgroupingrule;
+ pub mod cssimportrule;
+ pub mod csskeyframerule;
+ pub mod csskeyframesrule;
+ pub mod cssmediarule;
+ pub mod cssnamespacerule;
+ pub mod cssrule;
+diff --git a/servo/components/script/dom/webidls/CSSDocumentRule.webidl b/servo/components/script/dom/webidls/CSSDocumentRule.webidl
+new file mode 100644
+--- /dev/null
++++ b/servo/components/script/dom/webidls/CSSDocumentRule.webidl
+@@ -0,0 +1,10 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++// https://www.w3.org/TR/2012/WD-css3-conditional-20120911/#the-cssdocumentrule-interface
++// Initially in CSS Conditional Rules Module Level 3, @document has been postponed to the level 4.
++// We implement the prefixed `@-moz-document` rule.
++[Exposed=Window]
++interface CSSDocumentRule : CSSConditionRule {
++};
+diff --git a/servo/components/script/dom/webidls/CSSRule.webidl b/servo/components/script/dom/webidls/CSSRule.webidl
+--- a/servo/components/script/dom/webidls/CSSRule.webidl
++++ b/servo/components/script/dom/webidls/CSSRule.webidl
+@@ -27,11 +27,14 @@ partial interface CSSRule {
+ };
+ 
+ // https://drafts.csswg.org/css-device-adapt/#css-rule-interface
+ partial interface CSSRule {
+     const unsigned short VIEWPORT_RULE = 15;
+ };
+ 
+ // https://drafts.csswg.org/css-conditional-3/#extentions-to-cssrule-interface
++// And for prefixed @-moz-document support:
++// https://www.w3.org/TR/2012/WD-css3-conditional-20120911/#extentions-to-cssrule-interface
+ partial interface CSSRule {
+     const unsigned short SUPPORTS_RULE = 12;
++    const unsigned short DOCUMENT_RULE = 13;
+ };
 diff --git a/servo/components/script/stylesheet_loader.rs b/servo/components/script/stylesheet_loader.rs
 --- a/servo/components/script/stylesheet_loader.rs
 +++ b/servo/components/script/stylesheet_loader.rs
