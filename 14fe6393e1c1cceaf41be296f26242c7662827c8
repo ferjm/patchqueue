@@ -3,7 +3,7 @@
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
 # Date 1492534783 -7200
 # Node ID 14fe6393e1c1cceaf41be296f26242c7662827c8
-# Parent  c697e756f738ce37abc56f31bfbc48f55625d617
+# Parent  8b854986038cf3f3f240697e27ef48ea65914c13
  Bug 1355408 - stylo: Support @-moz-document rule. Part 1: Common bits and Gecko support. r=xidorn
 
 MozReview-Commit-ID: 3yLRdXrqDm3
@@ -29,7 +29,7 @@ diff --git a/layout/style/ServoBindings.cpp b/layout/style/ServoBindings.cpp
  #include "nsRuleNode.h"
  #include "nsString.h"
  #include "nsStyleStruct.h"
-@@ -1797,16 +1798,49 @@
+@@ -1852,16 +1853,34 @@ Gecko_RegisterProfilerThread(const char*
  }
  
  void
@@ -39,36 +39,21 @@ diff --git a/layout/style/ServoBindings.cpp b/layout/style/ServoBindings.cpp
  }
  
 +bool
-+Gecko_nsIURI_ToString(nsIURI* aURI, nsACString* aResult)
++Gecko_DocumentRule_UseForPresentation(const nsIDocument* aDoc,
++                                      const nsACString* aPattern,
++                                      css::URLMatchingFunction aURLMatchingFunction)
 +{
-+  nsresult rv = aURI->GetSpec(*aResult);
-+  return NS_SUCCEEDED(rv);
-+}
++  nsIURI *docURI = aDoc->GetDocumentURI();
++  nsAutoCString docURISpec;
++  if (docURI) {
++    // If GetSpec fails (due to OOM) just skip these URI-specific CSS rules.
++    nsresult rv = docURI->GetSpec(docURISpec);
++    NS_ENSURE_SUCCESS(rv, false);
++  }
 +
-+bool
-+Gecko_IsPatternMatching(const uint8_t* aValue, uint32_t aValueLength,
-+                        const uint8_t* aPattern, uint32_t aPatternLength,
-+                        RawGeckoDocumentBorrowedOrNull aDocument)
-+{
-+  nsString valueStr;
-+  nsDependentCSubstring value(reinterpret_cast<const char*>(aValue),
-+                              aValueLength);
-+  AppendUTF8toUTF16(value, valueStr);
-+
-+  nsString patternStr;
-+  nsDependentCSubstring pattern(reinterpret_cast<const char*>(aPattern),
-+                                aPatternLength);
-+  AppendUTF8toUTF16(pattern, patternStr);
-+
-+  return nsContentUtils::IsPatternMatching(valueStr, patternStr,
-+    const_cast<nsIDocument*>(reinterpret_cast<const nsIDocument*>(aDocument)));
-+}
-+
-+bool
-+Gecko_GetURIHost(ServoBundledURI aURI, nsACString* aHost)
-+{
-+  nsresult rv = aURI.mExtraData->BaseURI()->GetHost(*aHost);
-+  return NS_SUCCEEDED(rv);
++  return css::DocumentRule::UseForPresentation(const_cast<nsIDocument*>(aDoc),
++                                               docURI, docURISpec,
++                                               *aPattern, aURLMatchingFunction);
 +}
 +
  #include "nsStyleStructList.h"
@@ -82,7 +67,25 @@ diff --git a/layout/style/ServoBindings.cpp b/layout/style/ServoBindings.cpp
 diff --git a/layout/style/ServoBindings.h b/layout/style/ServoBindings.h
 --- a/layout/style/ServoBindings.h
 +++ b/layout/style/ServoBindings.h
-@@ -454,15 +454,21 @@
+@@ -8,16 +8,17 @@
+ #define mozilla_ServoBindings_h
+ 
+ #include <stdint.h>
+ 
+ #include "mozilla/ServoTypes.h"
+ #include "mozilla/ServoBindingTypes.h"
+ #include "mozilla/ServoElementSnapshot.h"
+ #include "mozilla/css/SheetParsingMode.h"
++#include "mozilla/css/URLMatchingFunction.h"
+ #include "mozilla/EffectCompositor.h"
+ #include "mozilla/ComputedTimingFunction.h"
+ #include "nsChangeHint.h"
+ #include "nsCSSPseudoClasses.h"
+ #include "nsStyleStruct.h"
+ 
+ /*
+  * API for Servo to access Gecko data structures. This file must compile as valid
+@@ -466,15 +467,19 @@ bool Gecko_MatchStringArgPseudo(RawGecko
  #include "nsStyleStructList.h"
  #undef STYLE_STRUCT
  
@@ -91,11 +94,9 @@ diff --git a/layout/style/ServoBindings.h b/layout/style/ServoBindings.h
  void Gecko_RegisterProfilerThread(const char* name);
  void Gecko_UnregisterProfilerThread();
  
-+bool Gecko_nsIURI_ToString(nsIURI* aURI, nsACString* aResult);
-+bool Gecko_IsPatternMatching(const uint8_t* aValue, uint32_t aValueLength,
-+                             const uint8_t* aPattern, uint32_t aPatternLength,
-+                             RawGeckoDocumentBorrowedOrNull aDocument);
-+bool Gecko_GetURIHost(ServoBundledURI aURI, nsACString* aHost);
++bool Gecko_DocumentRule_UseForPresentation(const nsIDocument* aDoc,
++                                           const nsACString* aPattern,
++                                           mozilla::css::URLMatchingFunction aURLMatchingFunction);
 +
  #define SERVO_BINDING_FUNC(name_, return_, ...) return_ name_(__VA_ARGS__);
  #include "mozilla/ServoBindingList.h"
@@ -104,10 +105,264 @@ diff --git a/layout/style/ServoBindings.h b/layout/style/ServoBindings.h
  } // extern "C"
  
  #endif // mozilla_ServoBindings_h
+diff --git a/layout/style/moz.build b/layout/style/moz.build
+--- a/layout/style/moz.build
++++ b/layout/style/moz.build
+@@ -148,16 +148,17 @@ EXPORTS.mozilla.css += [
+     'GroupRule.h',
+     'ImageLoader.h',
+     'ImportRule.h',
+     'Loader.h',
+     'NameSpaceRule.h',
+     'Rule.h',
+     'SheetParsingMode.h',
+     'StyleRule.h',
++    'URLMatchingFunction.h',
+ ]
+ 
+ UNIFIED_SOURCES += [
+     'AnimationCollection.cpp',
+     'BindingStyleRule.cpp',
+     'CounterStyleManager.cpp',
+     'CSS.cpp',
+     'CSSLexer.cpp',
+diff --git a/layout/style/nsCSSParser.cpp b/layout/style/nsCSSParser.cpp
+--- a/layout/style/nsCSSParser.cpp
++++ b/layout/style/nsCSSParser.cpp
+@@ -23,16 +23,17 @@
+ #include "nsAlgorithm.h"
+ #include "nsCSSProps.h"
+ #include "nsCSSKeywords.h"
+ #include "nsCSSScanner.h"
+ #include "mozilla/css/ErrorReporter.h"
+ #include "mozilla/css/Loader.h"
+ #include "mozilla/css/StyleRule.h"
+ #include "mozilla/css/ImportRule.h"
++#include "mozilla/css/URLMatchingFunction.h"
+ #include "nsCSSRules.h"
+ #include "nsCSSFontFaceRule.h"
+ #include "mozilla/css/NameSpaceRule.h"
+ #include "nsTArray.h"
+ #include "mozilla/StyleSheetInlines.h"
+ #include "mozilla/css/Declaration.h"
+ #include "nsStyleConsts.h"
+ #include "nsNetUtil.h"
+@@ -3900,38 +3901,38 @@ CSSParserImpl::ParseMozDocumentRule(Rule
+       REPORT_UNEXPECTED_TOKEN(PEMozDocRuleBadFunc2);
+       UngetToken();
+       delete urls;
+       return false;
+     }
+     css::DocumentRule::URL *cur = *next = new css::DocumentRule::URL;
+     next = &cur->next;
+     if (mToken.mType == eCSSToken_URL) {
+-      cur->func = css::DocumentRule::eURL;
++      cur->func = URLMatchingFunction::eURL;
+       CopyUTF16toUTF8(mToken.mIdent, cur->url);
+     } else if (mToken.mIdent.LowerCaseEqualsLiteral("regexp")) {
+       // regexp() is different from url-prefix() and domain() (but
+       // probably the way they *should* have been* in that it requires a
+       // string argument, and doesn't try to behave like url().
+-      cur->func = css::DocumentRule::eRegExp;
++      cur->func = URLMatchingFunction::eRegExp;
+       GetToken(true);
+       // copy before we know it's valid (but before ExpectSymbol changes
+       // mToken.mIdent)
+       CopyUTF16toUTF8(mToken.mIdent, cur->url);
+       if (eCSSToken_String != mToken.mType || !ExpectSymbol(')', true)) {
+         REPORT_UNEXPECTED_TOKEN(PEMozDocRuleNotString);
+         SkipUntil(')');
+         delete urls;
+         return false;
+       }
+     } else {
+       if (mToken.mIdent.LowerCaseEqualsLiteral("url-prefix")) {
+-        cur->func = css::DocumentRule::eURLPrefix;
++        cur->func = URLMatchingFunction::eURLPrefix;
+       } else if (mToken.mIdent.LowerCaseEqualsLiteral("domain")) {
+-        cur->func = css::DocumentRule::eDomain;
++        cur->func = URLMatchingFunction::eDomain;
+       }
+ 
+       NS_ASSERTION(!mHavePushBack, "mustn't have pushback at this point");
+       mScanner->NextURL(mToken);
+       if (mToken.mType != eCSSToken_URL) {
+         REPORT_UNEXPECTED_TOKEN(PEMozDocRuleNotURI);
+         SkipUntil(')');
+         delete urls;
+diff --git a/layout/style/nsCSSRules.cpp b/layout/style/nsCSSRules.cpp
+--- a/layout/style/nsCSSRules.cpp
++++ b/layout/style/nsCSSRules.cpp
+@@ -676,47 +676,59 @@ DocumentRule::UseForPresentation(nsPresC
+   nsAutoCString docURISpec;
+   if (docURI) {
+     // If GetSpec fails (due to OOM) just skip these URI-specific CSS rules.
+     nsresult rv = docURI->GetSpec(docURISpec);
+     NS_ENSURE_SUCCESS(rv, false);
+   }
+ 
+   for (URL *url = mURLs; url; url = url->next) {
+-    switch (url->func) {
+-      case eURL: {
+-        if (docURISpec == url->url)
+-          return true;
+-      } break;
+-      case eURLPrefix: {
+-        if (StringBeginsWith(docURISpec, url->url))
++    return UseForPresentation(doc, docURI, docURISpec, url->url, url->func);
++  }
++
++  return false;
++}
++
++bool
++DocumentRule::UseForPresentation(nsIDocument* aDoc,
++                                 nsIURI* aDocURI,
++                                 const nsACString& aDocURISpec,
++                                 const nsACString& aPattern,
++                                 URLMatchingFunction aUrlMatchingFunction)
++{
++  switch (aUrlMatchingFunction) {
++    case eURL: {
++      if (aDocURISpec == aPattern)
++        return true;
++    } break;
++    case eURLPrefix: {
++      if (StringBeginsWith(aDocURISpec, aPattern))
++        return true;
++    } break;
++    case eDomain: {
++      nsAutoCString host;
++      if (aDocURI)
++        aDocURI->GetHost(host);
++      int32_t lenDiff = host.Length() - aPattern.Length();
++      if (lenDiff == 0) {
++        if (host == aPattern)
+           return true;
+-      } break;
+-      case eDomain: {
+-        nsAutoCString host;
+-        if (docURI)
+-          docURI->GetHost(host);
+-        int32_t lenDiff = host.Length() - url->url.Length();
+-        if (lenDiff == 0) {
+-          if (host == url->url)
+-            return true;
+-        } else {
+-          if (StringEndsWith(host, url->url) &&
+-              host.CharAt(lenDiff - 1) == '.')
+-            return true;
+-        }
+-      } break;
+-      case eRegExp: {
+-        NS_ConvertUTF8toUTF16 spec(docURISpec);
+-        NS_ConvertUTF8toUTF16 regex(url->url);
+-        if (nsContentUtils::IsPatternMatching(spec, regex, doc)) {
++      } else {
++        if (StringEndsWith(host, aPattern) &&
++            host.CharAt(lenDiff - 1) == '.')
+           return true;
+-        }
+-      } break;
+-    }
++      }
++    } break;
++    case eRegExp: {
++      NS_ConvertUTF8toUTF16 spec(aDocURISpec);
++      NS_ConvertUTF8toUTF16 regex(aPattern);
++      if (nsContentUtils::IsPatternMatching(spec, regex, aDoc)) {
++        return true;
++      }
++    } break;
+   }
+ 
+   return false;
+ }
+ 
+ DocumentRule::URL::~URL()
+ {
+   NS_CSS_DELETE_LIST_MEMBER(DocumentRule::URL, this, next);
+@@ -1162,17 +1174,17 @@ nsCSSFontFaceStyleDecl::GetParentObject(
+ JSObject*
+ nsCSSFontFaceStyleDecl::WrapObject(JSContext *cx, JS::Handle<JSObject*> aGivenProto)
+ {
+   return mozilla::dom::CSSStyleDeclarationBinding::Wrap(cx, this, aGivenProto);
+ }
+ 
+ // -------------------------------------------
+ // nsCSSFontFaceRule
+-// 
++//
+ 
+ /* virtual */ already_AddRefed<css::Rule>
+ nsCSSFontFaceRule::Clone() const
+ {
+   RefPtr<css::Rule> clone = new nsCSSFontFaceRule(*this);
+   return clone.forget();
+ }
+ 
+diff --git a/layout/style/nsCSSRules.h b/layout/style/nsCSSRules.h
+--- a/layout/style/nsCSSRules.h
++++ b/layout/style/nsCSSRules.h
+@@ -12,16 +12,17 @@
+ #include "Declaration.h"
+ #include "StyleRule.h"
+ #include "gfxFontFeatures.h"
+ #include "mozilla/Attributes.h"
+ #include "mozilla/MemoryReporting.h"
+ #include "mozilla/Move.h"
+ #include "mozilla/SheetType.h"
+ #include "mozilla/css/GroupRule.h"
++#include "mozilla/css/URLMatchingFunction.h"
+ #include "mozilla/dom/CSSMediaRule.h"
+ #include "mozilla/dom/CSSPageRule.h"
+ #include "nsAutoPtr.h"
+ #include "nsCSSPropertyID.h"
+ #include "nsCSSValue.h"
+ #include "nsDOMCSSDeclaration.h"
+ #include "nsIDOMCSSConditionRule.h"
+ #include "nsIDOMCSSCounterStyleRule.h"
+@@ -118,29 +119,28 @@ public:
+   // nsIDOMCSSConditionRule interface
+   NS_DECL_NSIDOMCSSCONDITIONRULE
+ 
+   // nsIDOMCSSMozDocumentRule interface
+   NS_DECL_NSIDOMCSSMOZDOCUMENTRULE
+ 
+   // rest of GroupRule
+   virtual bool UseForPresentation(nsPresContext* aPresContext,
+-                                    nsMediaQueryResultCacheKey& aKey) override;
++                                  nsMediaQueryResultCacheKey& aKey) override;
+ 
+   bool UseForPresentation(nsPresContext* aPresContext);
+ 
+-  enum Function {
+-    eURL,
+-    eURLPrefix,
+-    eDomain,
+-    eRegExp
+-  };
++  static bool UseForPresentation(nsIDocument* aDoc,
++                                 nsIURI* aDocURI,
++                                 const nsACString& aDocURISpec,
++                                 const nsACString& aPattern,
++                                 URLMatchingFunction aUrlMatchingFunction);
+ 
+   struct URL {
+-    Function func;
++    URLMatchingFunction func;
+     nsCString url;
+     URL *next;
+ 
+     URL() : next(nullptr) {}
+     URL(const URL& aOther)
+       : func(aOther.func)
+       , url(aOther.url)
+       , next(aOther.next ? new URL(*aOther.next) : nullptr)
 diff --git a/servo/Cargo.lock b/servo/Cargo.lock
 --- a/servo/Cargo.lock
 +++ b/servo/Cargo.lock
-@@ -944,16 +944,17 @@
+@@ -944,16 +944,17 @@ dependencies = [
  name = "geckoservo"
  version = "0.0.1"
  dependencies = [
@@ -128,7 +383,7 @@ diff --git a/servo/Cargo.lock b/servo/Cargo.lock
 diff --git a/servo/components/script/dom/cssrule.rs b/servo/components/script/dom/cssrule.rs
 --- a/servo/components/script/dom/cssrule.rs
 +++ b/servo/components/script/dom/cssrule.rs
-@@ -79,16 +79,17 @@
+@@ -79,16 +79,17 @@ impl CSSRule {
              StyleCssRule::Style(s) => Root::upcast(CSSStyleRule::new(window, parent_stylesheet, s)),
              StyleCssRule::FontFace(s) => Root::upcast(CSSFontFaceRule::new(window, parent_stylesheet, s)),
              StyleCssRule::Keyframes(s) => Root::upcast(CSSKeyframesRule::new(window, parent_stylesheet, s)),
@@ -149,7 +404,7 @@ diff --git a/servo/components/script/dom/cssrule.rs b/servo/components/script/do
 diff --git a/servo/components/script/stylesheet_loader.rs b/servo/components/script/stylesheet_loader.rs
 --- a/servo/components/script/stylesheet_loader.rs
 +++ b/servo/components/script/stylesheet_loader.rs
-@@ -20,16 +20,17 @@
+@@ -20,16 +20,17 @@ use hyper_serde::Serde;
  use ipc_channel::ipc;
  use ipc_channel::router::ROUTER;
  use net_traits::{FetchResponseListener, FetchMetadata, FilteredMetadata, Metadata, NetworkError, ReferrerPolicy};
@@ -167,7 +422,7 @@ diff --git a/servo/components/script/stylesheet_loader.rs b/servo/components/scr
  pub trait StylesheetOwner {
      /// Returns whether this element was inserted by the parser (i.e., it should
      /// trigger a document-load-blocking load).
-@@ -277,9 +278,19 @@
+@@ -277,9 +278,19 @@ impl<'a> StyleStylesheetLoader for Style
  
          // TODO (mrnayak) : Whether we should use the original loader's CORS
          // setting? Fix this when spec has more details.
@@ -190,44 +445,7 @@ diff --git a/servo/components/script/stylesheet_loader.rs b/servo/components/scr
 diff --git a/servo/components/style/Cargo.toml b/servo/components/style/Cargo.toml
 --- a/servo/components/style/Cargo.toml
 +++ b/servo/components/style/Cargo.toml
-@@ -13,17 +13,17 @@
- doctest = false
- 
- [features]
- gecko = ["nsstring_vendor", "rayon/unstable", "num_cpus"]
- use_bindgen = ["bindgen", "regex"]
- servo = ["serde/unstable", "serde", "serde_derive", "heapsize", "heapsize_derive",
-          "style_traits/servo", "servo_atoms", "servo_config", "html5ever-atoms",
-          "cssparser/heapsize", "cssparser/serde", "encoding",
--         "rayon/unstable", "servo_url"]
-+         "rayon/unstable", "servo_url", "regex"]
- testing = []
- 
- [dependencies]
- app_units = "0.4"
- atomic_refcell = "0.1"
- bitflags = "0.7"
- bit-vec = "0.4.3"
- byteorder = "1.0"
-@@ -42,16 +42,17 @@
- num_cpus = {version = "1.1.0", optional = true}
- num-integer = "0.1.32"
- num-traits = "0.1.32"
- ordered-float = "0.4"
- parking_lot = "0.3.3"
- pdqsort = "0.1.0"
- precomputed-hash = "0.1"
- rayon = "0.6"
-+regex = {version = "0.2", optional = true}
- selectors = { path = "../selectors" }
- serde = {version = "0.9", optional = true}
- serde_derive = {version = "0.9", optional = true}
- servo_atoms = {path = "../atoms", optional = true}
- servo_config = {path = "../config", optional = true}
- smallvec = "0.3"
- style_traits = {path = "../style_traits"}
- servo_url = {path = "../url", optional = true}
-@@ -59,11 +60,11 @@
+@@ -59,11 +59,11 @@ time = "0.1"
  unicode-segmentation = "1.0"
  
  [target.'cfg(windows)'.dependencies]
@@ -243,7 +461,7 @@ diff --git a/servo/components/style/Cargo.toml b/servo/components/style/Cargo.to
 diff --git a/servo/components/style/build_gecko.rs b/servo/components/style/build_gecko.rs
 --- a/servo/components/style/build_gecko.rs
 +++ b/servo/components/style/build_gecko.rs
-@@ -298,16 +298,17 @@
+@@ -298,16 +298,17 @@ mod bindings {
              .include(add_include("mozilla/ServoElementSnapshot.h"))
              .include(add_include("mozilla/dom/Element.h"))
              .include(add_include("mozilla/dom/NameSpaceConstants.h"))
@@ -261,7 +479,25 @@ diff --git a/servo/components/style/build_gecko.rs b/servo/components/style/buil
              .raw_line("pub use self::root::mozilla::dom::*;")
              .raw_line("use atomic_refcell::AtomicRefCell;")
              .raw_line("use data::ElementData;")
-@@ -664,16 +665,17 @@
+@@ -335,16 +336,17 @@ mod bindings {
+             "mozilla::AnimationPropertySegment",
+             "mozilla::ComputedTiming",
+             "mozilla::ComputedTimingFunction",
+             "mozilla::ComputedTimingFunction::BeforeFlag",
+             "mozilla::ServoStyleSheet",
+             "mozilla::ServoElementSnapshot.*",
+             "mozilla::CSSPseudoClassType",
+             "mozilla::css::SheetParsingMode",
++            "mozilla::css::URLMatchingFunction",
+             "mozilla::HalfCorner",
+             "mozilla::PropertyStyleAnimationValuePair",
+             "mozilla::TraversalRestyleBehavior",
+             "mozilla::TraversalRootBehavior",
+             "mozilla::StyleShapeRadius",
+             "mozilla::StyleGrid.*",
+             "mozilla::UpdateAnimationsTasks",
+             "mozilla::LookAndFeel",
+@@ -664,16 +666,17 @@ mod bindings {
              "nsCSSShadowArray",
              "nsCSSUnit",
              "nsCSSValue",
@@ -270,7 +506,7 @@ diff --git a/servo/components/style/build_gecko.rs b/servo/components/style/buil
              "nsCursorImage",
              "nsFont",
              "nsIAtom",
-+            "nsIURI",
++            "nsIDocument",
              "nsMediaFeature",
              "nsRestyleHint",
              "nsStyleBackground",
@@ -279,11 +515,29 @@ diff --git a/servo/components/style/build_gecko.rs b/servo/components/style/buil
              "nsStyleColumn",
              "nsStyleContent",
              "nsStyleContentData",
+@@ -718,16 +721,17 @@ mod bindings {
+             "nscolor",
+             "nscoord",
+             "nsresult",
+             "Loader",
+             "ServoStyleSheet",
+             "EffectCompositor_CascadeLevel",
+             "UpdateAnimationsTasks",
+             "LengthParsingMode",
++            "URLMatchingFunction",
+         ];
+         struct ArrayType {
+             cpp_type: &'static str,
+             rust_type: &'static str
+         }
+         let array_types = [
+             ArrayType { cpp_type: "uintptr_t", rust_type: "usize" },
+         ];
 diff --git a/servo/components/style/document.rs b/servo/components/style/document.rs
 new file mode 100644
 --- /dev/null
 +++ b/servo/components/style/document.rs
-@@ -0,0 +1,220 @@
+@@ -0,0 +1,180 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -293,70 +547,15 @@ new file mode 100644
 +//! We implement the prefixed `@-moz-document`.
 +
 +use cssparser::Parser;
-+#[cfg(feature = "gecko")]
-+use gecko_bindings::bindings::RawGeckoDocumentBorrowedOrNull;
-+#[cfg(feature = "gecko")]
-+use gecko_bindings::bindings::{Gecko_GetURIHost, Gecko_IsPatternMatching};
++use gecko_bindings::bindings::Gecko_DocumentRule_UseForPresentation;
++use gecko_bindings::bindings::RawGeckoDocumentBorrowed;
++use gecko_bindings::structs::URLMatchingFunction;
++use nsstring::nsCString;
 +use parser::{Parse, ParserContext};
-+#[cfg(not(feature = "gecko"))]
-+use regex::Regex;
 +use std::fmt;
++use stylesheets::Document;
 +use style_traits::ToCss;
 +use values::specified::url::SpecifiedUrl;
-+#[cfg(not(feature = "gecko"))]
-+use servo_url::ServoUrl;
-+
-+/// Gecko nsIDocument.
-+/// Not pretty, but we need this to be able to call nsContentUtils::IsPatternMatching
-+#[cfg(feature = "gecko")]
-+pub type Document<'a> = RawGeckoDocumentBorrowedOrNull<'a>;
-+
-+/// Useless Document type for non-gecko platforms.
-+#[cfg(not(feature = "gecko"))]
-+pub type Document = Option<()>;
-+
-+#[cfg(feature = "gecko")]
-+fn is_pattern_matching(document_url: &str, pattern: &str, document: Document) -> bool {
-+    unsafe {
-+        Gecko_IsPatternMatching(document_url.as_ptr(), document_url.len() as u32,
-+                                pattern.as_ptr(), pattern.len() as u32,
-+                                document)
-+    }
-+}
-+
-+#[cfg(not(feature = "gecko"))]
-+fn is_pattern_matching(document_url: &str, pattern: &str, _: Document) -> bool {
-+    if let Ok(regex) = Regex::new(pattern) {
-+        regex.is_match(document_url)
-+    } else {
-+        false
-+    }
-+}
-+
-+#[cfg(feature = "gecko")]
-+fn get_document_domain(document_url: &str, context: &ParserContext) -> Result<String, ()>{
-+    use std::borrow::Cow;
-+    let specified_url = SpecifiedUrl::parse_from_string(Cow::from(document_url), context)?;
-+    ns_auto_cstring!(host);
-+    unsafe {
-+        if Gecko_GetURIHost(specified_url.for_ffi(), &mut *host) {
-+            Ok(format!("{}", host))
-+        } else {
-+            Err(())
-+        }
-+    }
-+}
-+
-+#[cfg(not(feature = "gecko"))]
-+fn get_document_domain(document_url: &str, _: &ParserContext) -> Result<String, ()>{
-+    match ServoUrl::parse(document_url) {
-+        Ok(url) => match url.domain() {
-+            Some(domain) => Ok(domain.to_owned()),
-+            None => Err(()),
-+        },
-+        Err(_) => Err(()),
-+    }
-+}
 +
 +/// A URL matching function for a `@document` rule's condition.
 +#[derive(Debug)]
@@ -395,13 +594,17 @@ new file mode 100644
 +    }
 +
 +    /// Evaluate a URL matching function.
-+    pub fn eval(&self, context: &ParserContext, document_url: &str,
-+                document: Document) -> bool {
++    pub fn eval(&self, document: RawGeckoDocumentBorrowed) -> bool {
 +        match *self {
 +            /// Exact URL matching function. It evaluates to true whenever the
 +            /// URL of the document being styled is exactly the URL given.
 +            UrlMatchingFunction::Url(ref url) => {
-+                url.as_str() == document_url
++                unsafe {
++                    let url = nsCString::from(url.as_str());
++                    Gecko_DocumentRule_UseForPresentation(document,
++                                                          &*url,
++                                                          URLMatchingFunction::eURL)
++                }
 +            },
 +            /// URL prefix matching function. It evaluates to true whenever the
 +            /// URL of the document being styled has the argument to the
@@ -409,7 +612,12 @@ new file mode 100644
 +            /// strings are equal). When the argument is the empty string,
 +            /// it evaluates to true for all documents.
 +            UrlMatchingFunction::UrlPrefix(ref url_prefix) => {
-+                document_url.starts_with(url_prefix)
++                unsafe {
++                    let url_prefix = nsCString::from(url_prefix);
++                    Gecko_DocumentRule_UseForPresentation(document,
++                                                          &*url_prefix,
++                                                          URLMatchingFunction::eURLPrefix)
++                }
 +            },
 +            /// Domain matching function. It evaluates to true whenever the URL
 +            /// of the document being styled has a host subcomponent and that
@@ -418,16 +626,23 @@ new file mode 100644
 +            /// period (U+002E) immediately followed by the argument to the
 +            /// ‘domain()’ function.
 +            UrlMatchingFunction::Domain(ref domain) => {
-+                match get_document_domain(document_url, context) {
-+                    Ok(ref document_domain) => domain == document_domain,
-+                    Err(_) => false
++                unsafe {
++                    let domain = nsCString::from(domain);
++                    Gecko_DocumentRule_UseForPresentation(document,
++                                                          &*domain,
++                                                          URLMatchingFunction::eDomain)
 +                }
 +            },
 +            /// Regular expression matching function. It evaluates to true
 +            /// whenever the regular expression matches the entirety of the URL
 +            /// of the document being styled.
 +            UrlMatchingFunction::RegExp(ref pattern) => {
-+                is_pattern_matching(document_url, pattern, document)
++                unsafe {
++                    let pattern = nsCString::from(pattern);
++                    Gecko_DocumentRule_UseForPresentation(document,
++                                                          &*pattern,
++                                                          URLMatchingFunction::eRegExp)
++                }
 +            },
 +        }
 +    }
@@ -478,11 +693,10 @@ new file mode 100644
 +    }
 +
 +    /// Evaluate a document condition.
-+    pub fn eval(&self, context: &ParserContext, document_url: Option<String>,
-+                document: Document) -> bool {
-+        if let Some(url) = document_url {
++    pub fn eval(&self, document: Document) -> bool {
++        if let Some(document) = document {
 +            self.0.iter().any(|ref url_matching_function|
-+                url_matching_function.eval(context, &url, document)
++                url_matching_function.eval(document)
 +            )
 +        } else {
 +            false
@@ -507,7 +721,7 @@ new file mode 100644
 diff --git a/servo/components/style/lib.rs b/servo/components/style/lib.rs
 --- a/servo/components/style/lib.rs
 +++ b/servo/components/style/lib.rs
-@@ -64,16 +64,18 @@
+@@ -64,16 +64,18 @@ extern crate nsstring_vendor as nsstring
  #[cfg(feature = "gecko")] extern crate num_cpus;
  extern crate num_integer;
  extern crate num_traits;
@@ -526,7 +740,7 @@ diff --git a/servo/components/style/lib.rs b/servo/components/style/lib.rs
  extern crate smallvec;
  #[macro_use]
  extern crate style_traits;
-@@ -86,16 +88,17 @@
+@@ -86,16 +88,17 @@ pub mod animation;
  #[cfg(feature = "servo")] pub mod attr;
  pub mod bezier;
  pub mod bloom;
@@ -535,7 +749,7 @@ diff --git a/servo/components/style/lib.rs b/servo/components/style/lib.rs
  pub mod context;
  pub mod custom_properties;
  pub mod data;
-+pub mod document;
++#[cfg(feature = "gecko")] pub mod document;
  pub mod dom;
  pub mod element_state;
  #[cfg(feature = "servo")] mod encoding_support;
@@ -547,7 +761,7 @@ diff --git a/servo/components/style/lib.rs b/servo/components/style/lib.rs
 diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/stylesheets.rs
 --- a/servo/components/style/stylesheets.rs
 +++ b/servo/components/style/stylesheets.rs
-@@ -5,16 +5,17 @@
+@@ -5,23 +5,27 @@
  //! Style sheets and their CSS rules.
  
  #![deny(missing_docs)]
@@ -556,7 +770,8 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
  use cssparser::{AtRuleParser, Parser, QualifiedRuleParser};
  use cssparser::{AtRuleType, RuleListParser, SourcePosition, Token, parse_one_rule};
  use cssparser::ToCss as ParserToCss;
-+use document::{Document, DocumentCondition};
++#[cfg(feature = "gecko")]
++use document::DocumentCondition;
  use error_reporting::ParseErrorReporter;
  #[cfg(feature = "servo")]
  use font_face::FontFaceRuleData;
@@ -564,8 +779,43 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
  #[cfg(feature = "gecko")]
  pub use gecko::rules::FontFaceRule;
  #[cfg(feature = "gecko")]
++use gecko_bindings::bindings::RawGeckoDocumentBorrowedOrNull;
++#[cfg(feature = "gecko")]
  use gecko_bindings::structs::URLExtraData;
-@@ -287,16 +288,17 @@
+ #[cfg(feature = "gecko")]
+ use gecko_bindings::sugar::refptr::RefPtr;
+ use keyframes::{Keyframe, parse_keyframe_list};
+ use media_queries::{Device, MediaList, parse_media_query_list};
+ use parking_lot::RwLock;
+ use parser::{LengthParsingMode, Parse, ParserContext, log_css_error};
+ use properties::{PropertyDeclarationBlock, parse_property_declaration_list};
+@@ -37,16 +41,25 @@ use std::fmt;
+ use std::sync::Arc;
+ use std::sync::atomic::{AtomicBool, Ordering};
+ use style_traits::ToCss;
+ use stylist::FnvHashMap;
+ use supports::SupportsCondition;
+ use values::specified::url::SpecifiedUrl;
+ use viewport::ViewportRule;
+ 
++/// Gecko nsIDocument.
++/// Not pretty, but we need this for @-moz-document.
++#[cfg(feature = "gecko")]
++pub type Document<'a> = RawGeckoDocumentBorrowedOrNull<'a>;
++
++/// Document type for non-gecko platforms.
++/// Useless until we implement @-moz-document, if it ever gets standardized.
++#[cfg(not(feature = "gecko"))]
++pub type Document = Option<()>;
+ 
+ /// Extra data that the backend may need to resolve url values.
+ #[cfg(not(feature = "gecko"))]
+ pub type UrlExtraData = ServoUrl;
+ 
+ /// Extra data that the backend may need to resolve url values.
+ #[cfg(feature = "gecko")]
+ pub type UrlExtraData = RefPtr<URLExtraData>;
+@@ -287,16 +300,17 @@ pub enum CssRule {
      Import(Arc<Locked<ImportRule>>),
      Style(Arc<Locked<StyleRule>>),
      Media(Arc<Locked<MediaRule>>),
@@ -583,7 +833,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
      // https://drafts.csswg.org/cssom/#the-cssrule-interface
      Style               = 1,
      Charset             = 2,
-@@ -309,16 +311,18 @@
+@@ -309,16 +323,18 @@ pub enum CssRuleType {
      Keyframe            = 8,
      // https://drafts.csswg.org/cssom/#the-cssrule-interface
      Margin              = 9,
@@ -602,7 +852,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
  
  /// Error reporter which silently forgets errors
  pub struct MemoryHoleReporter;
-@@ -348,16 +352,17 @@
+@@ -348,16 +364,17 @@ impl CssRule {
              CssRule::Import(_)    => CssRuleType::Import,
              CssRule::Media(_)     => CssRuleType::Media,
              CssRule::FontFace(_)  => CssRuleType::FontFace,
@@ -620,7 +870,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
              // CssRule::Charset(..) => State::Start,
              CssRule::Import(..) => State::Imports,
              CssRule::Namespace(..) => State::Namespaces,
-@@ -401,16 +406,26 @@
+@@ -401,16 +418,30 @@ impl CssRule {
                  let enabled = supports_rule.enabled;
                  if enabled {
                      let rules = &supports_rule.rules.read_with(guard).0;
@@ -630,13 +880,17 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
                  }
              }
 +            CssRule::Document(ref lock) => {
-+                let document_rule = lock.read_with(guard);
-+                let enabled = document_rule.enabled;
-+                if enabled {
-+                    let rules = &document_rule.rules.read_with(guard).0;
-+                    f(rules, None)
++                if cfg!(feature = "gecko") {
++                    let document_rule = lock.read_with(guard);
++                    let enabled = document_rule.enabled;
++                    if enabled {
++                        let rules = &document_rule.rules.read_with(guard).0;
++                        f(rules, None)
++                    } else {
++                        f(&[], None)
++                    }
 +                } else {
-+                    f(&[], None)
++                    unimplemented!()
 +                }
 +            }
          }
@@ -647,7 +901,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
      #[allow(missing_docs)]
      pub fn parse(css: &str,
                   parent_stylesheet: &Stylesheet,
-@@ -458,16 +473,17 @@
+@@ -458,16 +489,17 @@ impl ToCssWithGuard for CssRule {
              CssRule::Import(ref lock) => lock.read_with(guard).to_css(guard, dest),
              CssRule::Style(ref lock) => lock.read_with(guard).to_css(guard, dest),
              CssRule::FontFace(ref lock) => lock.read_with(guard).to_css(guard, dest),
@@ -665,7 +919,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
  #[allow(missing_docs)]
  pub struct NamespaceRule {
      /// `None` for the default Namespace
-@@ -650,16 +666,41 @@
+@@ -650,16 +682,41 @@ impl ToCssWithGuard for StyleRule {
          Ok(())
      }
  }
@@ -707,7 +961,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
                             stylesheet_loader: Option<&StylesheetLoader>,
                             error_reporter: &ParseErrorReporter) {
          let mut namespaces = Namespaces::default();
-@@ -844,16 +885,17 @@
+@@ -844,16 +901,17 @@ macro_rules! rule_filter {
  rule_filter! {
      effective_style_rules(Style => StyleRule),
      effective_media_rules(Media => MediaRule),
@@ -725,7 +979,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
      /// Request a stylesheet after parsing a given `@import` rule.
      ///
      /// The called code is responsible to update the `stylesheet` rules field
-@@ -862,29 +904,43 @@
+@@ -862,29 +920,36 @@ pub trait StylesheetLoader {
      /// The convoluted signature allows impls to look at MediaList and ImportRule
      /// before they’re locked, while keeping the trait object-safe.
      fn request_stylesheet(
@@ -734,9 +988,6 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
          make_import: &mut FnMut(Arc<Locked<MediaList>>) -> ImportRule,
          make_arc: &mut FnMut(ImportRule) -> Arc<Locked<ImportRule>>,
      ) -> Arc<Locked<ImportRule>>;
-+
-+    /// Get the URL of the document loading the stylesheet as a string.
-+    fn get_document_url_as_string(&self) -> Option<String>;
 +
 +    /// Get the document loading the stylesheet.
 +    fn get_document(&self) -> Document;
@@ -754,10 +1005,6 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
          make_arc(make_import(media))
      }
 +
-+    fn get_document_url_as_string(&self) -> Option<String> {
-+        None
-+    }
-+
 +    fn get_document(&self) -> Document {
 +        None
 +    }
@@ -769,7 +1016,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
      namespaces: &'a mut Namespaces,
      shared_lock: &'a SharedRwLock,
      loader: Option<&'a StylesheetLoader>,
-@@ -894,16 +950,17 @@
+@@ -894,16 +959,17 @@ struct TopLevelRuleParser<'a> {
  
  impl<'b> TopLevelRuleParser<'b> {
      fn nested<'a: 'b>(&'a self) -> NestedRuleParser<'a, 'b> {
@@ -787,7 +1034,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
  #[allow(missing_docs)]
  pub enum State {
      Start = 1,
-@@ -922,16 +979,18 @@
+@@ -922,16 +988,18 @@ enum AtRulePrelude {
      /// An @supports rule, with its conditional
      Supports(SupportsCondition),
      /// A @viewport rule prelude.
@@ -806,7 +1053,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
      type AtRule = CssRule;
  
      fn parse_prelude(&mut self, name: &str, input: &mut Parser)
-@@ -1043,26 +1102,28 @@
+@@ -1043,26 +1111,28 @@ impl<'a> QualifiedRuleParser for TopLeve
  }
  
  #[derive(Clone)]  // shallow, relatively cheap .clone
@@ -835,7 +1082,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
                  Ok(rule) => rules.push(rule),
                  Err(range) => {
                      let pos = range.start;
-@@ -1122,16 +1183,20 @@
+@@ -1122,16 +1192,24 @@ impl<'a, 'b> AtRuleParser for NestedRule
              },
              "page" => {
                  if cfg!(feature = "gecko") {
@@ -845,8 +1092,12 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
                  }
              },
 +            "-moz-document" => {
-+                let cond = DocumentCondition::parse(self.context, input)?;
-+                Ok(AtRuleType::WithBlock(AtRulePrelude::Document(cond)))
++                if cfg!(feature = "gecko") {
++                    let cond = DocumentCondition::parse(self.context, input)?;
++                    Ok(AtRuleType::WithBlock(AtRulePrelude::Document(cond)))
++                } else {
++                    unimplemented!()
++                }
 +            },
              _ => Err(())
          }
@@ -856,7 +1107,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
          match prelude {
              AtRulePrelude::FontFace => {
                  let context = ParserContext::new_with_rule_type(self.context, Some(CssRuleType::FontFace));
-@@ -1166,16 +1231,26 @@
+@@ -1166,16 +1244,29 @@ impl<'a, 'b> AtRuleParser for NestedRule
              }
              AtRulePrelude::Page => {
                  let context = ParserContext::new_with_rule_type(self.context, Some(CssRuleType::Page));
@@ -866,14 +1117,17 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
                  )))))
              }
 +            AtRulePrelude::Document(cond) => {
-+                let loader = self.loader.expect("Expected a stylesheet loader for @-moz-document");
-+                let enabled = cond.eval(self.context, loader.get_document_url_as_string(),
-+                                        loader.get_document());
-+                Ok(CssRule::Document(Arc::new(self.shared_lock.wrap(DocumentRule {
-+                    condition: cond,
-+                    rules: self.parse_nested_rules(input, CssRuleType::Document),
-+                    enabled: enabled,
-+                }))))
++                if cfg!(feature = "gecko") {
++                    let loader = self.loader.expect("Expected a stylesheet loader for @-moz-document");
++                    let enabled = cond.eval(loader.get_document());
++                    Ok(CssRule::Document(Arc::new(self.shared_lock.wrap(DocumentRule {
++                        condition: cond,
++                        rules: self.parse_nested_rules(input, CssRuleType::Document),
++                        enabled: enabled,
++                    }))))
++                } else {
++                    unimplemented!()
++                }
 +            }
          }
      }
@@ -886,7 +1140,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
 diff --git a/servo/ports/geckolib/Cargo.toml b/servo/ports/geckolib/Cargo.toml
 --- a/servo/ports/geckolib/Cargo.toml
 +++ b/servo/ports/geckolib/Cargo.toml
-@@ -14,15 +14,16 @@
+@@ -14,15 +14,16 @@ bindgen = ["style/use_bindgen"]
  testing = ["style/testing"]
  
  [dependencies]
@@ -927,26 +1181,26 @@ diff --git a/servo/ports/geckolib/lib.rs b/servo/ports/geckolib/lib.rs
 diff --git a/servo/ports/geckolib/stylesheet_loader.rs b/servo/ports/geckolib/stylesheet_loader.rs
 --- a/servo/ports/geckolib/stylesheet_loader.rs
 +++ b/servo/ports/geckolib/stylesheet_loader.rs
-@@ -1,16 +1,17 @@
- /* This Source Code Form is subject to the terms of the Mozilla Public
-  * License, v. 2.0. If a copy of the MPL was not distributed with this
+@@ -3,17 +3,17 @@
   * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
  
  use std::sync::Arc;
--use style::gecko_bindings::bindings::Gecko_LoadStyleSheet;
-+use style::gecko_bindings::bindings::{Gecko_LoadStyleSheet, Gecko_nsIURI_ToString};
+ use style::gecko_bindings::bindings::Gecko_LoadStyleSheet;
  use style::gecko_bindings::structs::{Loader, ServoStyleSheet};
  use style::gecko_bindings::sugar::ownership::{HasArcFFI, FFIArcHelpers};
-+use style::document::Document;
  use style::media_queries::MediaList;
  use style::shared_lock::Locked;
- use style::stylesheets::{ImportRule, Stylesheet, StylesheetLoader as StyleStylesheetLoader};
+-use style::stylesheets::{ImportRule, Stylesheet, StylesheetLoader as StyleStylesheetLoader};
++use style::stylesheets::{Document, ImportRule, Stylesheet, StylesheetLoader as StyleStylesheetLoader};
  
  pub struct StylesheetLoader(*mut Loader, *mut ServoStyleSheet);
  
  impl StylesheetLoader {
      pub fn new(loader: *mut Loader, parent: *mut ServoStyleSheet) -> Self {
-@@ -40,9 +41,26 @@
+         StylesheetLoader(loader, parent)
+     }
+ }
+@@ -40,9 +40,15 @@ impl StyleStylesheetLoader for Styleshee
                                   Stylesheet::arc_as_borrowed(&import.stylesheet),
                                   base_url_data,
                                   spec_bytes,
@@ -955,17 +1209,6 @@ diff --git a/servo/ports/geckolib/stylesheet_loader.rs b/servo/ports/geckolib/st
          }
          make_arc(import)
      }
-+
-+    fn get_document_url_as_string(&self) -> Option<String> {
-+        ns_auto_cstring!(spec);
-+        unsafe {
-+            if Gecko_nsIURI_ToString((*(*self.0).mDocument).mDocumentURI.raw(), &mut *spec) {
-+                Some(format!("{}", spec))
-+            } else {
-+                None
-+            }
-+        }
-+    }
 +
 +    fn get_document(&self) -> Document {
 +        unsafe {
@@ -976,7 +1219,7 @@ diff --git a/servo/ports/geckolib/stylesheet_loader.rs b/servo/ports/geckolib/st
 diff --git a/toolkit/library/gtest/rust/Cargo.lock b/toolkit/library/gtest/rust/Cargo.lock
 --- a/toolkit/library/gtest/rust/Cargo.lock
 +++ b/toolkit/library/gtest/rust/Cargo.lock
-@@ -285,16 +285,17 @@
+@@ -285,16 +285,17 @@ dependencies = [
  name = "geckoservo"
  version = "0.0.1"
  dependencies = [
@@ -997,7 +1240,7 @@ diff --git a/toolkit/library/gtest/rust/Cargo.lock b/toolkit/library/gtest/rust/
 diff --git a/toolkit/library/rust/Cargo.lock b/toolkit/library/rust/Cargo.lock
 --- a/toolkit/library/rust/Cargo.lock
 +++ b/toolkit/library/rust/Cargo.lock
-@@ -283,16 +283,17 @@
+@@ -283,16 +283,17 @@ dependencies = [
  name = "geckoservo"
  version = "0.0.1"
  dependencies = [
@@ -1015,4 +1258,3 @@ diff --git a/toolkit/library/rust/Cargo.lock b/toolkit/library/rust/Cargo.lock
  
  [[package]]
  name = "gkrust-shared"
-
