@@ -2,7 +2,7 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
 # Date 1492534783 -7200
-# Node ID c4df5f64e0f865be088fddef820392362c8501e8
+# Node ID b43c2afc25185ef038764003ea35c1f4b5142141
 # Parent  8b854986038cf3f3f240697e27ef48ea65914c13
 Bug 1355408 - stylo: Support @-moz-document rule. r=xidorn
 
@@ -435,47 +435,6 @@ diff --git a/servo/components/script/dom/cssrule.rs b/servo/components/script/do
          self.deparent();
          // should set parent rule to None when we add parent rule support
      }
-diff --git a/servo/components/script/stylesheet_loader.rs b/servo/components/script/stylesheet_loader.rs
---- a/servo/components/script/stylesheet_loader.rs
-+++ b/servo/components/script/stylesheet_loader.rs
-@@ -20,16 +20,17 @@ use hyper_serde::Serde;
- use ipc_channel::ipc;
- use ipc_channel::router::ROUTER;
- use net_traits::{FetchResponseListener, FetchMetadata, FilteredMetadata, Metadata, NetworkError, ReferrerPolicy};
- use net_traits::request::{CorsSettings, CredentialsMode, Destination, RequestInit, RequestMode, Type as RequestType};
- use network_listener::{NetworkListener, PreInvoke};
- use servo_url::ServoUrl;
- use std::mem;
- use std::sync::{Arc, Mutex};
-+use style::document::Document as StyleDocument;
- use style::media_queries::MediaList;
- use style::shared_lock::Locked as StyleLocked;
- use style::stylesheets::{ImportRule, Stylesheet, Origin};
- use style::stylesheets::StylesheetLoader as StyleStylesheetLoader;
- 
- pub trait StylesheetOwner {
-     /// Returns whether this element was inserted by the parser (i.e., it should
-     /// trigger a document-load-blocking load).
-@@ -277,9 +278,19 @@ impl<'a> StyleStylesheetLoader for Style
- 
-         // TODO (mrnayak) : Whether we should use the original loader's CORS
-         // setting? Fix this when spec has more details.
-         let source = StylesheetContextSource::Import(import.stylesheet.clone());
-         self.load(source, url, None, "".to_owned());
- 
-         make_arc(import)
-     }
-+
-+    fn get_document_url_as_string(&self) -> Option<String> {
-+        // TODO (ferjm): Implement as part of @-moz-document support for Servo.
-+        None
-+    }
-+
-+    fn get_document(&self) -> StyleDocument {
-+        // This is only used by Gecko, so we return None here.
-+        None
-+    }
- }
 diff --git a/servo/components/style/Cargo.toml b/servo/components/style/Cargo.toml
 --- a/servo/components/style/Cargo.toml
 +++ b/servo/components/style/Cargo.toml
@@ -553,7 +512,7 @@ diff --git a/servo/components/style/document.rs b/servo/components/style/documen
 new file mode 100644
 --- /dev/null
 +++ b/servo/components/style/document.rs
-@@ -0,0 +1,175 @@
+@@ -0,0 +1,186 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
 + * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -563,9 +522,13 @@ new file mode 100644
 +//! We implement the prefixed `@-moz-document`.
 +
 +use cssparser::Parser;
++
++#[cfg(feature = "gecko")]
 +use gecko_bindings::bindings::Gecko_DocumentRule_UseForPresentation;
-+use gecko_bindings::structs::URLMatchingFunction;
++#[cfg(feature = "gecko")]
++use gecko_bindings::structs::URLMatchingFunction as GeckoUrlMatchingFunction;
 +use media_queries::Device;
++#[cfg(feature = "gecko")]
 +use nsstring::nsCString;
 +use parser::{Parse, ParserContext};
 +use std::fmt;
@@ -608,6 +571,7 @@ new file mode 100644
 +        }
 +    }
 +
++    #[cfg(feature = "gecko")]
 +    /// Evaluate a URL matching function.
 +    pub fn evaluate(&self, device: &Device) -> bool {
 +        match *self {
@@ -618,7 +582,7 @@ new file mode 100644
 +                    let url = nsCString::from(url.as_str());
 +                    Gecko_DocumentRule_UseForPresentation(&*device.pres_context,
 +                                                          &*url,
-+                                                          URLMatchingFunction::eURL)
++                                                          GeckoUrlMatchingFunction::eURL)
 +                }
 +            },
 +            /// URL prefix matching function. It evaluates to true whenever the
@@ -631,7 +595,7 @@ new file mode 100644
 +                    let url_prefix = nsCString::from(url_prefix);
 +                    Gecko_DocumentRule_UseForPresentation(&*device.pres_context,
 +                                                          &*url_prefix,
-+                                                          URLMatchingFunction::eURLPrefix)
++                                                          GeckoUrlMatchingFunction::eURLPrefix)
 +                }
 +            },
 +            /// Domain matching function. It evaluates to true whenever the URL
@@ -645,7 +609,7 @@ new file mode 100644
 +                    let domain = nsCString::from(domain);
 +                    Gecko_DocumentRule_UseForPresentation(&*device.pres_context,
 +                                                          &*domain,
-+                                                          URLMatchingFunction::eDomain)
++                                                          GeckoUrlMatchingFunction::eDomain)
 +                }
 +            },
 +            /// Regular expression matching function. It evaluates to true
@@ -656,10 +620,16 @@ new file mode 100644
 +                    let pattern = nsCString::from(pattern);
 +                    Gecko_DocumentRule_UseForPresentation(&*device.pres_context,
 +                                                          &*pattern,
-+                                                          URLMatchingFunction::eRegExp)
++                                                          GeckoUrlMatchingFunction::eRegExp)
 +                }
 +            },
 +        }
++    }
++
++    #[cfg(not(feature = "gecko"))]
++    /// Evaluate a URL matching function.
++    pub fn evaluate(&self, _: &Device) -> bool {
++        false
 +    }
 +}
 +
@@ -732,26 +702,7 @@ new file mode 100644
 diff --git a/servo/components/style/lib.rs b/servo/components/style/lib.rs
 --- a/servo/components/style/lib.rs
 +++ b/servo/components/style/lib.rs
-@@ -64,16 +64,18 @@ extern crate nsstring_vendor as nsstring
- #[cfg(feature = "gecko")] extern crate num_cpus;
- extern crate num_integer;
- extern crate num_traits;
- extern crate ordered_float;
- extern crate parking_lot;
- extern crate pdqsort;
- #[cfg(feature = "gecko")] extern crate precomputed_hash;
- extern crate rayon;
-+#[cfg(not(feature = "gecko"))]
-+extern crate regex;
- extern crate selectors;
- #[cfg(feature = "servo")] #[macro_use] extern crate serde_derive;
- #[cfg(feature = "servo")] #[macro_use] extern crate servo_atoms;
- #[cfg(feature = "servo")] extern crate servo_config;
- #[cfg(feature = "servo")] extern crate servo_url;
- extern crate smallvec;
- #[macro_use]
- extern crate style_traits;
-@@ -86,16 +88,17 @@ pub mod animation;
+@@ -86,16 +86,17 @@ pub mod animation;
  #[cfg(feature = "servo")] pub mod attr;
  pub mod bezier;
  pub mod bloom;
@@ -760,7 +711,7 @@ diff --git a/servo/components/style/lib.rs b/servo/components/style/lib.rs
  pub mod context;
  pub mod custom_properties;
  pub mod data;
-+#[cfg(feature = "gecko")] pub mod document;
++pub mod document;
  pub mod dom;
  pub mod element_state;
  #[cfg(feature = "servo")] mod encoding_support;
@@ -772,7 +723,7 @@ diff --git a/servo/components/style/lib.rs b/servo/components/style/lib.rs
 diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/stylesheets.rs
 --- a/servo/components/style/stylesheets.rs
 +++ b/servo/components/style/stylesheets.rs
-@@ -5,16 +5,18 @@
+@@ -5,16 +5,17 @@
  //! Style sheets and their CSS rules.
  
  #![deny(missing_docs)]
@@ -781,7 +732,6 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
  use cssparser::{AtRuleParser, Parser, QualifiedRuleParser};
  use cssparser::{AtRuleType, RuleListParser, SourcePosition, Token, parse_one_rule};
  use cssparser::ToCss as ParserToCss;
-+#[cfg(feature = "gecko")]
 +use document::DocumentCondition;
  use error_reporting::ParseErrorReporter;
  #[cfg(feature = "servo")]
@@ -791,7 +741,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
  pub use gecko::rules::FontFaceRule;
  #[cfg(feature = "gecko")]
  use gecko_bindings::structs::URLExtraData;
-@@ -37,17 +39,16 @@ use std::fmt;
+@@ -37,17 +38,16 @@ use std::fmt;
  use std::sync::Arc;
  use std::sync::atomic::{AtomicBool, Ordering};
  use style_traits::ToCss;
@@ -809,7 +759,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
  #[cfg(feature = "gecko")]
  pub type UrlExtraData = RefPtr<URLExtraData>;
  
-@@ -287,16 +288,17 @@ pub enum CssRule {
+@@ -287,16 +287,17 @@ pub enum CssRule {
      Import(Arc<Locked<ImportRule>>),
      Style(Arc<Locked<StyleRule>>),
      Media(Arc<Locked<MediaRule>>),
@@ -827,7 +777,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
      // https://drafts.csswg.org/cssom/#the-cssrule-interface
      Style               = 1,
      Charset             = 2,
-@@ -309,16 +311,18 @@ pub enum CssRuleType {
+@@ -309,16 +310,18 @@ pub enum CssRuleType {
      Keyframe            = 8,
      // https://drafts.csswg.org/cssom/#the-cssrule-interface
      Margin              = 9,
@@ -846,7 +796,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
  
  /// Error reporter which silently forgets errors
  pub struct MemoryHoleReporter;
-@@ -348,16 +352,17 @@ impl CssRule {
+@@ -348,16 +351,17 @@ impl CssRule {
              CssRule::Import(_)    => CssRuleType::Import,
              CssRule::Media(_)     => CssRuleType::Media,
              CssRule::FontFace(_)  => CssRuleType::FontFace,
@@ -864,7 +814,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
              // CssRule::Charset(..) => State::Start,
              CssRule::Import(..) => State::Imports,
              CssRule::Namespace(..) => State::Namespaces,
-@@ -366,49 +371,58 @@ impl CssRule {
+@@ -366,49 +370,58 @@ impl CssRule {
      }
  
      /// Call `f` with the slice of rules directly contained inside this rule.
@@ -930,7 +880,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
      // input state is None for a nested rule
      // Returns a parsed CSS rule and the final state of the parser
      #[allow(missing_docs)]
-@@ -458,16 +472,17 @@ impl ToCssWithGuard for CssRule {
+@@ -458,16 +471,17 @@ impl ToCssWithGuard for CssRule {
              CssRule::Import(ref lock) => lock.read_with(guard).to_css(guard, dest),
              CssRule::Style(ref lock) => lock.read_with(guard).to_css(guard, dest),
              CssRule::FontFace(ref lock) => lock.read_with(guard).to_css(guard, dest),
@@ -948,7 +898,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
  #[allow(missing_docs)]
  pub struct NamespaceRule {
      /// `None` for the default Namespace
-@@ -650,16 +665,39 @@ impl ToCssWithGuard for StyleRule {
+@@ -650,16 +664,39 @@ impl ToCssWithGuard for StyleRule {
          Ok(())
      }
  }
@@ -988,7 +938,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
                             stylesheet_loader: Option<&StylesheetLoader>,
                             error_reporter: &ParseErrorReporter) {
          let mut namespaces = Namespaces::default();
-@@ -806,22 +844,29 @@ impl Stylesheet {
+@@ -806,22 +843,29 @@ impl Stylesheet {
          self.disabled.swap(disabled, Ordering::SeqCst) != disabled
      }
  }
@@ -1019,7 +969,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
  macro_rules! rule_filter {
      ($( $method: ident($variant:ident => $rule_type: ident), )+) => {
          impl Stylesheet {
-@@ -844,16 +889,17 @@ macro_rules! rule_filter {
+@@ -844,16 +888,17 @@ macro_rules! rule_filter {
  rule_filter! {
      effective_style_rules(Style => StyleRule),
      effective_media_rules(Media => MediaRule),
@@ -1037,7 +987,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
      /// Request a stylesheet after parsing a given `@import` rule.
      ///
      /// The called code is responsible to update the `stylesheet` rules field
-@@ -922,16 +968,18 @@ enum AtRulePrelude {
+@@ -922,16 +967,18 @@ enum AtRulePrelude {
      /// An @supports rule, with its conditional
      Supports(SupportsCondition),
      /// A @viewport rule prelude.
@@ -1056,7 +1006,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
      type AtRule = CssRule;
  
      fn parse_prelude(&mut self, name: &str, input: &mut Parser)
-@@ -1122,16 +1170,24 @@ impl<'a, 'b> AtRuleParser for NestedRule
+@@ -1122,16 +1169,24 @@ impl<'a, 'b> AtRuleParser for NestedRule
              },
              "page" => {
                  if cfg!(feature = "gecko") {
@@ -1081,7 +1031,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
          match prelude {
              AtRulePrelude::FontFace => {
                  let context = ParserContext::new_with_rule_type(self.context, Some(CssRuleType::FontFace));
-@@ -1166,16 +1222,26 @@ impl<'a, 'b> AtRuleParser for NestedRule
+@@ -1166,16 +1221,26 @@ impl<'a, 'b> AtRuleParser for NestedRule
              }
              AtRulePrelude::Page => {
                  let context = ParserContext::new_with_rule_type(self.context, Some(CssRuleType::Page));
@@ -1108,6 +1058,29 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
      type Prelude = SelectorList<SelectorImpl>;
      type QualifiedRule = CssRule;
  
+diff --git a/servo/components/style/stylist.rs b/servo/components/style/stylist.rs
+--- a/servo/components/style/stylist.rs
++++ b/servo/components/style/stylist.rs
+@@ -567,17 +567,18 @@ impl Stylist {
+ 
+         if let Some(ref constraints) = self.viewport_constraints {
+             device.account_for_viewport_rule(constraints);
+         }
+ 
+         fn mq_eval_changed(guard: &SharedRwLockReadGuard, rules: &[CssRule],
+                            before: &Device, after: &Device) -> bool {
+             for rule in rules {
+-                let changed = rule.with_nested_rules_and_mq(guard, |rules, mq| {
++                let changed = rule.with_nested_rules_mq_and_doc_rule(guard,
++                                                                     |rules, mq, _| {
+                     if let Some(mq) = mq {
+                         if mq.evaluate(before) != mq.evaluate(after) {
+                             return true
+                         }
+                     }
+                     mq_eval_changed(guard, rules, before, after)
+                 });
+                 if changed {
 diff --git a/servo/ports/geckolib/Cargo.toml b/servo/ports/geckolib/Cargo.toml
 --- a/servo/ports/geckolib/Cargo.toml
 +++ b/servo/ports/geckolib/Cargo.toml
