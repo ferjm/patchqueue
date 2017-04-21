@@ -2,9 +2,11 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
 # Date 1492534783 -7200
-# Node ID 14fe6393e1c1cceaf41be296f26242c7662827c8
+# Node ID c4df5f64e0f865be088fddef820392362c8501e8
 # Parent  8b854986038cf3f3f240697e27ef48ea65914c13
 Bug 1355408 - stylo: Support @-moz-document rule. r=xidorn
+
+MozReview-Commit-ID: Hb9HzIzviiV
 
 diff --git a/layout/style/ServoBindings.cpp b/layout/style/ServoBindings.cpp
 --- a/layout/style/ServoBindings.cpp
@@ -223,7 +225,7 @@ diff --git a/layout/style/nsCSSParser.cpp b/layout/style/nsCSSParser.cpp
 diff --git a/layout/style/nsCSSRules.cpp b/layout/style/nsCSSRules.cpp
 --- a/layout/style/nsCSSRules.cpp
 +++ b/layout/style/nsCSSRules.cpp
-@@ -676,47 +676,59 @@ DocumentRule::UseForPresentation(nsPresC
+@@ -676,47 +676,61 @@ DocumentRule::UseForPresentation(nsPresC
    nsAutoCString docURISpec;
    if (docURI) {
      // If GetSpec fails (due to OOM) just skip these URI-specific CSS rules.
@@ -239,7 +241,9 @@ diff --git a/layout/style/nsCSSRules.cpp b/layout/style/nsCSSRules.cpp
 -      } break;
 -      case eURLPrefix: {
 -        if (StringBeginsWith(docURISpec, url->url))
-+    return UseForPresentation(doc, docURI, docURISpec, url->url, url->func);
++    if (UseForPresentation(doc, docURI, docURISpec, url->url, url->func)) {
++      return true;
++    }
 +  }
 +
 +  return false;
@@ -312,7 +316,7 @@ diff --git a/layout/style/nsCSSRules.cpp b/layout/style/nsCSSRules.cpp
  DocumentRule::URL::~URL()
  {
    NS_CSS_DELETE_LIST_MEMBER(DocumentRule::URL, this, next);
-@@ -1162,17 +1174,17 @@ nsCSSFontFaceStyleDecl::GetParentObject(
+@@ -1162,17 +1176,17 @@ nsCSSFontFaceStyleDecl::GetParentObject(
  JSObject*
  nsCSSFontFaceStyleDecl::WrapObject(JSContext *cx, JS::Handle<JSObject*> aGivenProto)
  {
