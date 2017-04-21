@@ -2,7 +2,7 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
 # Date 1492534783 -7200
-# Node ID 8ad5a15f1ea8eb6b59b9b131c6eb81a3ac32a78d
+# Node ID 14fe6393e1c1cceaf41be296f26242c7662827c8
 # Parent  c697e756f738ce37abc56f31bfbc48f55625d617
  Bug 1355408 - stylo: Support @-moz-document rule. Part 1: Common bits and Gecko support. r=xidorn
 
@@ -29,7 +29,7 @@ diff --git a/layout/style/ServoBindings.cpp b/layout/style/ServoBindings.cpp
  #include "nsRuleNode.h"
  #include "nsString.h"
  #include "nsStyleStruct.h"
-@@ -1797,16 +1798,49 @@ Gecko_RegisterProfilerThread(const char*
+@@ -1797,16 +1798,49 @@
  }
  
  void
@@ -82,7 +82,7 @@ diff --git a/layout/style/ServoBindings.cpp b/layout/style/ServoBindings.cpp
 diff --git a/layout/style/ServoBindings.h b/layout/style/ServoBindings.h
 --- a/layout/style/ServoBindings.h
 +++ b/layout/style/ServoBindings.h
-@@ -454,15 +454,21 @@ bool Gecko_MatchStringArgPseudo(RawGecko
+@@ -454,15 +454,21 @@
  #include "nsStyleStructList.h"
  #undef STYLE_STRUCT
  
@@ -107,7 +107,7 @@ diff --git a/layout/style/ServoBindings.h b/layout/style/ServoBindings.h
 diff --git a/servo/Cargo.lock b/servo/Cargo.lock
 --- a/servo/Cargo.lock
 +++ b/servo/Cargo.lock
-@@ -944,16 +944,17 @@ dependencies = [
+@@ -944,16 +944,17 @@
  name = "geckoservo"
  version = "0.0.1"
  dependencies = [
@@ -128,7 +128,7 @@ diff --git a/servo/Cargo.lock b/servo/Cargo.lock
 diff --git a/servo/components/script/dom/cssrule.rs b/servo/components/script/dom/cssrule.rs
 --- a/servo/components/script/dom/cssrule.rs
 +++ b/servo/components/script/dom/cssrule.rs
-@@ -79,16 +79,17 @@ impl CSSRule {
+@@ -79,16 +79,17 @@
              StyleCssRule::Style(s) => Root::upcast(CSSStyleRule::new(window, parent_stylesheet, s)),
              StyleCssRule::FontFace(s) => Root::upcast(CSSFontFaceRule::new(window, parent_stylesheet, s)),
              StyleCssRule::Keyframes(s) => Root::upcast(CSSKeyframesRule::new(window, parent_stylesheet, s)),
@@ -149,7 +149,7 @@ diff --git a/servo/components/script/dom/cssrule.rs b/servo/components/script/do
 diff --git a/servo/components/script/stylesheet_loader.rs b/servo/components/script/stylesheet_loader.rs
 --- a/servo/components/script/stylesheet_loader.rs
 +++ b/servo/components/script/stylesheet_loader.rs
-@@ -20,16 +20,17 @@ use hyper_serde::Serde;
+@@ -20,16 +20,17 @@
  use ipc_channel::ipc;
  use ipc_channel::router::ROUTER;
  use net_traits::{FetchResponseListener, FetchMetadata, FilteredMetadata, Metadata, NetworkError, ReferrerPolicy};
@@ -167,7 +167,7 @@ diff --git a/servo/components/script/stylesheet_loader.rs b/servo/components/scr
  pub trait StylesheetOwner {
      /// Returns whether this element was inserted by the parser (i.e., it should
      /// trigger a document-load-blocking load).
-@@ -277,9 +278,19 @@ impl<'a> StyleStylesheetLoader for Style
+@@ -277,9 +278,19 @@
  
          // TODO (mrnayak) : Whether we should use the original loader's CORS
          // setting? Fix this when spec has more details.
@@ -190,7 +190,7 @@ diff --git a/servo/components/script/stylesheet_loader.rs b/servo/components/scr
 diff --git a/servo/components/style/Cargo.toml b/servo/components/style/Cargo.toml
 --- a/servo/components/style/Cargo.toml
 +++ b/servo/components/style/Cargo.toml
-@@ -13,17 +13,17 @@ path = "lib.rs"
+@@ -13,17 +13,17 @@
  doctest = false
  
  [features]
@@ -209,7 +209,7 @@ diff --git a/servo/components/style/Cargo.toml b/servo/components/style/Cargo.to
  bitflags = "0.7"
  bit-vec = "0.4.3"
  byteorder = "1.0"
-@@ -42,16 +42,17 @@ nsstring_vendor = {path = "gecko_binding
+@@ -42,16 +42,17 @@
  num_cpus = {version = "1.1.0", optional = true}
  num-integer = "0.1.32"
  num-traits = "0.1.32"
@@ -227,7 +227,7 @@ diff --git a/servo/components/style/Cargo.toml b/servo/components/style/Cargo.to
  smallvec = "0.3"
  style_traits = {path = "../style_traits"}
  servo_url = {path = "../url", optional = true}
-@@ -59,11 +60,11 @@ time = "0.1"
+@@ -59,11 +60,11 @@
  unicode-segmentation = "1.0"
  
  [target.'cfg(windows)'.dependencies]
@@ -243,7 +243,7 @@ diff --git a/servo/components/style/Cargo.toml b/servo/components/style/Cargo.to
 diff --git a/servo/components/style/build_gecko.rs b/servo/components/style/build_gecko.rs
 --- a/servo/components/style/build_gecko.rs
 +++ b/servo/components/style/build_gecko.rs
-@@ -298,16 +298,17 @@ mod bindings {
+@@ -298,16 +298,17 @@
              .include(add_include("mozilla/ServoElementSnapshot.h"))
              .include(add_include("mozilla/dom/Element.h"))
              .include(add_include("mozilla/dom/NameSpaceConstants.h"))
@@ -261,7 +261,7 @@ diff --git a/servo/components/style/build_gecko.rs b/servo/components/style/buil
              .raw_line("pub use self::root::mozilla::dom::*;")
              .raw_line("use atomic_refcell::AtomicRefCell;")
              .raw_line("use data::ElementData;")
-@@ -664,16 +665,17 @@ mod bindings {
+@@ -664,16 +665,17 @@
              "nsCSSShadowArray",
              "nsCSSUnit",
              "nsCSSValue",
@@ -507,7 +507,7 @@ new file mode 100644
 diff --git a/servo/components/style/lib.rs b/servo/components/style/lib.rs
 --- a/servo/components/style/lib.rs
 +++ b/servo/components/style/lib.rs
-@@ -64,16 +64,18 @@ extern crate nsstring_vendor as nsstring
+@@ -64,16 +64,18 @@
  #[cfg(feature = "gecko")] extern crate num_cpus;
  extern crate num_integer;
  extern crate num_traits;
@@ -526,7 +526,7 @@ diff --git a/servo/components/style/lib.rs b/servo/components/style/lib.rs
  extern crate smallvec;
  #[macro_use]
  extern crate style_traits;
-@@ -86,16 +88,17 @@ pub mod animation;
+@@ -86,16 +88,17 @@
  #[cfg(feature = "servo")] pub mod attr;
  pub mod bezier;
  pub mod bloom;
@@ -565,7 +565,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
  pub use gecko::rules::FontFaceRule;
  #[cfg(feature = "gecko")]
  use gecko_bindings::structs::URLExtraData;
-@@ -287,16 +288,17 @@ pub enum CssRule {
+@@ -287,16 +288,17 @@
      Import(Arc<Locked<ImportRule>>),
      Style(Arc<Locked<StyleRule>>),
      Media(Arc<Locked<MediaRule>>),
@@ -583,7 +583,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
      // https://drafts.csswg.org/cssom/#the-cssrule-interface
      Style               = 1,
      Charset             = 2,
-@@ -309,16 +311,18 @@ pub enum CssRuleType {
+@@ -309,16 +311,18 @@
      Keyframe            = 8,
      // https://drafts.csswg.org/cssom/#the-cssrule-interface
      Margin              = 9,
@@ -602,7 +602,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
  
  /// Error reporter which silently forgets errors
  pub struct MemoryHoleReporter;
-@@ -348,16 +352,17 @@ impl CssRule {
+@@ -348,16 +352,17 @@
              CssRule::Import(_)    => CssRuleType::Import,
              CssRule::Media(_)     => CssRuleType::Media,
              CssRule::FontFace(_)  => CssRuleType::FontFace,
@@ -620,7 +620,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
              // CssRule::Charset(..) => State::Start,
              CssRule::Import(..) => State::Imports,
              CssRule::Namespace(..) => State::Namespaces,
-@@ -401,16 +406,26 @@ impl CssRule {
+@@ -401,16 +406,26 @@
                  let enabled = supports_rule.enabled;
                  if enabled {
                      let rules = &supports_rule.rules.read_with(guard).0;
@@ -647,7 +647,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
      #[allow(missing_docs)]
      pub fn parse(css: &str,
                   parent_stylesheet: &Stylesheet,
-@@ -458,16 +473,17 @@ impl ToCssWithGuard for CssRule {
+@@ -458,16 +473,17 @@
              CssRule::Import(ref lock) => lock.read_with(guard).to_css(guard, dest),
              CssRule::Style(ref lock) => lock.read_with(guard).to_css(guard, dest),
              CssRule::FontFace(ref lock) => lock.read_with(guard).to_css(guard, dest),
@@ -665,7 +665,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
  #[allow(missing_docs)]
  pub struct NamespaceRule {
      /// `None` for the default Namespace
-@@ -650,16 +666,41 @@ impl ToCssWithGuard for StyleRule {
+@@ -650,16 +666,41 @@
          Ok(())
      }
  }
@@ -707,7 +707,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
                             stylesheet_loader: Option<&StylesheetLoader>,
                             error_reporter: &ParseErrorReporter) {
          let mut namespaces = Namespaces::default();
-@@ -844,16 +885,17 @@ macro_rules! rule_filter {
+@@ -844,16 +885,17 @@
  rule_filter! {
      effective_style_rules(Style => StyleRule),
      effective_media_rules(Media => MediaRule),
@@ -725,7 +725,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
      /// Request a stylesheet after parsing a given `@import` rule.
      ///
      /// The called code is responsible to update the `stylesheet` rules field
-@@ -862,29 +904,43 @@ pub trait StylesheetLoader {
+@@ -862,29 +904,43 @@
      /// The convoluted signature allows impls to look at MediaList and ImportRule
      /// before they’re locked, while keeping the trait object-safe.
      fn request_stylesheet(
@@ -769,7 +769,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
      namespaces: &'a mut Namespaces,
      shared_lock: &'a SharedRwLock,
      loader: Option<&'a StylesheetLoader>,
-@@ -894,16 +950,17 @@ struct TopLevelRuleParser<'a> {
+@@ -894,16 +950,17 @@
  
  impl<'b> TopLevelRuleParser<'b> {
      fn nested<'a: 'b>(&'a self) -> NestedRuleParser<'a, 'b> {
@@ -787,7 +787,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
  #[allow(missing_docs)]
  pub enum State {
      Start = 1,
-@@ -922,16 +979,18 @@ enum AtRulePrelude {
+@@ -922,16 +979,18 @@
      /// An @supports rule, with its conditional
      Supports(SupportsCondition),
      /// A @viewport rule prelude.
@@ -806,7 +806,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
      type AtRule = CssRule;
  
      fn parse_prelude(&mut self, name: &str, input: &mut Parser)
-@@ -1043,26 +1102,28 @@ impl<'a> QualifiedRuleParser for TopLeve
+@@ -1043,26 +1102,28 @@
  }
  
  #[derive(Clone)]  // shallow, relatively cheap .clone
@@ -835,7 +835,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
                  Ok(rule) => rules.push(rule),
                  Err(range) => {
                      let pos = range.start;
-@@ -1122,16 +1183,20 @@ impl<'a, 'b> AtRuleParser for NestedRule
+@@ -1122,16 +1183,20 @@
              },
              "page" => {
                  if cfg!(feature = "gecko") {
@@ -856,7 +856,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
          match prelude {
              AtRulePrelude::FontFace => {
                  let context = ParserContext::new_with_rule_type(self.context, Some(CssRuleType::FontFace));
-@@ -1166,16 +1231,26 @@ impl<'a, 'b> AtRuleParser for NestedRule
+@@ -1166,16 +1231,26 @@
              }
              AtRulePrelude::Page => {
                  let context = ParserContext::new_with_rule_type(self.context, Some(CssRuleType::Page));
@@ -886,7 +886,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
 diff --git a/servo/ports/geckolib/Cargo.toml b/servo/ports/geckolib/Cargo.toml
 --- a/servo/ports/geckolib/Cargo.toml
 +++ b/servo/ports/geckolib/Cargo.toml
-@@ -14,15 +14,16 @@ bindgen = ["style/use_bindgen"]
+@@ -14,15 +14,16 @@
  testing = ["style/testing"]
  
  [dependencies]
@@ -946,7 +946,7 @@ diff --git a/servo/ports/geckolib/stylesheet_loader.rs b/servo/ports/geckolib/st
  
  impl StylesheetLoader {
      pub fn new(loader: *mut Loader, parent: *mut ServoStyleSheet) -> Self {
-@@ -40,9 +41,26 @@ impl StyleStylesheetLoader for Styleshee
+@@ -40,9 +41,26 @@
                                   Stylesheet::arc_as_borrowed(&import.stylesheet),
                                   base_url_data,
                                   spec_bytes,
@@ -976,7 +976,7 @@ diff --git a/servo/ports/geckolib/stylesheet_loader.rs b/servo/ports/geckolib/st
 diff --git a/toolkit/library/gtest/rust/Cargo.lock b/toolkit/library/gtest/rust/Cargo.lock
 --- a/toolkit/library/gtest/rust/Cargo.lock
 +++ b/toolkit/library/gtest/rust/Cargo.lock
-@@ -285,16 +285,17 @@ dependencies = [
+@@ -285,16 +285,17 @@
  name = "geckoservo"
  version = "0.0.1"
  dependencies = [
@@ -997,7 +997,7 @@ diff --git a/toolkit/library/gtest/rust/Cargo.lock b/toolkit/library/gtest/rust/
 diff --git a/toolkit/library/rust/Cargo.lock b/toolkit/library/rust/Cargo.lock
 --- a/toolkit/library/rust/Cargo.lock
 +++ b/toolkit/library/rust/Cargo.lock
-@@ -283,16 +283,17 @@ dependencies = [
+@@ -283,16 +283,17 @@
  name = "geckoservo"
  version = "0.0.1"
  dependencies = [
@@ -1015,3 +1015,4 @@ diff --git a/toolkit/library/rust/Cargo.lock b/toolkit/library/rust/Cargo.lock
  
  [[package]]
  name = "gkrust-shared"
+

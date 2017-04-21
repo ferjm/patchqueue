@@ -2,8 +2,8 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
 # Date 1492696360 -7200
-# Node ID 2f506843c26c8e322117e7e57debfbef551b221b
-# Parent  22394afb8660e4b7a14295a5ff68eafe9d9bbee4
+# Node ID b76906c8c1011cae38d4ff15f63cdf7ec8bf0f32
+# Parent  e9d9fecc28566629dbb2794e2aebd9b8c5ee6255
 Bug 1355408 - stylo: Support @-moz-document rule. Part 3: Update test expectations. r=xidorn
 
 MozReview-Commit-ID: 3pu2ds2SdJn
