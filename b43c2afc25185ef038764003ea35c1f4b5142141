@@ -3,7 +3,7 @@
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
 # Date 1492534783 -7200
 # Node ID b43c2afc25185ef038764003ea35c1f4b5142141
-# Parent  8b854986038cf3f3f240697e27ef48ea65914c13
+# Parent  27311156637f9b5d4504373967e01c4241902ae7
 Bug 1355408 - stylo: Support @-moz-document rule. r=xidorn
 
 MozReview-Commit-ID: Hb9HzIzviiV
