@@ -4,9 +4,7 @@
 # Date 1492534783 -7200
 # Node ID 14fe6393e1c1cceaf41be296f26242c7662827c8
 # Parent  8b854986038cf3f3f240697e27ef48ea65914c13
- Bug 1355408 - stylo: Support @-moz-document rule. Part 1: Common bits and Gecko support. r=xidorn
-
-MozReview-Commit-ID: 3yLRdXrqDm3
+Bug 1355408 - stylo: Support @-moz-document rule. Part 1: Stylo support via nsCSSRules::DocumentRule::UseForPresentation. r=xidorn
 
 diff --git a/layout/style/ServoBindings.cpp b/layout/style/ServoBindings.cpp
 --- a/layout/style/ServoBindings.cpp
