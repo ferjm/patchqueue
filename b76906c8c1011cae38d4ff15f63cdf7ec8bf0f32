@@ -3,15 +3,13 @@
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
 # Date 1492696360 -7200
 # Node ID b76906c8c1011cae38d4ff15f63cdf7ec8bf0f32
-# Parent  e9d9fecc28566629dbb2794e2aebd9b8c5ee6255
-Bug 1355408 - stylo: Support @-moz-document rule. Part 3: Update test expectations. r=xidorn
-
-MozReview-Commit-ID: 3pu2ds2SdJn
+# Parent  15496ba79ac44da6aa72dbe0fbcc31a7dcd61893
+Bug 1355408 - stylo: Support @-moz-document rule. Update test expectations. r=xidorn
 
 diff --git a/layout/reftests/scoped-style/reftest-stylo.list b/layout/reftests/scoped-style/reftest-stylo.list
 --- a/layout/reftests/scoped-style/reftest-stylo.list
 +++ b/layout/reftests/scoped-style/reftest-stylo.list
-@@ -44,15 +44,15 @@
+@@ -44,15 +44,15 @@ fails == scoped-style-dynamic-011.html s
  == scoped-style-dynamic-012.svg scoped-style-dynamic-012.svg
  == scoped-style-dynamic-013.svg scoped-style-dynamic-013.svg
  == scoped-style-dynamic-014.svg scoped-style-dynamic-014.svg
@@ -55,7 +53,7 @@ diff --git a/layout/reftests/w3c-css/submitted/conditional3/reftest-stylo.list b
 diff --git a/layout/style/test/stylo-failures.md b/layout/style/test/stylo-failures.md
 --- a/layout/style/test/stylo-failures.md
 +++ b/layout/style/test/stylo-failures.md
-@@ -322,17 +322,16 @@
+@@ -298,17 +298,16 @@ to mochitest command.
  * test_pseudoelement_parsing.html: support parsing some pseudo-classes on some pseudo-elements [5]
  * Unit should be preserved after parsing servo/servo#15346
    * test_units_time.html [1]
@@ -73,4 +71,3 @@ diff --git a/layout/style/test/stylo-failures.md b/layout/style/test/stylo-failu
  * test_author_specified_style.html: support serializing color as author specified bug 1348165 [27]
  * browser_newtab_share_rule_processors.js: agent style sheet sharing [1]
  * test_selectors.html `this_better_be_unvisited`: visited handling [2]
-
