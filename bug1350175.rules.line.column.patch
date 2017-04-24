@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  e17cbb839dd225a2da7e5d5bec43cf94e11749d8
+# Parent  27311156637f9b5d4504373967e01c4241902ae7
 Bug 1350175 - stylo: Support getting line / column number of CSS rules. r=xidorn
 
 diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
@@ -15,9 +15,9 @@ diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
                     RawServoDeclarationBlockBorrowed declarations)
  SERVO_BINDING_FUNC(Servo_StyleRule_GetSelectorText, void,
                     RawServoStyleRuleBorrowed rule, nsAString* result)
-+SERVO_BINDING_FUNC(Servo_StyleRule_GetSourceLine, uint32_t line,
++SERVO_BINDING_FUNC(Servo_StyleRule_GetSourceLine, uint32_t,
 +                   RawServoStyleRuleBorrowed rule)
-+SERVO_BINDING_FUNC(Servo_StyleRule_GetSourceColumn, uint32_t column,
++SERVO_BINDING_FUNC(Servo_StyleRule_GetSourceColumn, uint32_t,
 +                   RawServoStyleRuleBorrowed rule)
  SERVO_BINDING_FUNC(Servo_MediaRule_GetMedia, RawServoMediaListStrong,
                     RawServoMediaRuleBorrowed rule)
@@ -27,6 +27,29 @@ diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
                     RawServoNamespaceRuleBorrowed rule)
  SERVO_BINDING_FUNC(Servo_NamespaceRule_GetURI, nsIAtom*,
                     RawServoNamespaceRuleBorrowed rule)
+diff --git a/layout/style/ServoStyleRule.cpp b/layout/style/ServoStyleRule.cpp
+--- a/layout/style/ServoStyleRule.cpp
++++ b/layout/style/ServoStyleRule.cpp
+@@ -105,17 +105,18 @@ URLExtraData*
+ ServoStyleRuleDeclaration::GetURLData() const
+ {
+   return GetURLDataForRule(Rule());
+ }
+ 
+ // -- ServoStyleRule --------------------------------------------------
+ 
+ ServoStyleRule::ServoStyleRule(already_AddRefed<RawServoStyleRule> aRawRule)
+-  : BindingStyleRule(0, 0)
++  : BindingStyleRule(Servo_StyleRule_GetSourceLine(aRawRule.take()),
++                     Servo_StyleRule_GetSourceColumn(aRawRule.take()))
+   , mRawRule(aRawRule)
+   , mDecls(Servo_StyleRule_GetStyle(mRawRule).Consume())
+ {
+ }
+ 
+ // QueryInterface implementation for ServoStyleRule
+ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(ServoStyleRule)
+   NS_INTERFACE_MAP_ENTRY(nsIDOMCSSStyleRule)
 diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/stylesheets.rs
 --- a/servo/components/style/stylesheets.rs
 +++ b/servo/components/style/stylesheets.rs
@@ -49,30 +72,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
  use font_face::parse_font_face_block;
  #[cfg(feature = "gecko")]
  pub use gecko::rules::FontFaceRule;
-@@ -463,16 +463,22 @@ impl ToCssWithGuard for CssRule {
-             CssRule::Keyframes(ref lock) => lock.read_with(guard).to_css(guard, dest),
-             CssRule::Media(ref lock) => lock.read_with(guard).to_css(guard, dest),
-             CssRule::Supports(ref lock) => lock.read_with(guard).to_css(guard, dest),
-             CssRule::Page(ref lock) => lock.read_with(guard).to_css(guard, dest),
-         }
-     }
- }
- 
-+/// Get the line and column numbers of a parsed CSS Rule.
-+pub trait GetLocation {
-+    /// Get the line and column numbers of a parsed CSS Rule.
-+    fn get_location(&self) -> SourceLocation;
-+}
-+
- #[derive(Debug, PartialEq)]
- #[allow(missing_docs)]
- pub struct NamespaceRule {
-     /// `None` for the default Namespace
-     pub prefix: Option<Prefix>,
-     pub url: Namespace,
- }
- 
-@@ -626,16 +632,17 @@ impl ToCssWithGuard for PageRule {
+@@ -623,16 +623,17 @@ impl ToCssWithGuard for PageRule {
      }
  }
  
@@ -90,32 +90,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
      where W: fmt::Write {
          // Step 1
          try!(self.selectors.to_css(dest));
-@@ -649,16 +656,24 @@ impl ToCssWithGuard for StyleRule {
-             try!(write!(dest, " "));
-         }
-         // Step 5
-         try!(dest.write_str("}"));
-         Ok(())
-     }
- }
- 
-+impl GetLocation for StyleRule {
-+    /// Get the line and column numbers of the parsed style rule.
-+    fn get_location(&self) -> SourceLocation
-+    {
-+        self.source_location
-+    }
-+}
-+
- /// A @font-face rule
- #[cfg(feature = "servo")]
- pub type FontFaceRule = FontFaceRuleData;
- 
- impl Stylesheet {
-     /// Updates an empty stylesheet from a given string of text.
-     pub fn update_from_str(existing: &Stylesheet,
-                            css: &str,
-@@ -1209,16 +1224,18 @@ impl<'a, 'b> QualifiedRuleParser for Nes
+@@ -1184,16 +1185,18 @@ impl<'a, 'b> QualifiedRuleParser for Nes
              stylesheet_origin: self.stylesheet_origin,
              namespaces: self.namespaces,
          };
@@ -138,7 +113,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
 diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 --- a/servo/ports/geckolib/glue.rs
 +++ b/servo/ports/geckolib/glue.rs
-@@ -834,16 +834,26 @@ pub extern "C" fn Servo_StyleRule_SetSty
+@@ -818,16 +818,30 @@ pub extern "C" fn Servo_StyleRule_SetSty
  #[no_mangle]
  pub extern "C" fn Servo_StyleRule_GetSelectorText(rule: RawServoStyleRuleBorrowed, result: *mut nsAString) {
      read_locked_arc(rule, |rule: &StyleRule| {
@@ -148,12 +123,16 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
  
  #[no_mangle]
 +pub extern "C" fn Servo_StyleRule_GetSourceLine(rule: RawServoStyleRuleBorrowed) -> u32 {
-+    rule.get_location().line as u32
++    read_locked_arc(rule, |rule: &StyleRule| {
++        rule.source_location.line as u32
++    })
 +}
 +
 +#[no_mangle]
-+pub extern "C" fn Servo_StyleRule_GetColumnLine(rule: RawServoStyleRuleBorrowed) -> u32 {
-+    rule.get_location().column as u32
++pub extern "C" fn Servo_StyleRule_GetSourceColumn(rule: RawServoStyleRuleBorrowed) -> u32 {
++    read_locked_arc(rule, |rule: &StyleRule| {
++        rule.source_location.column as u32
++    })
 +}
 +
 +#[no_mangle]
