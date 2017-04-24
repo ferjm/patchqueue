@@ -1,0 +1,5 @@
+# HG changeset patch
+# User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
+# Parent  e17cbb839dd225a2da7e5d5bec43cf94e11749d8
+Bug 1355715 - stylo: test_namespace_rule.html fails for several cases. r=xidorn
+
