@@ -38,7 +38,7 @@ diff --git a/layout/style/ServoPageRule.cpp b/layout/style/ServoPageRule.cpp
  ServoPageRule::ServoPageRule(RefPtr<RawServoPageRule> aRawRule)
 -  : CSSPageRule(0, 0)
 +  : CSSPageRule(Servo_PageRule_GetSourceLine(aRawRule),
-+                Servo_PageRule_GetColumnLine(aRawRule))
++                Servo_PageRule_GetSourceColumn(aRawRule))
    , mRawRule(Move(aRawRule))
    , mDecls(Servo_PageRule_GetStyle(mRawRule).Consume())
  {
