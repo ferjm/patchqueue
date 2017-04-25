@@ -1,0 +1,147 @@
+# HG changeset patch
+# User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
+# Parent  0d5c2710b5b321984363c8b18a851bd9ec25813f
+Bug 1350175 - stylo: Support getting line / column number of CSS rules. Part 5: FontFaceRule. r=xidorn
+
+diff --git a/layout/style/ServoBindings.cpp b/layout/style/ServoBindings.cpp
+--- a/layout/style/ServoBindings.cpp
++++ b/layout/style/ServoBindings.cpp
+@@ -1871,19 +1871,19 @@ Gecko_CSSKeywordString(nsCSSKeyword aKey
+   MOZ_ASSERT(NS_IsMainThread());
+   MOZ_ASSERT(aLength);
+   const nsAFlatCString& value = nsCSSKeywords::GetStringValue(aKeyword);
+   *aLength = value.Length();
+   return value.get();
+ }
+ 
+ nsCSSFontFaceRule*
+-Gecko_CSSFontFaceRule_Create()
++Gecko_CSSFontFaceRule_Create(uint32_t line, uint32_t column)
+ {
+-  RefPtr<nsCSSFontFaceRule> rule = new nsCSSFontFaceRule(0, 0);
++  RefPtr<nsCSSFontFaceRule> rule = new nsCSSFontFaceRule(line, column);
+   return rule.forget().take();
+ }
+ 
+ void
+ Gecko_CSSFontFaceRule_GetCssText(const nsCSSFontFaceRule* aRule,
+                                  nsAString* aResult)
+ {
+   // GetCSSText serializes nsCSSValues, which have a heap write
+diff --git a/layout/style/ServoBindings.h b/layout/style/ServoBindings.h
+--- a/layout/style/ServoBindings.h
++++ b/layout/style/ServoBindings.h
+@@ -449,17 +449,17 @@ void InitializeServo();
+ void ShutdownServo();
+ 
+ const nsMediaFeature* Gecko_GetMediaFeatures();
+ nsCSSKeyword Gecko_LookupCSSKeyword(const uint8_t* string, uint32_t len);
+ const char* Gecko_CSSKeywordString(nsCSSKeyword keyword, uint32_t* len);
+ 
+ // Font face rule
+ // Creates and returns a new (already-addrefed) nsCSSFontFaceRule object.
+-nsCSSFontFaceRule* Gecko_CSSFontFaceRule_Create();
++nsCSSFontFaceRule* Gecko_CSSFontFaceRule_Create(uint32_t line, uint32_t column);
+ void Gecko_CSSFontFaceRule_GetCssText(const nsCSSFontFaceRule* rule, nsAString* result);
+ NS_DECL_FFI_REFCOUNTING(nsCSSFontFaceRule, CSSFontFaceRule);
+ 
+ RawGeckoElementBorrowedOrNull Gecko_GetBody(RawGeckoPresContextBorrowed pres_context);
+ 
+ // We use an int32_t here instead of a LookAndFeel::ColorID
+ // because forward-declaring a nested enum/struct is impossible
+ nscolor Gecko_GetLookAndFeelSystemColor(int32_t color_id,
+diff --git a/servo/components/style/font_face.rs b/servo/components/style/font_face.rs
+--- a/servo/components/style/font_face.rs
++++ b/servo/components/style/font_face.rs
+@@ -7,16 +7,17 @@
+ //! [ff]: https://drafts.csswg.org/css-fonts/#at-font-face-rule
+ 
+ #![deny(missing_docs)]
+ 
+ #[cfg(feature = "gecko")]
+ use computed_values::{font_style, font_weight, font_stretch};
+ use computed_values::font_family::FamilyName;
+ use cssparser::{AtRuleParser, DeclarationListParser, DeclarationParser, Parser};
++use cssparser::SourceLocation;
+ #[cfg(feature = "gecko")] use gecko_bindings::structs::CSSFontFaceDescriptors;
+ #[cfg(feature = "gecko")] use cssparser::UnicodeRange;
+ use parser::{ParserContext, log_css_error, Parse};
+ use shared_lock::{SharedRwLockReadGuard, ToCssWithGuard};
+ use std::fmt;
+ use style_traits::{ToCss, OneOrMoreCommaSeparated};
+ use values::specified::url::SpecifiedUrl;
+ 
+@@ -181,24 +182,30 @@ macro_rules! font_face_descriptors_commo
+         ///
+         /// https://drafts.csswg.org/css-fonts/#font-face-rule
+         #[derive(Debug, PartialEq, Eq)]
+         pub struct FontFaceRuleData {
+             $(
+                 #[$doc]
+                 pub $ident: Option<$ty>,
+             )*
++            /// Line and column of the @font-face rule source code.
++            pub source_location: SourceLocation,
+         }
+ 
+         impl FontFaceRuleData {
+             fn empty() -> Self {
+                 FontFaceRuleData {
+                     $(
+                         $ident: None,
+                     )*
++                    source_location: SourceLocation {
++                        line: 0,
++                        column: 0
++                    },
+                 }
+             }
+ 
+             /// Convert to Gecko types
+             #[cfg(feature = "gecko")]
+             pub fn set_descriptors(&self, descriptors: &mut CSSFontFaceDescriptors) {
+                 $(
+                     if let Some(ref value) = self.$ident {
+@@ -226,16 +233,17 @@ macro_rules! font_face_descriptors_commo
+                 dest.write_str("}")
+             }
+         }
+ 
+        impl<'a, 'b> DeclarationParser for FontFaceRuleParser<'a, 'b> {
+             type Declaration = ();
+ 
+             fn parse_value(&mut self, name: &str, input: &mut Parser) -> Result<(), ()> {
++                self.rule.source_location = input.current_source_location();
+                 match_ignore_ascii_case! { name,
+                     $(
+                         $name => {
+                             // DeclarationParser also calls parse_entirely
+                             // so we’d normally not need to,
+                             // but in this case we do because we set the value as a side effect
+                             // rather than returning it.
+                             let value = input.parse_entirely(|i| Parse::parse(self.context, i))?;
+diff --git a/servo/components/style/gecko/rules.rs b/servo/components/style/gecko/rules.rs
+--- a/servo/components/style/gecko/rules.rs
++++ b/servo/components/style/gecko/rules.rs
+@@ -111,17 +111,20 @@ impl ToNsCssValue for Vec<UnicodeRange> 
+             target[1].set_integer(range.end as i32);
+         }
+     }
+ }
+ 
+ impl From<FontFaceRuleData> for FontFaceRule {
+     fn from(data: FontFaceRuleData) -> FontFaceRule {
+         let mut result = unsafe {
+-            UniqueRefPtr::from_addrefed(bindings::Gecko_CSSFontFaceRule_Create())
++            UniqueRefPtr::from_addrefed(
++                bindings::Gecko_CSSFontFaceRule_Create(data.source_location.line as u32,
++                                                       data.source_location.column as u32)
++            )
+         };
+         data.set_descriptors(&mut result.mDecl.mDescriptors);
+         result.get()
+     }
+ }
+ 
+ impl ToCssWithGuard for FontFaceRule {
+     fn to_css<W>(&self, _guard: &SharedRwLockReadGuard, dest: &mut W) -> fmt::Result
