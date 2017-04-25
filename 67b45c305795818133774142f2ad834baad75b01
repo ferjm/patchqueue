@@ -136,7 +136,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
 -            block: Arc::new(self.shared_lock.wrap(declarations))
 +            block: Arc::new(self.shared_lock.wrap(declarations)),
 +            source_location: SourceLocation {
-+                line: location.line + self.context.line_number_offset as usize,
++                line: location.line + self.context.line_number_offset as usize - 1,
 +                column: location.column,
 +            }
          }))))
