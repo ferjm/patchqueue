@@ -3,3 +3,129 @@
 # Parent  f629f2eddd0a7a0608d85c1b20df349a21102ab2
 Bug 1350175 - stylo: Support getting line / column number of CSS rules. Part 4: NamespaceRule. r=xidorn
 
+diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
+--- a/layout/style/ServoBindingList.h
++++ b/layout/style/ServoBindingList.h
+@@ -105,16 +105,17 @@ BASIC_RULE_FUNCS(Page)
+ #undef BASIC_RULE_FUNCS
+ #define RULE_LOCATION_GETTERS(type_) \
+     SERVO_BINDING_FUNC(Servo_##type_##Rule_GetSourceLine, uint32_t, \
+                        RawServo##type_##RuleBorrowed rule) \
+     SERVO_BINDING_FUNC(Servo_##type_##Rule_GetSourceColumn, uint32_t, \
+                        RawServo##type_##RuleBorrowed rule)
+ RULE_LOCATION_GETTERS(Style)
+ RULE_LOCATION_GETTERS(Page)
++RULE_LOCATION_GETTERS(Namespace)
+ #undef RULE_LOCATION_GETTERS
+ SERVO_BINDING_FUNC(Servo_CssRules_GetFontFaceRuleAt, nsCSSFontFaceRule*,
+                    ServoCssRulesBorrowed rules, uint32_t index)
+ SERVO_BINDING_FUNC(Servo_StyleRule_GetStyle, RawServoDeclarationBlockStrong,
+                    RawServoStyleRuleBorrowed rule)
+ SERVO_BINDING_FUNC(Servo_StyleRule_SetStyle, void,
+                    RawServoStyleRuleBorrowed rule,
+                    RawServoDeclarationBlockBorrowed declarations)
+diff --git a/layout/style/ServoNamespaceRule.h b/layout/style/ServoNamespaceRule.h
+--- a/layout/style/ServoNamespaceRule.h
++++ b/layout/style/ServoNamespaceRule.h
+@@ -11,17 +11,18 @@
+ #include "mozilla/dom/CSSNamespaceRule.h"
+ 
+ namespace mozilla {
+ 
+ class ServoNamespaceRule : public dom::CSSNamespaceRule
+ {
+ public:
+   explicit ServoNamespaceRule(already_AddRefed<RawServoNamespaceRule> aRule)
+-    : CSSNamespaceRule(0, 0)
++    : CSSNamespaceRule(Servo_NamespaceRule_GetSourceLine(aRule.take()),
++                       Servo_NamespaceRule_GetSourceColumn(aRule.take()))
+     , mRawRule(Move(aRule))
+   {
+   }
+ 
+   NS_DECL_ISUPPORTS_INHERITED
+ 
+ #ifdef DEBUG
+   void List(FILE* out = stdout, int32_t aIndent = 0) const final;
+diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/stylesheets.rs
+--- a/servo/components/style/stylesheets.rs
++++ b/servo/components/style/stylesheets.rs
+@@ -455,16 +455,17 @@ impl ToCssWithGuard for CssRule {
+ }
+ 
+ #[derive(Debug, PartialEq)]
+ #[allow(missing_docs)]
+ pub struct NamespaceRule {
+     /// `None` for the default Namespace
+     pub prefix: Option<Prefix>,
+     pub url: Namespace,
++    pub source_location: SourceLocation,
+ }
+ 
+ impl ToCssWithGuard for NamespaceRule {
+     // https://drafts.csswg.org/cssom/#serialize-a-css-rule CSSNamespaceRule
+     fn to_css<W>(&self, _guard: &SharedRwLockReadGuard, dest: &mut W) -> fmt::Result
+     where W: fmt::Write {
+         try!(dest.write_str("@namespace "));
+         if let Some(ref prefix) = self.prefix {
+@@ -979,32 +980,35 @@ impl<'a> AtRuleParser for TopLevelRulePa
+                     self.state.set(State::Invalid);
+                     return Err(())  // "@import must be before any rule but @charset"
+                 }
+             },
+             "namespace" => {
+                 if self.state.get() <= State::Namespaces {
+                     self.state.set(State::Namespaces);
+ 
++                    let location = input.current_source_location();
++
+                     let prefix_result = input.try(|input| input.expect_ident());
+                     let url = Namespace::from(try!(input.expect_url_or_string()));
+ 
+                     let opt_prefix = if let Ok(prefix) = prefix_result {
+                         let prefix = Prefix::from(prefix);
+                         self.namespaces.prefixes.insert(prefix.clone(), url.clone());
+                         Some(prefix)
+                     } else {
+                         self.namespaces.default = Some(url.clone());
+                         None
+                     };
+ 
+                     return Ok(AtRuleType::WithoutBlock(CssRule::Namespace(Arc::new(
+                         self.shared_lock.wrap(NamespaceRule {
+                             prefix: opt_prefix,
+                             url: url,
++                            source_location: location,
+                         })
+                     ))))
+                 } else {
+                     self.state.set(State::Invalid);
+                     return Err(())  // "@namespace must be before any rule but @charset and @import"
+                 }
+             },
+             // @charset is removed by rust-cssparser if it’s the first rule in the stylesheet
+diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
+--- a/servo/ports/geckolib/glue.rs
++++ b/servo/ports/geckolib/glue.rs
+@@ -768,16 +768,21 @@ impl_rule_location_getters! { (StyleRule
+     column_getter: Servo_StyleRule_GetSourceColumn,
+ }
+ 
+ impl_rule_location_getters! { (PageRule, RawServoPageRuleBorrowed),
+     line_getter: Servo_PageRule_GetSourceLine,
+     column_getter: Servo_PageRule_GetSourceColumn,
+ }
+ 
++impl_rule_location_getters! { (NamespaceRule, RawServoNamespaceRuleBorrowed),
++    line_getter: Servo_NamespaceRule_GetSourceLine,
++    column_getter: Servo_NamespaceRule_GetSourceColumn,
++}
++
+ macro_rules! impl_basic_rule_funcs {
+     { ($name:ident, $rule_type:ty, $raw_type:ty),
+         getter: $getter:ident,
+         debug: $debug:ident,
+         to_css: $to_css:ident,
+     } => {
+         #[no_mangle]
+         pub extern "C" fn $getter(rules: ServoCssRulesBorrowed, index: u32) -> Strong<$raw_type> {
