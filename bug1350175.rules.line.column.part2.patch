@@ -17,9 +17,9 @@ diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
  #undef BASIC_RULE_FUNCS
 +#define RULE_LOCATION_GETTERS(type_) \
 +    SERVO_BINDING_FUNC(Servo_##type_##Rule_GetSourceLine, uint32_t, \
-+                       RawServoStyleRuleBorrowed rule) \
++                       RawServo##type_##RuleBorrowed rule) \
 +    SERVO_BINDING_FUNC(Servo_##type_##Rule_GetSourceColumn, uint32_t, \
-+                       RawServoStyleRuleBorrowed rule)
++                       RawServo##type_##RuleBorrowed rule)
 +RULE_LOCATION_GETTERS(Style)
 +#undef RULE_LOCATION_GETTERS
  SERVO_BINDING_FUNC(Servo_CssRules_GetFontFaceRuleAt, nsCSSFontFaceRule*,
