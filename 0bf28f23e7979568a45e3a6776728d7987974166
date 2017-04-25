@@ -1,12 +1,17 @@
+
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  0d5c2710b5b321984363c8b18a851bd9ec25813f
+# Date 1493130280 -7200
+# Node ID 0bf28f23e7979568a45e3a6776728d7987974166
+# Parent  a3a1e49b7f0a94bdb4a0d2d0f1ad309b0cc6ee69
 Bug 1350175 - stylo: Support getting line / column number of CSS rules. Part 5: FontFaceRule. r=xidorn
+
+MozReview-Commit-ID: InyYKJhWAbv
 
 diff --git a/layout/style/ServoBindings.cpp b/layout/style/ServoBindings.cpp
 --- a/layout/style/ServoBindings.cpp
 +++ b/layout/style/ServoBindings.cpp
-@@ -1871,19 +1871,19 @@ Gecko_CSSKeywordString(nsCSSKeyword aKey
+@@ -1871,19 +1871,19 @@
    MOZ_ASSERT(NS_IsMainThread());
    MOZ_ASSERT(aLength);
    const nsAFlatCString& value = nsCSSKeywords::GetStringValue(aKeyword);
@@ -31,7 +36,7 @@ diff --git a/layout/style/ServoBindings.cpp b/layout/style/ServoBindings.cpp
 diff --git a/layout/style/ServoBindings.h b/layout/style/ServoBindings.h
 --- a/layout/style/ServoBindings.h
 +++ b/layout/style/ServoBindings.h
-@@ -449,17 +449,17 @@ void InitializeServo();
+@@ -449,17 +449,17 @@
  void ShutdownServo();
  
  const nsMediaFeature* Gecko_GetMediaFeatures();
@@ -71,7 +76,7 @@ diff --git a/servo/components/style/font_face.rs b/servo/components/style/font_f
  use style_traits::{ToCss, OneOrMoreCommaSeparated};
  use values::specified::url::SpecifiedUrl;
  
-@@ -181,24 +182,30 @@ macro_rules! font_face_descriptors_commo
+@@ -181,24 +182,30 @@
          ///
          /// https://drafts.csswg.org/css-fonts/#font-face-rule
          #[derive(Debug, PartialEq, Eq)]
@@ -102,7 +107,7 @@ diff --git a/servo/components/style/font_face.rs b/servo/components/style/font_f
              pub fn set_descriptors(&self, descriptors: &mut CSSFontFaceDescriptors) {
                  $(
                      if let Some(ref value) = self.$ident {
-@@ -226,16 +233,17 @@ macro_rules! font_face_descriptors_commo
+@@ -226,16 +233,17 @@
                  dest.write_str("}")
              }
          }
@@ -123,7 +128,7 @@ diff --git a/servo/components/style/font_face.rs b/servo/components/style/font_f
 diff --git a/servo/components/style/gecko/rules.rs b/servo/components/style/gecko/rules.rs
 --- a/servo/components/style/gecko/rules.rs
 +++ b/servo/components/style/gecko/rules.rs
-@@ -111,17 +111,20 @@ impl ToNsCssValue for Vec<UnicodeRange> 
+@@ -111,17 +111,20 @@
              target[1].set_integer(range.end as i32);
          }
      }
@@ -145,3 +150,4 @@ diff --git a/servo/components/style/gecko/rules.rs b/servo/components/style/geck
  
  impl ToCssWithGuard for FontFaceRule {
      fn to_css<W>(&self, _guard: &SharedRwLockReadGuard, dest: &mut W) -> fmt::Result
+

@@ -1,12 +1,17 @@
+
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  f629f2eddd0a7a0608d85c1b20df349a21102ab2
+# Date 1493130279 -7200
+# Node ID a3a1e49b7f0a94bdb4a0d2d0f1ad309b0cc6ee69
+# Parent  bcf9dd961ad7a3fff0ba0e66ae7c75f560f0574e
 Bug 1350175 - stylo: Support getting line / column number of CSS rules. Part 4: NamespaceRule. r=xidorn
+
+MozReview-Commit-ID: FSRr7fXJ7Wp
 
 diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
 --- a/layout/style/ServoBindingList.h
 +++ b/layout/style/ServoBindingList.h
-@@ -105,16 +105,17 @@ BASIC_RULE_FUNCS(Page)
+@@ -105,16 +105,17 @@
  #undef BASIC_RULE_FUNCS
  #define RULE_LOCATION_GETTERS(type_) \
      SERVO_BINDING_FUNC(Servo_##type_##Rule_GetSourceLine, uint32_t, \
@@ -50,7 +55,7 @@ diff --git a/layout/style/ServoNamespaceRule.h b/layout/style/ServoNamespaceRule
 diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/stylesheets.rs
 --- a/servo/components/style/stylesheets.rs
 +++ b/servo/components/style/stylesheets.rs
-@@ -455,16 +455,17 @@ impl ToCssWithGuard for CssRule {
+@@ -455,16 +455,17 @@
  }
  
  #[derive(Debug, PartialEq)]
@@ -68,7 +73,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
      where W: fmt::Write {
          try!(dest.write_str("@namespace "));
          if let Some(ref prefix) = self.prefix {
-@@ -979,32 +980,35 @@ impl<'a> AtRuleParser for TopLevelRulePa
+@@ -979,32 +980,35 @@
                      self.state.set(State::Invalid);
                      return Err(())  // "@import must be before any rule but @charset"
                  }
@@ -107,7 +112,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
 diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 --- a/servo/ports/geckolib/glue.rs
 +++ b/servo/ports/geckolib/glue.rs
-@@ -768,16 +768,21 @@ impl_rule_location_getters! { (StyleRule
+@@ -768,16 +768,21 @@
      column_getter: Servo_StyleRule_GetSourceColumn,
  }
  
@@ -129,3 +134,4 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
      } => {
          #[no_mangle]
          pub extern "C" fn $getter(rules: ServoCssRulesBorrowed, index: u32) -> Strong<$raw_type> {
+

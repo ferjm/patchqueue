@@ -1,12 +1,17 @@
+
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  2d1b6defa96fc2f627089e63915931be45c11b98
+# Date 1493130279 -7200
+# Node ID cf711692c23781706fb778f9af58f1bdbbcf65f9
+# Parent  67b45c305795818133774142f2ad834baad75b01
 Bug 1350175 - stylo: Support getting line / column number of CSS rules. Part 2: Introduce RULE_LOCATION_GETTERS. r=xidorn
+
+MozReview-Commit-ID: 4NU4Y5gp6hz
 
 diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
 --- a/layout/style/ServoBindingList.h
 +++ b/layout/style/ServoBindingList.h
-@@ -98,29 +98,32 @@ SERVO_BINDING_FUNC(Servo_CssRules_Delete
+@@ -98,29 +98,32 @@
                       RawServo##type_##RuleBorrowed rule, nsACString* result) \
    SERVO_BINDING_FUNC(Servo_##type_##Rule_GetCssText, void, \
                       RawServo##type_##RuleBorrowed rule, nsAString* result)
@@ -43,3 +48,4 @@ diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
                     RawServoNamespaceRuleBorrowed rule)
  SERVO_BINDING_FUNC(Servo_NamespaceRule_GetURI, nsIAtom*,
                     RawServoNamespaceRuleBorrowed rule)
+

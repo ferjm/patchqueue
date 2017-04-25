@@ -1,7 +1,12 @@
+
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
+# Date 1493130279 -7200
+# Node ID 67b45c305795818133774142f2ad834baad75b01
 # Parent  a30dc237c3a600a5231f2974fc2b85dfb5513414
 Bug 1350175 - stylo: Support getting line / column number of CSS rules. Part 1: StyleRule. r=xidorn
+
+MozReview-Commit-ID: 6ODvvX5JX7O
 
 diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
 --- a/layout/style/ServoBindingList.h
@@ -30,7 +35,8 @@ diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
 diff --git a/layout/style/ServoStyleRule.cpp b/layout/style/ServoStyleRule.cpp
 --- a/layout/style/ServoStyleRule.cpp
 +++ b/layout/style/ServoStyleRule.cpp
-@@ -105,17 +105,18 @@ URLExtraData*
+@@ -104,18 +104,19 @@ ServoStyleRuleDeclaration::GetCSSParsing
+ URLExtraData*
  ServoStyleRuleDeclaration::GetURLData() const
  {
    return GetURLDataForRule(Rule());
@@ -38,8 +44,9 @@ diff --git a/layout/style/ServoStyleRule.cpp b/layout/style/ServoStyleRule.cpp
  
  // -- ServoStyleRule --------------------------------------------------
  
- ServoStyleRule::ServoStyleRule(already_AddRefed<RawServoStyleRule> aRawRule)
+-ServoStyleRule::ServoStyleRule(already_AddRefed<RawServoStyleRule> aRawRule)
 -  : BindingStyleRule(0, 0)
++ServoStyleRule::ServoStyleRule(RefPtr<RawServoStyleRule> aRawRule)
 +  : BindingStyleRule(Servo_StyleRule_GetSourceLine(aRawRule.take()),
 +                     Servo_StyleRule_GetSourceColumn(aRawRule.take()))
    , mRawRule(aRawRule)
@@ -50,6 +57,28 @@ diff --git a/layout/style/ServoStyleRule.cpp b/layout/style/ServoStyleRule.cpp
  // QueryInterface implementation for ServoStyleRule
  NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(ServoStyleRule)
    NS_INTERFACE_MAP_ENTRY(nsIDOMCSSStyleRule)
+diff --git a/layout/style/ServoStyleRule.h b/layout/style/ServoStyleRule.h
+--- a/layout/style/ServoStyleRule.h
++++ b/layout/style/ServoStyleRule.h
+@@ -48,17 +48,17 @@ private:
+ 
+   RefPtr<ServoDeclarationBlock> mDecls;
+ };
+ 
+ class ServoStyleRule final : public BindingStyleRule
+                            , public nsIDOMCSSStyleRule
+ {
+ public:
+-  explicit ServoStyleRule(already_AddRefed<RawServoStyleRule> aRawRule);
++  explicit ServoStyleRule(RefPtr<RawServoStyleRule> aRawRule);
+ 
+   NS_DECL_ISUPPORTS_INHERITED
+   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_INHERITED(ServoStyleRule,
+                                                          css::Rule)
+   virtual bool IsCCLeaf() const final MOZ_MUST_OVERRIDE;
+   NS_DECL_NSIDOMCSSSTYLERULE
+ 
+   // WebIDL interface
 diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/stylesheets.rs
 --- a/servo/components/style/stylesheets.rs
 +++ b/servo/components/style/stylesheets.rs

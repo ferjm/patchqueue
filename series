@@ -1,8 +1,8 @@
-bug1350175.rules.line.column.patch
-bug1350175.rules.line.column.part2.patch
-bug1350175.rules.line.column.part3.patch
-bug1350175.rules.line.column.part4.patch
-bug1350175.rules.line.column.part5.patch
+67b45c305795818133774142f2ad834baad75b01
+cf711692c23781706fb778f9af58f1bdbbcf65f9
+bcf9dd961ad7a3fff0ba0e66ae7c75f560f0574e
+a3a1e49b7f0a94bdb4a0d2d0f1ad309b0cc6ee69
+0bf28f23e7979568a45e3a6776728d7987974166
 #e9d9fecc28566629dbb2794e2aebd9b8c5ee6255
 bug1217544.background.sync.part1.webidl.patch
 bug1217544.background.sync.part2.serviceworkerregistration.patch

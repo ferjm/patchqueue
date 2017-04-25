@@ -1,12 +1,17 @@
+
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  e03ae1c69c91cd695d60d970cbab99fad62ecdc7
+# Date 1493130279 -7200
+# Node ID bcf9dd961ad7a3fff0ba0e66ae7c75f560f0574e
+# Parent  cf711692c23781706fb778f9af58f1bdbbcf65f9
 Bug 1350175 - stylo: Support getting line / column number of CSS rules. Part 3: PageRule. r=xidorn
+
+MozReview-Commit-ID: 8Mnz51icFXz
 
 diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
 --- a/layout/style/ServoBindingList.h
 +++ b/layout/style/ServoBindingList.h
-@@ -104,16 +104,17 @@ BASIC_RULE_FUNCS(Namespace)
+@@ -104,16 +104,17 @@
  BASIC_RULE_FUNCS(Page)
  #undef BASIC_RULE_FUNCS
  #define RULE_LOCATION_GETTERS(type_) \
@@ -27,7 +32,7 @@ diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
 diff --git a/layout/style/ServoPageRule.cpp b/layout/style/ServoPageRule.cpp
 --- a/layout/style/ServoPageRule.cpp
 +++ b/layout/style/ServoPageRule.cpp
-@@ -100,17 +100,18 @@ URLExtraData*
+@@ -100,17 +100,18 @@
  ServoPageRuleDeclaration::GetURLData() const
  {
    return GetURLDataForRule(Rule());
@@ -50,7 +55,7 @@ diff --git a/layout/style/ServoPageRule.cpp b/layout/style/ServoPageRule.cpp
 diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/stylesheets.rs
 --- a/servo/components/style/stylesheets.rs
 +++ b/servo/components/style/stylesheets.rs
-@@ -590,25 +590,29 @@ impl ToCssWithGuard for SupportsRule {
+@@ -590,25 +590,29 @@
      }
  }
  
@@ -82,7 +87,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
      }
  }
  
-@@ -1172,21 +1176,23 @@ impl<'a, 'b> AtRuleParser for NestedRule
+@@ -1172,21 +1176,23 @@
                  let context = ParserContext::new_with_rule_type(self.context, Some(CssRuleType::Keyframes));
                  Ok(CssRule::Keyframes(Arc::new(self.shared_lock.wrap(KeyframesRule {
                      name: name,
@@ -112,7 +117,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
 diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 --- a/servo/ports/geckolib/glue.rs
 +++ b/servo/ports/geckolib/glue.rs
-@@ -737,16 +737,47 @@ pub extern "C" fn Servo_CssRules_DeleteR
+@@ -737,16 +737,47 @@
      write_locked_arc(rules, |rules: &mut CssRules| {
          match rules.remove_rule(index as usize) {
              Ok(_) => nsresult::NS_OK,
@@ -160,7 +165,7 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
      } => {
          #[no_mangle]
          pub extern "C" fn $getter(rules: ServoCssRulesBorrowed, index: u32) -> Strong<$raw_type> {
-@@ -834,30 +865,16 @@ pub extern "C" fn Servo_StyleRule_SetSty
+@@ -834,30 +865,16 @@
  #[no_mangle]
  pub extern "C" fn Servo_StyleRule_GetSelectorText(rule: RawServoStyleRuleBorrowed, result: *mut nsAString) {
      read_locked_arc(rule, |rule: &StyleRule| {
@@ -191,7 +196,7 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
  
  #[no_mangle]
  pub extern "C" fn Servo_MediaRule_GetRules(rule: RawServoMediaRuleBorrowed) -> ServoCssRulesStrong {
-@@ -876,26 +893,26 @@ pub extern "C" fn Servo_NamespaceRule_Ge
+@@ -876,26 +893,26 @@
  #[no_mangle]
  pub extern "C" fn Servo_NamespaceRule_GetURI(rule: RawServoNamespaceRuleBorrowed) -> *mut nsIAtom {
      read_locked_arc(rule, |rule: &NamespaceRule| rule.url.0.as_ptr())
@@ -220,3 +225,4 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
                                                            pseudo_tag: *mut nsIAtom,
                                                            skip_display_fixup: bool,
                                                            raw_data: RawServoStyleSetBorrowed)
+
