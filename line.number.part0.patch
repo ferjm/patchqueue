@@ -1,0 +1,199 @@
+# HG changeset patch
+# User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
+# Parent  a30dc237c3a600a5231f2974fc2b85dfb5513414
+Bug 1350175 - stylo: Support getting line / column number of CSS rules. Part 0: Set stylesheet line offset. r=xidorn
+
+diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
+--- a/layout/style/ServoBindingList.h
++++ b/layout/style/ServoBindingList.h
+@@ -25,27 +25,29 @@ SERVO_BINDING_FUNC(Servo_Element_ClearDa
+ SERVO_BINDING_FUNC(Servo_StyleSheet_Empty, RawServoStyleSheetStrong,
+                    mozilla::css::SheetParsingMode parsing_mode)
+ SERVO_BINDING_FUNC(Servo_StyleSheet_FromUTF8Bytes, RawServoStyleSheetStrong,
+                    mozilla::css::Loader* loader,
+                    mozilla::ServoStyleSheet* gecko_stylesheet,
+                    const nsACString* data,
+                    mozilla::css::SheetParsingMode parsing_mode,
+                    const RawServoMediaList* media_list,
+-                   RawGeckoURLExtraData* extra_data)
++                   RawGeckoURLExtraData* extra_data,
++                   uint32_t line_number_offset)
+ SERVO_BINDING_FUNC(Servo_ImportRule_GetSheet,
+                    RawServoStyleSheetStrong,
+                    const RawServoImportRuleBorrowed import_rule)
+ SERVO_BINDING_FUNC(Servo_StyleSheet_ClearAndUpdate,
+                    void,
+                    RawServoStyleSheetBorrowed stylesheet,
+                    mozilla::css::Loader* loader,
+                    mozilla::ServoStyleSheet* gecko_stylesheet,
+                    const nsACString* data,
+-                   RawGeckoURLExtraData* extra_data)
++                   RawGeckoURLExtraData* extra_data,
++                   uint32_t line_number_offset)
+ SERVO_BINDING_FUNC(Servo_StyleSheet_HasRules, bool,
+                    RawServoStyleSheetBorrowed sheet)
+ SERVO_BINDING_FUNC(Servo_StyleSheet_GetRules, ServoCssRulesStrong,
+                    RawServoStyleSheetBorrowed sheet)
+ SERVO_BINDING_FUNC(Servo_StyleSet_Init, RawServoStyleSetOwned, RawGeckoPresContextOwned pres_context)
+ SERVO_BINDING_FUNC(Servo_StyleSet_RebuildData, void,
+                    RawServoStyleSetBorrowed set)
+ SERVO_BINDING_FUNC(Servo_StyleSet_Drop, void, RawServoStyleSetOwned set)
+diff --git a/layout/style/ServoStyleSheet.cpp b/layout/style/ServoStyleSheet.cpp
+--- a/layout/style/ServoStyleSheet.cpp
++++ b/layout/style/ServoStyleSheet.cpp
+@@ -105,23 +105,24 @@ ServoStyleSheet::ParseSheet(css::Loader*
+ 
+   NS_ConvertUTF16toUTF8 input(aInput);
+   if (!Inner()->mSheet) {
+     auto* mediaList = static_cast<ServoMediaList*>(mMedia.get());
+     RawServoMediaList* media = mediaList ?  &mediaList->RawList() : nullptr;
+ 
+     Inner()->mSheet =
+       Servo_StyleSheet_FromUTF8Bytes(
+-          aLoader, this, &input, mParsingMode, media, extraData).Consume();
++          aLoader, this, &input, mParsingMode, media, extraData, aLineNumber
++      ).Consume();
+   } else {
+     // TODO(emilio): Once we have proper inner cloning (which we don't right
+     // now) we should update the mediaList here too, though it's slightly
+     // tricky.
+     Servo_StyleSheet_ClearAndUpdate(Inner()->mSheet, aLoader,
+-                                    this, &input, extraData);
++                                    this, &input, extraData, aLineNumber);
+   }
+ 
+   Inner()->mURLData = extraData.forget();
+   return NS_OK;
+ }
+ 
+ void
+ ServoStyleSheet::LoadFailed()
+diff --git a/layout/style/test/gtest/StyloParsingBench.cpp b/layout/style/test/gtest/StyloParsingBench.cpp
+--- a/layout/style/test/gtest/StyloParsingBench.cpp
++++ b/layout/style/test/gtest/StyloParsingBench.cpp
+@@ -23,17 +23,17 @@ static void ServoParsingBench() {
+   NS_NAMED_LITERAL_CSTRING(css_, EXAMPLE_STYLESHEET);
+   const nsACString& css = css_;
+   ASSERT_TRUE(IsUTF8(css));
+ 
+   RefPtr<URLExtraData> data = new URLExtraData(
+     NullPrincipalURI::Create(), nullptr, NullPrincipal::Create());
+   for (int i = 0; i < PARSING_REPETITIONS; i++) {
+     RefPtr<RawServoStyleSheet> stylesheet = Servo_StyleSheet_FromUTF8Bytes(
+-      nullptr, nullptr, &css, eAuthorSheetFeatures, nullptr, data
++      nullptr, nullptr, &css, eAuthorSheetFeatures, nullptr, data, 0
+     ).Consume();
+   }
+ }
+ 
+ MOZ_GTEST_BENCH(Stylo, Servo_StyleSheet_FromUTF8Bytes_Bench, ServoParsingBench);
+ 
+ #endif
+ 
+diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/stylesheets.rs
+--- a/servo/components/style/stylesheets.rs
++++ b/servo/components/style/stylesheets.rs
+@@ -645,24 +645,25 @@ impl ToCssWithGuard for StyleRule {
+ pub type FontFaceRule = FontFaceRuleData;
+ 
+ impl Stylesheet {
+     /// Updates an empty stylesheet from a given string of text.
+     pub fn update_from_str(existing: &Stylesheet,
+                            css: &str,
+                            url_data: &UrlExtraData,
+                            stylesheet_loader: Option<&StylesheetLoader>,
+-                           error_reporter: &ParseErrorReporter) {
++                           error_reporter: &ParseErrorReporter,
++                           line_number_offset: u64) {
+         let mut namespaces = Namespaces::default();
+         // FIXME: we really should update existing.url_data with the given url_data,
+         // otherwise newly inserted rule may not have the right base url.
+         let (rules, dirty_on_viewport_size_change) = Stylesheet::parse_rules(
+             css, url_data, existing.origin, &mut namespaces,
+             &existing.shared_lock, stylesheet_loader, error_reporter,
+-            0u64);
++            line_number_offset);
+ 
+         *existing.namespaces.write() = namespaces;
+         existing.dirty_on_viewport_size_change
+             .store(dirty_on_viewport_size_change, Ordering::Release);
+ 
+         // Acquire the lock *after* parsing, to minimize the exclusive section.
+         let mut guard = existing.shared_lock.write();
+         *existing.rules.write_with(&mut guard) = CssRules(rules);
+diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
+--- a/servo/ports/geckolib/glue.rs
++++ b/servo/ports/geckolib/glue.rs
+@@ -516,17 +516,18 @@ pub extern "C" fn Servo_StyleSheet_Empty
+ }
+ 
+ #[no_mangle]
+ pub extern "C" fn Servo_StyleSheet_FromUTF8Bytes(loader: *mut Loader,
+                                                  stylesheet: *mut ServoStyleSheet,
+                                                  data: *const nsACString,
+                                                  mode: SheetParsingMode,
+                                                  media_list: *const RawServoMediaList,
+-                                                 extra_data: *mut URLExtraData)
++                                                 extra_data: *mut URLExtraData,
++                                                 line_number_offset: u32)
+                                                  -> RawServoStyleSheetStrong {
+     let global_style_data = &*GLOBAL_STYLE_DATA;
+     let input = unsafe { data.as_ref().unwrap().as_str_unchecked() };
+ 
+     let origin = match mode {
+         SheetParsingMode::eAuthorSheetFeatures => Origin::Author,
+         SheetParsingMode::eUserSheetFeatures => Origin::User,
+         SheetParsingMode::eAgentSheetFeatures => Origin::UserAgent,
+@@ -548,27 +549,28 @@ pub extern "C" fn Servo_StyleSheet_FromU
+     let shared_lock = global_style_data.shared_lock.clone();
+     let media = if media_list.is_null() {
+         Arc::new(shared_lock.wrap(MediaList::empty()))
+     } else {
+         Locked::<MediaList>::as_arc(unsafe { &&*media_list }).clone()
+     };
+ 
+     Arc::new(Stylesheet::from_str(
+-        input, url_data.clone(), origin, media,
+-        shared_lock, loader, &RustLogReporter, 0u64)
++        input, url_data.clone(), origin, media, shared_lock,
++        loader, &RustLogReporter, line_number_offset as u64)
+     ).into_strong()
+ }
+ 
+ #[no_mangle]
+ pub extern "C" fn Servo_StyleSheet_ClearAndUpdate(stylesheet: RawServoStyleSheetBorrowed,
+                                                   loader: *mut Loader,
+                                                   gecko_stylesheet: *mut ServoStyleSheet,
+                                                   data: *const nsACString,
+-                                                  extra_data: *mut URLExtraData)
++                                                  extra_data: *mut URLExtraData,
++                                                  line_number_offset: u32)
+ {
+     let input = unsafe { data.as_ref().unwrap().as_str_unchecked() };
+     let url_data = unsafe { RefPtr::from_ptr_ref(&extra_data) };
+ 
+     let loader = if loader.is_null() {
+         None
+     } else {
+         Some(StylesheetLoader::new(loader, gecko_stylesheet))
+@@ -576,18 +578,18 @@ pub extern "C" fn Servo_StyleSheet_Clear
+ 
+     // FIXME(emilio): loader.as_ref() doesn't typecheck for some reason?
+     let loader: Option<&StyleStylesheetLoader> = match loader {
+         None => None,
+         Some(ref s) => Some(s),
+     };
+ 
+     let sheet = Stylesheet::as_arc(&stylesheet);
+-    Stylesheet::update_from_str(&sheet, input, url_data,
+-                                loader, &RustLogReporter);
++    Stylesheet::update_from_str(&sheet, input, url_data, loader,
++                                &RustLogReporter, line_number_offset as u64);
+ }
+ 
+ #[no_mangle]
+ pub extern "C" fn Servo_StyleSet_AppendStyleSheet(raw_data: RawServoStyleSetBorrowed,
+                                                   raw_sheet: RawServoStyleSheetBorrowed,
+                                                   flush: bool) {
+     let global_style_data = &*GLOBAL_STYLE_DATA;
+     let guard = global_style_data.shared_lock.read();
