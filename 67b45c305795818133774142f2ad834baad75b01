@@ -3,7 +3,7 @@
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
 # Date 1493130279 -7200
 # Node ID 67b45c305795818133774142f2ad834baad75b01
-# Parent  a30dc237c3a600a5231f2974fc2b85dfb5513414
+# Parent  047db35c91e62824595816c74501d88cb3f73143
 Bug 1350175 - stylo: Support getting line / column number of CSS rules. Part 1: StyleRule. r=xidorn
 
 MozReview-Commit-ID: 6ODvvX5JX7O
@@ -11,7 +11,7 @@ MozReview-Commit-ID: 6ODvvX5JX7O
 diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
 --- a/layout/style/ServoBindingList.h
 +++ b/layout/style/ServoBindingList.h
-@@ -107,16 +107,20 @@ SERVO_BINDING_FUNC(Servo_CssRules_GetFon
+@@ -109,16 +109,20 @@ SERVO_BINDING_FUNC(Servo_CssRules_GetFon
                     ServoCssRulesBorrowed rules, uint32_t index)
  SERVO_BINDING_FUNC(Servo_StyleRule_GetStyle, RawServoDeclarationBlockStrong,
                     RawServoStyleRuleBorrowed rule)
@@ -119,7 +119,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
      where W: fmt::Write {
          // Step 1
          try!(self.selectors.to_css(dest));
-@@ -1195,16 +1196,18 @@ impl<'a, 'b> QualifiedRuleParser for Nes
+@@ -1196,16 +1197,21 @@ impl<'a, 'b> QualifiedRuleParser for Nes
              stylesheet_origin: self.stylesheet_origin,
              namespaces: self.namespaces,
          };
@@ -135,14 +135,17 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
              selectors: prelude,
 -            block: Arc::new(self.shared_lock.wrap(declarations))
 +            block: Arc::new(self.shared_lock.wrap(declarations)),
-+            source_location: location,
++            source_location: SourceLocation {
++                line: location.line + self.context.line_number_offset as usize,
++                column: location.column,
++            }
          }))))
      }
  }
 diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 --- a/servo/ports/geckolib/glue.rs
 +++ b/servo/ports/geckolib/glue.rs
-@@ -834,16 +834,30 @@ pub extern "C" fn Servo_StyleRule_SetSty
+@@ -836,16 +836,30 @@ pub extern "C" fn Servo_StyleRule_SetSty
  #[no_mangle]
  pub extern "C" fn Servo_StyleRule_GetSelectorText(rule: RawServoStyleRuleBorrowed, result: *mut nsAString) {
      read_locked_arc(rule, |rule: &StyleRule| {
