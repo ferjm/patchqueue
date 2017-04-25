@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  cfdacf09fa876e6d75861f7cb5cd0cd47d6d92c1
+# Parent  7733b535c71e999311fc6c6934505141e2beeeeb
 Bug 1350175 - stylo: Support getting line / column number of CSS rules. Part 3: PageStyle. r=xidorn
 
 diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
@@ -50,7 +50,7 @@ diff --git a/layout/style/ServoPageRule.cpp b/layout/style/ServoPageRule.cpp
 diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/stylesheets.rs
 --- a/servo/components/style/stylesheets.rs
 +++ b/servo/components/style/stylesheets.rs
-@@ -601,25 +601,29 @@ impl ToCssWithGuard for SupportsRule {
+@@ -590,25 +590,29 @@ impl ToCssWithGuard for SupportsRule {
      }
  }
  
@@ -82,12 +82,12 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
      }
  }
  
-@@ -1161,21 +1165,23 @@ impl<'a, 'b> AtRuleParser for NestedRule
-             AtRulePrelude::Keyframes(name) => {
+@@ -1172,21 +1176,23 @@ impl<'a, 'b> AtRuleParser for NestedRule
                  let context = ParserContext::new_with_rule_type(self.context, Some(CssRuleType::Keyframes));
                  Ok(CssRule::Keyframes(Arc::new(self.shared_lock.wrap(KeyframesRule {
                      name: name,
                      keyframes: parse_keyframe_list(&context, input, self.shared_lock),
+                     vendor_prefix: prefix,
                  }))))
              }
              AtRulePrelude::Page => {
@@ -112,7 +112,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
 diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 --- a/servo/ports/geckolib/glue.rs
 +++ b/servo/ports/geckolib/glue.rs
-@@ -721,16 +721,47 @@ pub extern "C" fn Servo_CssRules_DeleteR
+@@ -737,16 +737,47 @@ pub extern "C" fn Servo_CssRules_DeleteR
      write_locked_arc(rules, |rules: &mut CssRules| {
          match rules.remove_rule(index as usize) {
              Ok(_) => nsresult::NS_OK,
@@ -160,7 +160,7 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
      } => {
          #[no_mangle]
          pub extern "C" fn $getter(rules: ServoCssRulesBorrowed, index: u32) -> Strong<$raw_type> {
-@@ -818,30 +849,16 @@ pub extern "C" fn Servo_StyleRule_SetSty
+@@ -834,30 +865,16 @@ pub extern "C" fn Servo_StyleRule_SetSty
  #[no_mangle]
  pub extern "C" fn Servo_StyleRule_GetSelectorText(rule: RawServoStyleRuleBorrowed, result: *mut nsAString) {
      read_locked_arc(rule, |rule: &StyleRule| {
@@ -191,7 +191,7 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
  
  #[no_mangle]
  pub extern "C" fn Servo_MediaRule_GetRules(rule: RawServoMediaRuleBorrowed) -> ServoCssRulesStrong {
-@@ -860,26 +877,26 @@ pub extern "C" fn Servo_NamespaceRule_Ge
+@@ -876,26 +893,26 @@ pub extern "C" fn Servo_NamespaceRule_Ge
  #[no_mangle]
  pub extern "C" fn Servo_NamespaceRule_GetURI(rule: RawServoNamespaceRuleBorrowed) -> *mut nsIAtom {
      read_locked_arc(rule, |rule: &NamespaceRule| rule.url.0.as_ptr())
