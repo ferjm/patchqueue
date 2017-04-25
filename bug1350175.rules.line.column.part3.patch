@@ -1,7 +1,7 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  7733b535c71e999311fc6c6934505141e2beeeeb
-Bug 1350175 - stylo: Support getting line / column number of CSS rules. Part 3: PageStyle. r=xidorn
+# Parent  e03ae1c69c91cd695d60d970cbab99fad62ecdc7
+Bug 1350175 - stylo: Support getting line / column number of CSS rules. Part 3: PageRule. r=xidorn
 
 diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
 --- a/layout/style/ServoBindingList.h

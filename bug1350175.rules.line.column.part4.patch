@@ -1,0 +1,5 @@
+# HG changeset patch
+# User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
+# Parent  ad66b5a0cd227cdc15eba5c47a91e2d90be4616e
+Bug 1350175 - stylo: Support getting line / column number of CSS rules. Part 4: NamespaceRule. r=xidorn
+
