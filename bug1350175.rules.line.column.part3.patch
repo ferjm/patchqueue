@@ -1,0 +1,222 @@
+# HG changeset patch
+# User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
+# Parent  e0cd0b645e84d80187e93d2c1f4adb3ae4aec7e1
+Bug 1350175 - stylo: Support getting line / column number of CSS rules. Part 3: PageStyle. r=xidorn
+
+diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
+--- a/layout/style/ServoBindingList.h
++++ b/layout/style/ServoBindingList.h
+@@ -104,16 +104,17 @@ BASIC_RULE_FUNCS(Namespace)
+ BASIC_RULE_FUNCS(Page)
+ #undef BASIC_RULE_FUNCS
+ #define RULE_LOCATION_GETTERS(type_) \
+     SERVO_BINDING_FUNC(Servo_##type_##Rule_GetSourceLine, uint32_t, \
+                        RawServoStyleRuleBorrowed rule) \
+     SERVO_BINDING_FUNC(Servo_##type_##Rule_GetSourceColumn, uint32_t, \
+                        RawServoStyleRuleBorrowed rule)
+ RULE_LOCATION_GETTERS(Style)
++RULE_LOCATION_GETTERS(Page)
+ #undef RULE_LOCATION_GETTERS
+ SERVO_BINDING_FUNC(Servo_CssRules_GetFontFaceRuleAt, nsCSSFontFaceRule*,
+                    ServoCssRulesBorrowed rules, uint32_t index)
+ SERVO_BINDING_FUNC(Servo_StyleRule_GetStyle, RawServoDeclarationBlockStrong,
+                    RawServoStyleRuleBorrowed rule)
+ SERVO_BINDING_FUNC(Servo_StyleRule_SetStyle, void,
+                    RawServoStyleRuleBorrowed rule,
+                    RawServoDeclarationBlockBorrowed declarations)
+diff --git a/layout/style/ServoPageRule.cpp b/layout/style/ServoPageRule.cpp
+--- a/layout/style/ServoPageRule.cpp
++++ b/layout/style/ServoPageRule.cpp
+@@ -100,17 +100,18 @@ URLExtraData*
+ ServoPageRuleDeclaration::GetURLData() const
+ {
+   return GetURLDataForRule(Rule());
+ }
+ 
+ // -- ServoPageRule --------------------------------------------------
+ 
+ ServoPageRule::ServoPageRule(RefPtr<RawServoPageRule> aRawRule)
+-  : CSSPageRule(0, 0)
++  : CSSPageRule(Servo_PageRule_GetSourceLine(aRawValue.take()),
++                Servo_PageRule_GetColumnLine(aRawRule.take()))
+   , mRawRule(Move(aRawRule))
+   , mDecls(Servo_PageRule_GetStyle(mRawRule).Consume())
+ {
+ }
+ 
+ ServoPageRule::~ServoPageRule()
+ {
+ }
+diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/stylesheets.rs
+--- a/servo/components/style/stylesheets.rs
++++ b/servo/components/style/stylesheets.rs
+@@ -601,25 +601,29 @@ impl ToCssWithGuard for SupportsRule {
+     }
+ }
+ 
+ /// A [`@page`][page] rule.  This implements only a limited subset of the CSS 2.2 syntax.  In this
+ /// subset, [page selectors][page-selectors] are not implemented.
+ ///
+ /// [page]: https://drafts.csswg.org/css2/page.html#page-box
+ /// [page-selectors]: https://drafts.csswg.org/css2/page.html#page-selectors
++#[allow(missing_docs)]
+ #[derive(Debug)]
+-pub struct PageRule(pub Arc<Locked<PropertyDeclarationBlock>>);
++pub struct PageRule {
++    pub block: Arc<Locked<PropertyDeclarationBlock>>,
++    pub source_location: SourceLocation,
++}
+ 
+ impl ToCssWithGuard for PageRule {
+     // Serialization of PageRule is not specced, adapted from steps for StyleRule.
+     fn to_css<W>(&self, guard: &SharedRwLockReadGuard, dest: &mut W) -> fmt::Result
+     where W: fmt::Write {
+         dest.write_str("@page { ")?;
+-        let declaration_block = self.0.read_with(guard);
++        let declaration_block = self.block.read_with(guard);
+         declaration_block.to_css(dest)?;
+         if declaration_block.declarations().len() > 0 {
+             write!(dest, " ")?;
+         }
+         dest.write_str("}")
+     }
+ }
+ 
+@@ -1161,21 +1165,23 @@ impl<'a, 'b> AtRuleParser for NestedRule
+             AtRulePrelude::Keyframes(name) => {
+                 let context = ParserContext::new_with_rule_type(self.context, Some(CssRuleType::Keyframes));
+                 Ok(CssRule::Keyframes(Arc::new(self.shared_lock.wrap(KeyframesRule {
+                     name: name,
+                     keyframes: parse_keyframe_list(&context, input, self.shared_lock),
+                 }))))
+             }
+             AtRulePrelude::Page => {
++                let location = input.current_source_location();
+                 let context = ParserContext::new_with_rule_type(self.context, Some(CssRuleType::Page));
+                 let declarations = parse_property_declaration_list(&context, input);
+-                Ok(CssRule::Page(Arc::new(self.shared_lock.wrap(PageRule(
+-                    Arc::new(self.shared_lock.wrap(declarations))
+-                )))))
++                Ok(CssRule::Page(Arc::new(self.shared_lock.wrap(PageRule {
++                    block: Arc::new(self.shared_lock.wrap(declarations)),
++                    source_location: location,
++                }))))
+             }
+         }
+     }
+ }
+ 
+ impl<'a, 'b> QualifiedRuleParser for NestedRuleParser<'a, 'b> {
+     type Prelude = SelectorList<SelectorImpl>;
+     type QualifiedRule = CssRule;
+diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
+--- a/servo/ports/geckolib/glue.rs
++++ b/servo/ports/geckolib/glue.rs
+@@ -721,16 +721,47 @@ pub extern "C" fn Servo_CssRules_DeleteR
+     write_locked_arc(rules, |rules: &mut CssRules| {
+         match rules.remove_rule(index as usize) {
+             Ok(_) => nsresult::NS_OK,
+             Err(err) => err.into()
+         }
+     })
+ }
+ 
++macro_rules! impl_rule_location_getters {
++    { ($rule_type:ty, $raw_type:ty),
++        line_getter: $line_getter:ident,
++        column_getter: $column_getter:ident,
++    } => {
++        #[no_mangle]
++        pub extern "C" fn $line_getter(rule: $raw_type) -> u32 {
++            read_locked_arc(rule, |rule: &$rule_type| {
++                rule.source_location.line as u32
++            })
++        }
++
++        #[no_mangle]
++        pub extern "C" fn $column_getter(rule: $raw_type) -> u32 {
++            read_locked_arc(rule, |rule: &$rule_type| {
++                rule.source_location.column as u32
++            })
++        }
++    }
++}
++
++impl_rule_location_getters! { (StyleRule, RawServoStyleRuleBorrowed),
++    line_getter: Servo_StyleRule_GetSourceLine,
++    column_getter: Servo_StyleRule_GetSourceColumn,
++}
++
++impl_rule_location_getters! { (PageRule, RawServoPageRuleBorrowed),
++    line_getter: Servo_PageRule_GetSourceLine,
++    column_getter: Servo_PageRule_GetSourceColumn,
++}
++
+ macro_rules! impl_basic_rule_funcs {
+     { ($name:ident, $rule_type:ty, $raw_type:ty),
+         getter: $getter:ident,
+         debug: $debug:ident,
+         to_css: $to_css:ident,
+     } => {
+         #[no_mangle]
+         pub extern "C" fn $getter(rules: ServoCssRulesBorrowed, index: u32) -> Strong<$raw_type> {
+@@ -818,30 +849,16 @@ pub extern "C" fn Servo_StyleRule_SetSty
+ #[no_mangle]
+ pub extern "C" fn Servo_StyleRule_GetSelectorText(rule: RawServoStyleRuleBorrowed, result: *mut nsAString) {
+     read_locked_arc(rule, |rule: &StyleRule| {
+         rule.selectors.to_css(unsafe { result.as_mut().unwrap() }).unwrap();
+     })
+ }
+ 
+ #[no_mangle]
+-pub extern "C" fn Servo_StyleRule_GetSourceLine(rule: RawServoStyleRuleBorrowed) -> u32 {
+-    read_locked_arc(rule, |rule: &StyleRule| {
+-        rule.source_location.line as u32
+-    })
+-}
+-
+-#[no_mangle]
+-pub extern "C" fn Servo_StyleRule_GetSourceColumn(rule: RawServoStyleRuleBorrowed) -> u32 {
+-    read_locked_arc(rule, |rule: &StyleRule| {
+-        rule.source_location.column as u32
+-    })
+-}
+-
+-#[no_mangle]
+ pub extern "C" fn Servo_MediaRule_GetMedia(rule: RawServoMediaRuleBorrowed) -> RawServoMediaListStrong {
+     read_locked_arc(rule, |rule: &MediaRule| {
+         rule.media_queries.clone().into_strong()
+     })
+ }
+ 
+ #[no_mangle]
+ pub extern "C" fn Servo_MediaRule_GetRules(rule: RawServoMediaRuleBorrowed) -> ServoCssRulesStrong {
+@@ -860,26 +877,26 @@ pub extern "C" fn Servo_NamespaceRule_Ge
+ #[no_mangle]
+ pub extern "C" fn Servo_NamespaceRule_GetURI(rule: RawServoNamespaceRuleBorrowed) -> *mut nsIAtom {
+     read_locked_arc(rule, |rule: &NamespaceRule| rule.url.0.as_ptr())
+ }
+ 
+ #[no_mangle]
+ pub extern "C" fn Servo_PageRule_GetStyle(rule: RawServoPageRuleBorrowed) -> RawServoDeclarationBlockStrong {
+     read_locked_arc(rule, |rule: &PageRule| {
+-        rule.0.clone().into_strong()
++        rule.block.clone().into_strong()
+     })
+ }
+ 
+ #[no_mangle]
+ pub extern "C" fn Servo_PageRule_SetStyle(rule: RawServoPageRuleBorrowed,
+                                            declarations: RawServoDeclarationBlockBorrowed) {
+     let declarations = Locked::<PropertyDeclarationBlock>::as_arc(&declarations);
+     write_locked_arc(rule, |rule: &mut PageRule| {
+-        rule.0 = declarations.clone();
++        rule.block = declarations.clone();
+     })
+ }
+ 
+ #[no_mangle]
+ pub extern "C" fn Servo_ComputedValues_GetForAnonymousBox(parent_style_or_null: ServoComputedValuesBorrowedOrNull,
+                                                           pseudo_tag: *mut nsIAtom,
+                                                           skip_display_fixup: bool,
+                                                           raw_data: RawServoStyleSetBorrowed)
