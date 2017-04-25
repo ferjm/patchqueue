@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  e0cd0b645e84d80187e93d2c1f4adb3ae4aec7e1
+# Parent  cfdacf09fa876e6d75861f7cb5cd0cd47d6d92c1
 Bug 1350175 - stylo: Support getting line / column number of CSS rules. Part 3: PageStyle. r=xidorn
 
 diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
@@ -11,9 +11,9 @@ diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
  #undef BASIC_RULE_FUNCS
  #define RULE_LOCATION_GETTERS(type_) \
      SERVO_BINDING_FUNC(Servo_##type_##Rule_GetSourceLine, uint32_t, \
-                        RawServoStyleRuleBorrowed rule) \
+                        RawServo##type_##RuleBorrowed rule) \
      SERVO_BINDING_FUNC(Servo_##type_##Rule_GetSourceColumn, uint32_t, \
-                        RawServoStyleRuleBorrowed rule)
+                        RawServo##type_##RuleBorrowed rule)
  RULE_LOCATION_GETTERS(Style)
 +RULE_LOCATION_GETTERS(Page)
  #undef RULE_LOCATION_GETTERS
