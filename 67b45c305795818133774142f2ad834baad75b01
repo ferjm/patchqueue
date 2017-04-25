@@ -47,8 +47,8 @@ diff --git a/layout/style/ServoStyleRule.cpp b/layout/style/ServoStyleRule.cpp
 -ServoStyleRule::ServoStyleRule(already_AddRefed<RawServoStyleRule> aRawRule)
 -  : BindingStyleRule(0, 0)
 +ServoStyleRule::ServoStyleRule(RefPtr<RawServoStyleRule> aRawRule)
-+  : BindingStyleRule(Servo_StyleRule_GetSourceLine(aRawRule.take()),
-+                     Servo_StyleRule_GetSourceColumn(aRawRule.take()))
++  : BindingStyleRule(Servo_StyleRule_GetSourceLine(aRawRule),
++                     Servo_StyleRule_GetSourceColumn(aRawRule))
    , mRawRule(aRawRule)
    , mDecls(Servo_StyleRule_GetStyle(mRawRule).Consume())
  {
