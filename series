@@ -1,4 +1,5 @@
 bug1350175.rules.line.column.patch
+bug1350175.rules.line.column.part2.patch
 #e9d9fecc28566629dbb2794e2aebd9b8c5ee6255
 bug1217544.background.sync.part1.webidl.patch
 bug1217544.background.sync.part2.serviceworkerregistration.patch

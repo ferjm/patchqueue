@@ -1,0 +1,45 @@
+# HG changeset patch
+# User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
+# Parent  2d1b6defa96fc2f627089e63915931be45c11b98
+Bug 1350175 - stylo: Support getting line / column number of CSS rules. Part 2: Introduce RULE_LOCATION_GETTERS. r=xidorn
+
+diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
+--- a/layout/style/ServoBindingList.h
++++ b/layout/style/ServoBindingList.h
+@@ -98,29 +98,32 @@ SERVO_BINDING_FUNC(Servo_CssRules_Delete
+                      RawServo##type_##RuleBorrowed rule, nsACString* result) \
+   SERVO_BINDING_FUNC(Servo_##type_##Rule_GetCssText, void, \
+                      RawServo##type_##RuleBorrowed rule, nsAString* result)
+ BASIC_RULE_FUNCS(Style)
+ BASIC_RULE_FUNCS(Media)
+ BASIC_RULE_FUNCS(Namespace)
+ BASIC_RULE_FUNCS(Page)
+ #undef BASIC_RULE_FUNCS
++#define RULE_LOCATION_GETTERS(type_) \
++    SERVO_BINDING_FUNC(Servo_##type_##Rule_GetSourceLine, uint32_t, \
++                       RawServoStyleRuleBorrowed rule) \
++    SERVO_BINDING_FUNC(Servo_##type_##Rule_GetSourceColumn, uint32_t, \
++                       RawServoStyleRuleBorrowed rule)
++RULE_LOCATION_GETTERS(Style)
++#undef RULE_LOCATION_GETTERS
+ SERVO_BINDING_FUNC(Servo_CssRules_GetFontFaceRuleAt, nsCSSFontFaceRule*,
+                    ServoCssRulesBorrowed rules, uint32_t index)
+ SERVO_BINDING_FUNC(Servo_StyleRule_GetStyle, RawServoDeclarationBlockStrong,
+                    RawServoStyleRuleBorrowed rule)
+ SERVO_BINDING_FUNC(Servo_StyleRule_SetStyle, void,
+                    RawServoStyleRuleBorrowed rule,
+                    RawServoDeclarationBlockBorrowed declarations)
+ SERVO_BINDING_FUNC(Servo_StyleRule_GetSelectorText, void,
+                    RawServoStyleRuleBorrowed rule, nsAString* result)
+-SERVO_BINDING_FUNC(Servo_StyleRule_GetSourceLine, uint32_t,
+-                   RawServoStyleRuleBorrowed rule)
+-SERVO_BINDING_FUNC(Servo_StyleRule_GetSourceColumn, uint32_t,
+-                   RawServoStyleRuleBorrowed rule)
+ SERVO_BINDING_FUNC(Servo_MediaRule_GetMedia, RawServoMediaListStrong,
+                    RawServoMediaRuleBorrowed rule)
+ SERVO_BINDING_FUNC(Servo_MediaRule_GetRules, ServoCssRulesStrong,
+                    RawServoMediaRuleBorrowed rule)
+ SERVO_BINDING_FUNC(Servo_NamespaceRule_GetPrefix, nsIAtom*,
+                    RawServoNamespaceRuleBorrowed rule)
+ SERVO_BINDING_FUNC(Servo_NamespaceRule_GetURI, nsIAtom*,
+                    RawServoNamespaceRuleBorrowed rule)
