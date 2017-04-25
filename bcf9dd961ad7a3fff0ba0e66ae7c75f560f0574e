@@ -3,7 +3,7 @@
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
 # Date 1493130279 -7200
 # Node ID bcf9dd961ad7a3fff0ba0e66ae7c75f560f0574e
-# Parent  d18be52c1b4c3c43d71e30da648081099941a14a
+# Parent  4dcc46923bb44e00ab2fa62c15fa79cf37f65ae5
 Bug 1350175 - stylo: Support getting line / column number of CSS rules. Part 3: PageRule. r=xidorn
 
 MozReview-Commit-ID: 8Mnz51icFXz
@@ -124,7 +124,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
              selectors: prelude,
              block: Arc::new(self.shared_lock.wrap(declarations)),
              source_location: SourceLocation {
-                 line: location.line + self.context.line_number_offset as usize,
+                 line: location.line + self.context.line_number_offset as usize - 1,
                  column: location.column,
 -            }
 +            },
