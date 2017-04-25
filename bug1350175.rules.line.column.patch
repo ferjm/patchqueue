@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  27311156637f9b5d4504373967e01c4241902ae7
+# Parent  a30dc237c3a600a5231f2974fc2b85dfb5513414
 Bug 1350175 - stylo: Support getting line / column number of CSS rules. Part 1: StyleRule. r=xidorn
 
 diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
@@ -64,15 +64,15 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
  use {Atom, Prefix, Namespace};
 -use cssparser::{AtRuleParser, Parser, QualifiedRuleParser};
 +use cssparser::{AtRuleParser, Parser, QualifiedRuleParser, SourceLocation};
- use cssparser::{AtRuleType, RuleListParser, SourcePosition, Token, parse_one_rule};
+ use cssparser::{AtRuleType, RuleListParser, Token, parse_one_rule};
  use cssparser::ToCss as ParserToCss;
- use error_reporting::ParseErrorReporter;
+ use error_reporting::{ParseErrorReporter, NullReporter};
  #[cfg(feature = "servo")]
  use font_face::FontFaceRuleData;
  use font_face::parse_font_face_block;
  #[cfg(feature = "gecko")]
  pub use gecko::rules::FontFaceRule;
-@@ -623,16 +623,17 @@ impl ToCssWithGuard for PageRule {
+@@ -612,16 +612,17 @@ impl ToCssWithGuard for PageRule {
      }
  }
  
@@ -90,7 +90,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
      where W: fmt::Write {
          // Step 1
          try!(self.selectors.to_css(dest));
-@@ -1184,16 +1185,18 @@ impl<'a, 'b> QualifiedRuleParser for Nes
+@@ -1195,16 +1196,18 @@ impl<'a, 'b> QualifiedRuleParser for Nes
              stylesheet_origin: self.stylesheet_origin,
              namespaces: self.namespaces,
          };
@@ -113,7 +113,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
 diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 --- a/servo/ports/geckolib/glue.rs
 +++ b/servo/ports/geckolib/glue.rs
-@@ -818,16 +818,30 @@ pub extern "C" fn Servo_StyleRule_SetSty
+@@ -834,16 +834,30 @@ pub extern "C" fn Servo_StyleRule_SetSty
  #[no_mangle]
  pub extern "C" fn Servo_StyleRule_GetSelectorText(rule: RawServoStyleRuleBorrowed, result: *mut nsAString) {
      read_locked_arc(rule, |rule: &StyleRule| {
