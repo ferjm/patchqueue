@@ -3,3 +3,49 @@
 # Parent  4e07d801447f81a48ffd8d718857f32e7cba908f
 Bug 1350175 - stylo: Support getting line / column number of CSS rules. Part 5: MediaRule. r=xidorn
 
+diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/stylesheets.rs
+--- a/servo/components/style/stylesheets.rs
++++ b/servo/components/style/stylesheets.rs
+@@ -542,16 +542,17 @@ impl ToCssWithGuard for KeyframesRule {
+     }
+ }
+ 
+ #[allow(missing_docs)]
+ #[derive(Debug)]
+ pub struct MediaRule {
+     pub media_queries: Arc<Locked<MediaList>>,
+     pub rules: Arc<Locked<CssRules>>,
++    source_location: SourceLocation,
+ }
+ 
+ impl ToCssWithGuard for MediaRule {
+     // Serialization of MediaRule is not specced.
+     // https://drafts.csswg.org/cssom/#serialize-a-css-rule CSSMediaRule
+     fn to_css<W>(&self, guard: &SharedRwLockReadGuard, dest: &mut W) -> fmt::Result
+     where W: fmt::Write {
+         try!(dest.write_str("@media "));
+@@ -1157,19 +1158,24 @@ impl<'a, 'b> AtRuleParser for NestedRule
+     fn parse_block(&mut self, prelude: AtRulePrelude, input: &mut Parser) -> Result<CssRule, ()> {
+         match prelude {
+             AtRulePrelude::FontFace => {
+                 let context = ParserContext::new_with_rule_type(self.context, Some(CssRuleType::FontFace));
+                 Ok(CssRule::FontFace(Arc::new(self.shared_lock.wrap(
+                    parse_font_face_block(&context, input).into()))))
+             }
+             AtRulePrelude::Media(media_queries) => {
++                let location = input.current_source_location();
+                 Ok(CssRule::Media(Arc::new(self.shared_lock.wrap(MediaRule {
+                     media_queries: media_queries,
+                     rules: self.parse_nested_rules(input, CssRuleType::Media),
++                    source_location: SourceLocation {
++                        line: location.line + self.context.line_number_offset as usize - 1,
++                        column: location.column,
++                    },
+                 }))))
+             }
+             AtRulePrelude::Supports(cond) => {
+                 let enabled = cond.eval(self.context);
+                 Ok(CssRule::Supports(Arc::new(self.shared_lock.wrap(SupportsRule {
+                     condition: cond,
+                     rules: self.parse_nested_rules(input, CssRuleType::Supports),
+                     enabled: enabled,
