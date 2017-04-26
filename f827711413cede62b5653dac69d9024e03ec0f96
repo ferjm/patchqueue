@@ -4,9 +4,7 @@
 # Date 1493130279 -7200
 # Node ID f827711413cede62b5653dac69d9024e03ec0f96
 # Parent  59f24155fad1486940303a2a5db859ca1c4709ac
-Bug 1350175 - stylo: Support getting line / column number of CSS rules. Part 1: StyleRule. r=xidorn
-
-MozReview-Commit-ID: 6ODvvX5JX7O
+Bug 1350175 - stylo: Support getting line / column number of CSS rules. Part 1: FFI changes to get line and column. r=xidorn
 
 diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
 --- a/layout/style/ServoBindingList.h
