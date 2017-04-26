@@ -3,6 +3,155 @@
 # Parent  5e4611910f5f54f93a4894a6926c7ba75880b813
 Bug 1350175 - Set source position for StyleRule, PageRule, NamespaceRule, MediaRule and FontFaceRule. r?SimonSapin
 
+diff --git a/layout/style/ServoBindings.cpp b/layout/style/ServoBindings.cpp
+--- a/layout/style/ServoBindings.cpp
++++ b/layout/style/ServoBindings.cpp
+@@ -1871,19 +1871,19 @@ Gecko_CSSKeywordString(nsCSSKeyword aKey
+   MOZ_ASSERT(NS_IsMainThread());
+   MOZ_ASSERT(aLength);
+   const nsAFlatCString& value = nsCSSKeywords::GetStringValue(aKeyword);
+   *aLength = value.Length();
+   return value.get();
+ }
+ 
+ nsCSSFontFaceRule*
+-Gecko_CSSFontFaceRule_Create()
++Gecko_CSSFontFaceRule_Create(uint32_t aLine, uint32_t aColumn)
+ {
+-  RefPtr<nsCSSFontFaceRule> rule = new nsCSSFontFaceRule(0, 0);
++  RefPtr<nsCSSFontFaceRule> rule = new nsCSSFontFaceRule(aLine, aColumn);
+   return rule.forget().take();
+ }
+ 
+ void
+ Gecko_CSSFontFaceRule_GetCssText(const nsCSSFontFaceRule* aRule,
+                                  nsAString* aResult)
+ {
+   // GetCSSText serializes nsCSSValues, which have a heap write
+diff --git a/layout/style/ServoBindings.h b/layout/style/ServoBindings.h
+--- a/layout/style/ServoBindings.h
++++ b/layout/style/ServoBindings.h
+@@ -449,17 +449,17 @@ void InitializeServo();
+ void ShutdownServo();
+ 
+ const nsMediaFeature* Gecko_GetMediaFeatures();
+ nsCSSKeyword Gecko_LookupCSSKeyword(const uint8_t* string, uint32_t len);
+ const char* Gecko_CSSKeywordString(nsCSSKeyword keyword, uint32_t* len);
+ 
+ // Font face rule
+ // Creates and returns a new (already-addrefed) nsCSSFontFaceRule object.
+-nsCSSFontFaceRule* Gecko_CSSFontFaceRule_Create();
++nsCSSFontFaceRule* Gecko_CSSFontFaceRule_Create(uint32_t line, uint32_t column);
+ void Gecko_CSSFontFaceRule_GetCssText(const nsCSSFontFaceRule* rule, nsAString* result);
+ NS_DECL_FFI_REFCOUNTING(nsCSSFontFaceRule, CSSFontFaceRule);
+ 
+ RawGeckoElementBorrowedOrNull Gecko_GetBody(RawGeckoPresContextBorrowed pres_context);
+ 
+ // We use an int32_t here instead of a LookAndFeel::ColorID
+ // because forward-declaring a nested enum/struct is impossible
+ nscolor Gecko_GetLookAndFeelSystemColor(int32_t color_id,
+diff --git a/servo/components/style/font_face.rs b/servo/components/style/font_face.rs
+--- a/servo/components/style/font_face.rs
++++ b/servo/components/style/font_face.rs
+@@ -7,21 +7,23 @@
+ //! [ff]: https://drafts.csswg.org/css-fonts/#at-font-face-rule
+ 
+ #![deny(missing_docs)]
+ 
+ #[cfg(feature = "gecko")]
+ use computed_values::{font_style, font_weight, font_stretch};
+ use computed_values::font_family::FamilyName;
+ use cssparser::{AtRuleParser, DeclarationListParser, DeclarationParser, Parser};
++use cssparser::SourceLocation;
+ #[cfg(feature = "gecko")] use gecko_bindings::structs::CSSFontFaceDescriptors;
+ #[cfg(feature = "gecko")] use cssparser::UnicodeRange;
+ use parser::{ParserContext, log_css_error, Parse};
+ use shared_lock::{SharedRwLockReadGuard, ToCssWithGuard};
+ use std::fmt;
++use stylesheets::get_location_with_offset;
+ use style_traits::{ToCss, OneOrMoreCommaSeparated};
+ use values::specified::url::SpecifiedUrl;
+ 
+ /// A source for a font-face rule.
+ #[derive(Clone, Debug, PartialEq, Eq)]
+ #[cfg_attr(feature = "servo", derive(Deserialize, Serialize))]
+ pub enum Source {
+     /// A `url()` source.
+@@ -181,24 +183,30 @@ macro_rules! font_face_descriptors_commo
+         ///
+         /// https://drafts.csswg.org/css-fonts/#font-face-rule
+         #[derive(Debug, PartialEq, Eq)]
+         pub struct FontFaceRuleData {
+             $(
+                 #[$doc]
+                 pub $ident: Option<$ty>,
+             )*
++            /// Line and column of the @font-face rule source code.
++            pub source_location: SourceLocation,
+         }
+ 
+         impl FontFaceRuleData {
+             fn empty() -> Self {
+                 FontFaceRuleData {
+                     $(
+                         $ident: None,
+                     )*
++                    source_location: SourceLocation {
++                        line: 0,
++                        column: 0,
++                    },
+                 }
+             }
+ 
+             /// Convert to Gecko types
+             #[cfg(feature = "gecko")]
+             pub fn set_descriptors(&self, descriptors: &mut CSSFontFaceDescriptors) {
+                 $(
+                     if let Some(ref value) = self.$ident {
+@@ -226,16 +234,19 @@ macro_rules! font_face_descriptors_commo
+                 dest.write_str("}")
+             }
+         }
+ 
+        impl<'a, 'b> DeclarationParser for FontFaceRuleParser<'a, 'b> {
+             type Declaration = ();
+ 
+             fn parse_value(&mut self, name: &str, input: &mut Parser) -> Result<(), ()> {
++                let location = input.current_source_location();
++                self.rule.source_location = get_location_with_offset(location,
++                                                                     self.context.line_number_offset);
+                 match_ignore_ascii_case! { name,
+                     $(
+                         $name => {
+                             // DeclarationParser also calls parse_entirely
+                             // so we’d normally not need to,
+                             // but in this case we do because we set the value as a side effect
+                             // rather than returning it.
+                             let value = input.parse_entirely(|i| Parse::parse(self.context, i))?;
+diff --git a/servo/components/style/gecko/rules.rs b/servo/components/style/gecko/rules.rs
+--- a/servo/components/style/gecko/rules.rs
++++ b/servo/components/style/gecko/rules.rs
+@@ -111,17 +111,19 @@ impl ToNsCssValue for Vec<UnicodeRange> 
+             target[1].set_integer(range.end as i32);
+         }
+     }
+ }
+ 
+ impl From<FontFaceRuleData> for FontFaceRule {
+     fn from(data: FontFaceRuleData) -> FontFaceRule {
+         let mut result = unsafe {
+-            UniqueRefPtr::from_addrefed(bindings::Gecko_CSSFontFaceRule_Create())
++            UniqueRefPtr::from_addrefed(bindings::Gecko_CSSFontFaceRule_Create(
++                data.source_location.line as u32, data.source_location.column as u32
++            ))
+         };
+         data.set_descriptors(&mut result.mDecl.mDescriptors);
+         result.get()
+     }
+ }
+ 
+ impl ToCssWithGuard for FontFaceRule {
+     fn to_css<W>(&self, _guard: &SharedRwLockReadGuard, dest: &mut W) -> fmt::Result
 diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/stylesheets.rs
 --- a/servo/components/style/stylesheets.rs
 +++ b/servo/components/style/stylesheets.rs
@@ -25,7 +174,86 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
  use font_face::parse_font_face_block;
  #[cfg(feature = "gecko")]
  pub use gecko::rules::FontFaceRule;
-@@ -612,16 +612,17 @@ impl ToCssWithGuard for PageRule {
+@@ -449,22 +449,32 @@ impl ToCssWithGuard for CssRule {
+             CssRule::Keyframes(ref lock) => lock.read_with(guard).to_css(guard, dest),
+             CssRule::Media(ref lock) => lock.read_with(guard).to_css(guard, dest),
+             CssRule::Supports(ref lock) => lock.read_with(guard).to_css(guard, dest),
+             CssRule::Page(ref lock) => lock.read_with(guard).to_css(guard, dest),
+         }
+     }
+ }
+ 
++/// Calculates the location of a rule's source given an offset.
++pub fn get_location_with_offset(location: SourceLocation, offset: u64)
++    -> SourceLocation {
++    SourceLocation {
++        line: location.line + offset as usize - 1,
++        column: location.column,
++    }
++}
++
+ #[derive(Debug, PartialEq)]
+ #[allow(missing_docs)]
+ pub struct NamespaceRule {
+     /// `None` for the default Namespace
+     pub prefix: Option<Prefix>,
+     pub url: Namespace,
++    pub source_location: SourceLocation,
+ }
+ 
+ impl ToCssWithGuard for NamespaceRule {
+     // https://drafts.csswg.org/cssom/#serialize-a-css-rule CSSNamespaceRule
+     fn to_css<W>(&self, _guard: &SharedRwLockReadGuard, dest: &mut W) -> fmt::Result
+     where W: fmt::Write {
+         try!(dest.write_str("@namespace "));
+         if let Some(ref prefix) = self.prefix {
+@@ -541,16 +551,17 @@ impl ToCssWithGuard for KeyframesRule {
+     }
+ }
+ 
+ #[allow(missing_docs)]
+ #[derive(Debug)]
+ pub struct MediaRule {
+     pub media_queries: Arc<Locked<MediaList>>,
+     pub rules: Arc<Locked<CssRules>>,
++    pub source_location: SourceLocation,
+ }
+ 
+ impl ToCssWithGuard for MediaRule {
+     // Serialization of MediaRule is not specced.
+     // https://drafts.csswg.org/cssom/#serialize-a-css-rule CSSMediaRule
+     fn to_css<W>(&self, guard: &SharedRwLockReadGuard, dest: &mut W) -> fmt::Result
+     where W: fmt::Write {
+         try!(dest.write_str("@media "));
+@@ -590,38 +601,43 @@ impl ToCssWithGuard for SupportsRule {
+     }
+ }
+ 
+ /// A [`@page`][page] rule.  This implements only a limited subset of the CSS 2.2 syntax.  In this
+ /// subset, [page selectors][page-selectors] are not implemented.
+ ///
+ /// [page]: https://drafts.csswg.org/css2/page.html#page-box
+ /// [page-selectors]: https://drafts.csswg.org/css2/page.html#page-selectors
++#[allow(missing_docs)]
+ #[derive(Debug)]
+-pub struct PageRule(pub Arc<Locked<PropertyDeclarationBlock>>);
++pub struct PageRule {
++    pub block: Arc<Locked<PropertyDeclarationBlock>>,
++    pub source_location: SourceLocation,
++}
+ 
+ impl ToCssWithGuard for PageRule {
+     // Serialization of PageRule is not specced, adapted from steps for StyleRule.
+     fn to_css<W>(&self, guard: &SharedRwLockReadGuard, dest: &mut W) -> fmt::Result
+     where W: fmt::Write {
+         dest.write_str("@page { ")?;
+-        let declaration_block = self.0.read_with(guard);
++        let declaration_block = self.block.read_with(guard);
+         declaration_block.to_css(dest)?;
+         if declaration_block.declarations().len() > 0 {
+             write!(dest, " ")?;
+         }
+         dest.write_str("}")
      }
  }
  
@@ -43,7 +271,95 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
      where W: fmt::Write {
          // Step 1
          try!(self.selectors.to_css(dest));
-@@ -1196,16 +1197,21 @@ impl<'a, 'b> QualifiedRuleParser for Nes
+@@ -975,32 +991,36 @@ impl<'a> AtRuleParser for TopLevelRulePa
+                     self.state.set(State::Invalid);
+                     return Err(())  // "@import must be before any rule but @charset"
+                 }
+             },
+             "namespace" => {
+                 if self.state.get() <= State::Namespaces {
+                     self.state.set(State::Namespaces);
+ 
++                    let location = input.current_source_location();
++
+                     let prefix_result = input.try(|input| input.expect_ident());
+                     let url = Namespace::from(try!(input.expect_url_or_string()));
+ 
+                     let opt_prefix = if let Ok(prefix) = prefix_result {
+                         let prefix = Prefix::from(prefix);
+                         self.namespaces.prefixes.insert(prefix.clone(), url.clone());
+                         Some(prefix)
+                     } else {
+                         self.namespaces.default = Some(url.clone());
+                         None
+                     };
+ 
+                     return Ok(AtRuleType::WithoutBlock(CssRule::Namespace(Arc::new(
+                         self.shared_lock.wrap(NamespaceRule {
+                             prefix: opt_prefix,
+                             url: url,
++                            source_location: get_location_with_offset(location,
++                                                                      self.context.line_number_offset),
+                         })
+                     ))))
+                 } else {
+                     self.state.set(State::Invalid);
+                     return Err(())  // "@namespace must be before any rule but @charset and @import"
+                 }
+             },
+             // @charset is removed by rust-cssparser if it’s the first rule in the stylesheet
+@@ -1145,19 +1165,22 @@ impl<'a, 'b> AtRuleParser for NestedRule
+     fn parse_block(&mut self, prelude: AtRulePrelude, input: &mut Parser) -> Result<CssRule, ()> {
+         match prelude {
+             AtRulePrelude::FontFace => {
+                 let context = ParserContext::new_with_rule_type(self.context, Some(CssRuleType::FontFace));
+                 Ok(CssRule::FontFace(Arc::new(self.shared_lock.wrap(
+                    parse_font_face_block(&context, input).into()))))
+             }
+             AtRulePrelude::Media(media_queries) => {
++                let location = input.current_source_location();
+                 Ok(CssRule::Media(Arc::new(self.shared_lock.wrap(MediaRule {
+                     media_queries: media_queries,
+                     rules: self.parse_nested_rules(input, CssRuleType::Media),
++                    source_location: get_location_with_offset(location,
++                                                              self.context.line_number_offset),
+                 }))))
+             }
+             AtRulePrelude::Supports(cond) => {
+                 let enabled = cond.eval(self.context);
+                 Ok(CssRule::Supports(Arc::new(self.shared_lock.wrap(SupportsRule {
+                     condition: cond,
+                     rules: self.parse_nested_rules(input, CssRuleType::Supports),
+                     enabled: enabled,
+@@ -1172,21 +1195,24 @@ impl<'a, 'b> AtRuleParser for NestedRule
+                 let context = ParserContext::new_with_rule_type(self.context, Some(CssRuleType::Keyframes));
+                 Ok(CssRule::Keyframes(Arc::new(self.shared_lock.wrap(KeyframesRule {
+                     name: name,
+                     keyframes: parse_keyframe_list(&context, input, self.shared_lock),
+                     vendor_prefix: prefix,
+                 }))))
+             }
+             AtRulePrelude::Page => {
++                let location = input.current_source_location();
+                 let context = ParserContext::new_with_rule_type(self.context, Some(CssRuleType::Page));
+                 let declarations = parse_property_declaration_list(&context, input);
+-                Ok(CssRule::Page(Arc::new(self.shared_lock.wrap(PageRule(
+-                    Arc::new(self.shared_lock.wrap(declarations))
+-                )))))
++                Ok(CssRule::Page(Arc::new(self.shared_lock.wrap(PageRule {
++                    block: Arc::new(self.shared_lock.wrap(declarations)),
++                    source_location: get_location_with_offset(location,
++                                                              self.context.line_number_offset),
++                }))))
+             }
+         }
+     }
+ }
+ 
+ impl<'a, 'b> QualifiedRuleParser for NestedRuleParser<'a, 'b> {
+     type Prelude = SelectorList<SelectorImpl>;
+     type QualifiedRule = CssRule;
+@@ -1196,16 +1222,19 @@ impl<'a, 'b> QualifiedRuleParser for Nes
              stylesheet_origin: self.stylesheet_origin,
              namespaces: self.namespaces,
          };
@@ -59,10 +375,40 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
              selectors: prelude,
 -            block: Arc::new(self.shared_lock.wrap(declarations))
 +            block: Arc::new(self.shared_lock.wrap(declarations)),
-+            source_location: SourceLocation {
-+                line: location.line + self.context.line_number_offset as usize - 1,
-+                column: location.column,
-+            }
++            source_location: get_location_with_offset(location,
++                                                      self.context.line_number_offset),
          }))))
      }
  }
+diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
+--- a/servo/ports/geckolib/glue.rs
++++ b/servo/ports/geckolib/glue.rs
+@@ -869,26 +869,26 @@ pub extern "C" fn Servo_NamespaceRule_Ge
+ #[no_mangle]
+ pub extern "C" fn Servo_NamespaceRule_GetURI(rule: RawServoNamespaceRuleBorrowed) -> *mut nsIAtom {
+     read_locked_arc(rule, |rule: &NamespaceRule| rule.url.0.as_ptr())
+ }
+ 
+ #[no_mangle]
+ pub extern "C" fn Servo_PageRule_GetStyle(rule: RawServoPageRuleBorrowed) -> RawServoDeclarationBlockStrong {
+     read_locked_arc(rule, |rule: &PageRule| {
+-        rule.0.clone().into_strong()
++        rule.block.clone().into_strong()
+     })
+ }
+ 
+ #[no_mangle]
+ pub extern "C" fn Servo_PageRule_SetStyle(rule: RawServoPageRuleBorrowed,
+                                            declarations: RawServoDeclarationBlockBorrowed) {
+     let declarations = Locked::<PropertyDeclarationBlock>::as_arc(&declarations);
+     write_locked_arc(rule, |rule: &mut PageRule| {
+-        rule.0 = declarations.clone();
++        rule.block = declarations.clone();
+     })
+ }
+ 
+ #[no_mangle]
+ pub extern "C" fn Servo_ComputedValues_GetForAnonymousBox(parent_style_or_null: ServoComputedValuesBorrowedOrNull,
+                                                           pseudo_tag: *mut nsIAtom,
+                                                           skip_display_fixup: bool,
+                                                           raw_data: RawServoStyleSetBorrowed)
