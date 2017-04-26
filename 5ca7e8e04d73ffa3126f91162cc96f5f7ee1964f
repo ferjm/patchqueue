@@ -93,6 +93,23 @@ diff --git a/layout/style/test/gtest/StyloParsingBench.cpp b/layout/style/test/g
  
  #endif
  
+diff --git a/servo/components/style/encoding_support.rs b/servo/components/style/encoding_support.rs
+--- a/servo/components/style/encoding_support.rs
++++ b/servo/components/style/encoding_support.rs
+@@ -80,11 +80,12 @@ impl Stylesheet {
+                              stylesheet_loader: Option<&StylesheetLoader>,
+                              error_reporter: &ParseErrorReporter) {
+         let (string, _) = decode_stylesheet_bytes(
+             bytes, protocol_encoding_label, environment_encoding);
+         Self::update_from_str(existing,
+                               &string,
+                               url_data,
+                               stylesheet_loader,
+-                              error_reporter)
++                              error_reporter,
++                              0)
+     }
+ }
 diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/stylesheets.rs
 --- a/servo/components/style/stylesheets.rs
 +++ b/servo/components/style/stylesheets.rs
