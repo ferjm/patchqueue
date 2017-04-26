@@ -6,6 +6,7 @@ bug1350175.stylerule.patch
 f28a88190c542b4128ec77c849c02971445fa71b
 bug1350175.mediarule.patch
 74dc5696a13e7273480ac780d4636507494c5aa4
+bug1350175.glue.patch
 #e9d9fecc28566629dbb2794e2aebd9b8c5ee6255
 bug1217544.background.sync.part1.webidl.patch
 bug1217544.background.sync.part2.serviceworkerregistration.patch

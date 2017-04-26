@@ -1,0 +1,36 @@
+# HG changeset patch
+# User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
+# Parent  2bae64d29ad61fbd9f66661975ec1a68d3599974
+Bug 1350175 - stylo: Support getting line / column number of CSS rules. Part 7: Set line and column values. r=xidorn
+
+diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
+--- a/servo/ports/geckolib/glue.rs
++++ b/servo/ports/geckolib/glue.rs
+@@ -751,19 +751,24 @@ macro_rules! impl_basic_rule_funcs {
+         to_css: $to_css:ident,
+     } => {
+         #[no_mangle]
+         pub extern "C" fn $getter(rules: ServoCssRulesBorrowed, index: u32, line: *mut u32, column: *mut u32)
+             -> Strong<$raw_type> {
+             read_locked_arc(rules, |rules: &CssRules| {
+                 match rules.0[index as usize] {
+                     CssRule::$name(ref rule) => {
+-                        unsafe {
+-                            *line = 0; // TODO rule.source_location.line as u32
+-                            *column = 0; // TODO rule.source_location.column as u32
++                        {
++                            let global_style_data = &*GLOBAL_STYLE_DATA;
++                            let guard = global_style_data.shared_lock.read();
++                            let rule = rule.read_with(&guard);
++                            unsafe {
++                                *line = rule.source_location.line as u32;
++                                *column = rule.source_location.column as u32;
++                            }
+                         }
+                         rule.clone().into_strong()
+                     },
+                     _ => {
+                         unreachable!(concat!(stringify!($getter), "should only be called ",
+                                              "on a ", stringify!($name), " rule"));
+                     }
+                 }
