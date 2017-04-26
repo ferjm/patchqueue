@@ -3,59 +3,15 @@
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
 # Date 1493130279 -7200
 # Node ID 65835a856532f3f3a69e5bbeb2de4147ddd62c77
-# Parent  f96e307e9b4cb263aa8b5d45e02eb88862c9d20c
+# Parent  b1b288a20b56e9b39df5d154dfc51ee705475191
 Bug 1350175 - stylo: Support getting line / column number of CSS rules. Part 3: PageRule. r=xidorn
 
 MozReview-Commit-ID: 8Mnz51icFXz
 
-diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
---- a/layout/style/ServoBindingList.h
-+++ b/layout/style/ServoBindingList.h
-@@ -106,16 +106,17 @@
- BASIC_RULE_FUNCS(Page)
- #undef BASIC_RULE_FUNCS
- #define RULE_LOCATION_GETTERS(type_) \
-     SERVO_BINDING_FUNC(Servo_##type_##Rule_GetSourceLine, uint32_t, \
-                        RawServo##type_##RuleBorrowed rule) \
-     SERVO_BINDING_FUNC(Servo_##type_##Rule_GetSourceColumn, uint32_t, \
-                        RawServo##type_##RuleBorrowed rule)
- RULE_LOCATION_GETTERS(Style)
-+RULE_LOCATION_GETTERS(Page)
- #undef RULE_LOCATION_GETTERS
- SERVO_BINDING_FUNC(Servo_CssRules_GetFontFaceRuleAt, nsCSSFontFaceRule*,
-                    ServoCssRulesBorrowed rules, uint32_t index)
- SERVO_BINDING_FUNC(Servo_StyleRule_GetStyle, RawServoDeclarationBlockStrong,
-                    RawServoStyleRuleBorrowed rule)
- SERVO_BINDING_FUNC(Servo_StyleRule_SetStyle, void,
-                    RawServoStyleRuleBorrowed rule,
-                    RawServoDeclarationBlockBorrowed declarations)
-diff --git a/layout/style/ServoPageRule.cpp b/layout/style/ServoPageRule.cpp
---- a/layout/style/ServoPageRule.cpp
-+++ b/layout/style/ServoPageRule.cpp
-@@ -100,17 +100,18 @@
- ServoPageRuleDeclaration::GetURLData() const
- {
-   return GetURLDataForRule(Rule());
- }
- 
- // -- ServoPageRule --------------------------------------------------
- 
- ServoPageRule::ServoPageRule(RefPtr<RawServoPageRule> aRawRule)
--  : CSSPageRule(0, 0)
-+  : CSSPageRule(Servo_PageRule_GetSourceLine(aRawRule),
-+                Servo_PageRule_GetSourceColumn(aRawRule))
-   , mRawRule(Move(aRawRule))
-   , mDecls(Servo_PageRule_GetStyle(mRawRule).Consume())
- {
- }
- 
- ServoPageRule::~ServoPageRule()
- {
- }
 diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/stylesheets.rs
 --- a/servo/components/style/stylesheets.rs
 +++ b/servo/components/style/stylesheets.rs
-@@ -590,25 +590,29 @@
+@@ -590,25 +590,29 @@ impl ToCssWithGuard for SupportsRule {
      }
  }
  
@@ -87,7 +43,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
      }
  }
  
-@@ -1173,21 +1177,26 @@
+@@ -1173,21 +1177,26 @@ impl<'a, 'b> AtRuleParser for NestedRule
                  let context = ParserContext::new_with_rule_type(self.context, Some(CssRuleType::Keyframes));
                  Ok(CssRule::Keyframes(Arc::new(self.shared_lock.wrap(KeyframesRule {
                      name: name,
@@ -117,7 +73,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
  impl<'a, 'b> QualifiedRuleParser for NestedRuleParser<'a, 'b> {
      type Prelude = SelectorList<SelectorImpl>;
      type QualifiedRule = CssRule;
-@@ -1206,12 +1215,12 @@
+@@ -1206,12 +1215,12 @@ impl<'a, 'b> QualifiedRuleParser for Nes
          let context = ParserContext::new_with_rule_type(self.context, Some(CssRuleType::Style));
          let declarations = parse_property_declaration_list(&context, input);
          Ok(CssRule::Style(Arc::new(self.shared_lock.wrap(StyleRule {
@@ -134,7 +90,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
 diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 --- a/servo/ports/geckolib/glue.rs
 +++ b/servo/ports/geckolib/glue.rs
-@@ -739,16 +739,47 @@
+@@ -739,16 +739,47 @@ pub extern "C" fn Servo_CssRules_DeleteR
      write_locked_arc(rules, |rules: &mut CssRules| {
          match rules.remove_rule(index as usize) {
              Ok(_) => nsresult::NS_OK,
@@ -181,39 +137,8 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
          to_css: $to_css:ident,
      } => {
          #[no_mangle]
-         pub extern "C" fn $getter(rules: ServoCssRulesBorrowed, index: u32) -> Strong<$raw_type> {
-@@ -836,30 +867,16 @@
- #[no_mangle]
- pub extern "C" fn Servo_StyleRule_GetSelectorText(rule: RawServoStyleRuleBorrowed, result: *mut nsAString) {
-     read_locked_arc(rule, |rule: &StyleRule| {
-         rule.selectors.to_css(unsafe { result.as_mut().unwrap() }).unwrap();
-     })
- }
- 
- #[no_mangle]
--pub extern "C" fn Servo_StyleRule_GetSourceLine(rule: RawServoStyleRuleBorrowed) -> u32 {
--    read_locked_arc(rule, |rule: &StyleRule| {
--        rule.source_location.line as u32
--    })
--}
--
--#[no_mangle]
--pub extern "C" fn Servo_StyleRule_GetSourceColumn(rule: RawServoStyleRuleBorrowed) -> u32 {
--    read_locked_arc(rule, |rule: &StyleRule| {
--        rule.source_location.column as u32
--    })
--}
--
--#[no_mangle]
- pub extern "C" fn Servo_MediaRule_GetMedia(rule: RawServoMediaRuleBorrowed) -> RawServoMediaListStrong {
-     read_locked_arc(rule, |rule: &MediaRule| {
-         rule.media_queries.clone().into_strong()
-     })
- }
- 
- #[no_mangle]
- pub extern "C" fn Servo_MediaRule_GetRules(rule: RawServoMediaRuleBorrowed) -> ServoCssRulesStrong {
-@@ -878,26 +895,26 @@
+         pub extern "C" fn $getter(rules: ServoCssRulesBorrowed, index: u32, line: *mut u32, column: *mut u32)
+@@ -871,26 +902,26 @@ pub extern "C" fn Servo_NamespaceRule_Ge
  #[no_mangle]
  pub extern "C" fn Servo_NamespaceRule_GetURI(rule: RawServoNamespaceRuleBorrowed) -> *mut nsIAtom {
      read_locked_arc(rule, |rule: &NamespaceRule| rule.url.0.as_ptr())
@@ -242,4 +167,3 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
                                                            pseudo_tag: *mut nsIAtom,
                                                            skip_display_fixup: bool,
                                                            raw_data: RawServoStyleSetBorrowed)
-
