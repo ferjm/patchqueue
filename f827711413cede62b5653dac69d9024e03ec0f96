@@ -32,7 +32,7 @@ diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
 diff --git a/layout/style/ServoCSSRuleList.cpp b/layout/style/ServoCSSRuleList.cpp
 --- a/layout/style/ServoCSSRuleList.cpp
 +++ b/layout/style/ServoCSSRuleList.cpp
-@@ -76,18 +76,23 @@ css::Rule*
+@@ -76,18 +76,22 @@ css::Rule*
  ServoCSSRuleList::GetRule(uint32_t aIndex)
  {
    uintptr_t rule = mRules[aIndex];
@@ -48,8 +48,7 @@ diff --git a/layout/style/ServoCSSRuleList.cpp b/layout/style/ServoCSSRuleList.c
 +          Servo_CssRules_Get##name_##RuleAt(                                \
 +              mRawRules, aIndex, &line, &column                             \
 +          ).Consume();                                                      \
-+        rule.forget();                                                      \
-+        ruleObj = new Servo##name_##Rule(rule, line, column);               \
++        ruleObj = new Servo##name_##Rule(rule.forget(), line, column);      \
          break;                                                              \
        }
        CASE_RULE(STYLE, Style)
@@ -143,7 +142,7 @@ diff --git a/layout/style/ServoPageRule.cpp b/layout/style/ServoPageRule.cpp
  
 -ServoPageRule::ServoPageRule(RefPtr<RawServoPageRule> aRawRule)
 -  : CSSPageRule(0, 0)
-+ServoPageRule::ServoPageRule(already_AddRefed<RawServoPageRule> aRawRule,
++ServoPageRule::ServoPageRule(RefPtr<RawServoPageRule> aRawRule,
 +                             uint32_t aLine, uint32_t aColumn)
 +  : CSSPageRule(aLine, aColumn)
    , mRawRule(Move(aRawRule))
