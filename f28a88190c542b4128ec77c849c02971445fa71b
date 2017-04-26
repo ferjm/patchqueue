@@ -3,59 +3,15 @@
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
 # Date 1493130279 -7200
 # Node ID f28a88190c542b4128ec77c849c02971445fa71b
-# Parent  65835a856532f3f3a69e5bbeb2de4147ddd62c77
+# Parent  4c5a7c10f711edebc205c8199b7a91ca4577d641
 Bug 1350175 - stylo: Support getting line / column number of CSS rules. Part 4: NamespaceRule. r=xidorn
 
 MozReview-Commit-ID: FSRr7fXJ7Wp
 
-diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
---- a/layout/style/ServoBindingList.h
-+++ b/layout/style/ServoBindingList.h
-@@ -107,16 +107,17 @@
- #undef BASIC_RULE_FUNCS
- #define RULE_LOCATION_GETTERS(type_) \
-     SERVO_BINDING_FUNC(Servo_##type_##Rule_GetSourceLine, uint32_t, \
-                        RawServo##type_##RuleBorrowed rule) \
-     SERVO_BINDING_FUNC(Servo_##type_##Rule_GetSourceColumn, uint32_t, \
-                        RawServo##type_##RuleBorrowed rule)
- RULE_LOCATION_GETTERS(Style)
- RULE_LOCATION_GETTERS(Page)
-+RULE_LOCATION_GETTERS(Namespace)
- #undef RULE_LOCATION_GETTERS
- SERVO_BINDING_FUNC(Servo_CssRules_GetFontFaceRuleAt, nsCSSFontFaceRule*,
-                    ServoCssRulesBorrowed rules, uint32_t index)
- SERVO_BINDING_FUNC(Servo_StyleRule_GetStyle, RawServoDeclarationBlockStrong,
-                    RawServoStyleRuleBorrowed rule)
- SERVO_BINDING_FUNC(Servo_StyleRule_SetStyle, void,
-                    RawServoStyleRuleBorrowed rule,
-                    RawServoDeclarationBlockBorrowed declarations)
-diff --git a/layout/style/ServoNamespaceRule.h b/layout/style/ServoNamespaceRule.h
---- a/layout/style/ServoNamespaceRule.h
-+++ b/layout/style/ServoNamespaceRule.h
-@@ -11,17 +11,18 @@
- #include "mozilla/dom/CSSNamespaceRule.h"
- 
- namespace mozilla {
- 
- class ServoNamespaceRule : public dom::CSSNamespaceRule
- {
- public:
-   explicit ServoNamespaceRule(already_AddRefed<RawServoNamespaceRule> aRule)
--    : CSSNamespaceRule(0, 0)
-+    : CSSNamespaceRule(Servo_NamespaceRule_GetSourceLine(aRule.take()),
-+                       Servo_NamespaceRule_GetSourceColumn(aRule.take()))
-     , mRawRule(Move(aRule))
-   {
-   }
- 
-   NS_DECL_ISUPPORTS_INHERITED
- 
- #ifdef DEBUG
-   void List(FILE* out = stdout, int32_t aIndent = 0) const final;
 diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/stylesheets.rs
 --- a/servo/components/style/stylesheets.rs
 +++ b/servo/components/style/stylesheets.rs
-@@ -455,16 +455,17 @@
+@@ -455,16 +455,17 @@ impl ToCssWithGuard for CssRule {
  }
  
  #[derive(Debug, PartialEq)]
@@ -73,7 +29,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
      where W: fmt::Write {
          try!(dest.write_str("@namespace "));
          if let Some(ref prefix) = self.prefix {
-@@ -980,32 +981,38 @@
+@@ -980,32 +981,38 @@ impl<'a> AtRuleParser for TopLevelRulePa
                      self.state.set(State::Invalid);
                      return Err(())  // "@import must be before any rule but @charset"
                  }
@@ -112,29 +68,3 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
                  }
              },
              // @charset is removed by rust-cssparser if it’s the first rule in the stylesheet
-diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
---- a/servo/ports/geckolib/glue.rs
-+++ b/servo/ports/geckolib/glue.rs
-@@ -770,16 +770,21 @@
-     column_getter: Servo_StyleRule_GetSourceColumn,
- }
- 
- impl_rule_location_getters! { (PageRule, RawServoPageRuleBorrowed),
-     line_getter: Servo_PageRule_GetSourceLine,
-     column_getter: Servo_PageRule_GetSourceColumn,
- }
- 
-+impl_rule_location_getters! { (NamespaceRule, RawServoNamespaceRuleBorrowed),
-+    line_getter: Servo_NamespaceRule_GetSourceLine,
-+    column_getter: Servo_NamespaceRule_GetSourceColumn,
-+}
-+
- macro_rules! impl_basic_rule_funcs {
-     { ($name:ident, $rule_type:ty, $raw_type:ty),
-         getter: $getter:ident,
-         debug: $debug:ident,
-         to_css: $to_css:ident,
-     } => {
-         #[no_mangle]
-         pub extern "C" fn $getter(rules: ServoCssRulesBorrowed, index: u32) -> Strong<$raw_type> {
-

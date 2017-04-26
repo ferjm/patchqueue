@@ -90,54 +90,6 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
 diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 --- a/servo/ports/geckolib/glue.rs
 +++ b/servo/ports/geckolib/glue.rs
-@@ -739,16 +739,47 @@ pub extern "C" fn Servo_CssRules_DeleteR
-     write_locked_arc(rules, |rules: &mut CssRules| {
-         match rules.remove_rule(index as usize) {
-             Ok(_) => nsresult::NS_OK,
-             Err(err) => err.into()
-         }
-     })
- }
- 
-+macro_rules! impl_rule_location_getters {
-+    { ($rule_type:ty, $raw_type:ty),
-+        line_getter: $line_getter:ident,
-+        column_getter: $column_getter:ident,
-+    } => {
-+        #[no_mangle]
-+        pub extern "C" fn $line_getter(rule: $raw_type) -> u32 {
-+            read_locked_arc(rule, |rule: &$rule_type| {
-+                rule.source_location.line as u32
-+            })
-+        }
-+
-+        #[no_mangle]
-+        pub extern "C" fn $column_getter(rule: $raw_type) -> u32 {
-+            read_locked_arc(rule, |rule: &$rule_type| {
-+                rule.source_location.column as u32
-+            })
-+        }
-+    }
-+}
-+
-+impl_rule_location_getters! { (StyleRule, RawServoStyleRuleBorrowed),
-+    line_getter: Servo_StyleRule_GetSourceLine,
-+    column_getter: Servo_StyleRule_GetSourceColumn,
-+}
-+
-+impl_rule_location_getters! { (PageRule, RawServoPageRuleBorrowed),
-+    line_getter: Servo_PageRule_GetSourceLine,
-+    column_getter: Servo_PageRule_GetSourceColumn,
-+}
-+
- macro_rules! impl_basic_rule_funcs {
-     { ($name:ident, $rule_type:ty, $raw_type:ty),
-         getter: $getter:ident,
-         debug: $debug:ident,
-         to_css: $to_css:ident,
-     } => {
-         #[no_mangle]
-         pub extern "C" fn $getter(rules: ServoCssRulesBorrowed, index: u32, line: *mut u32, column: *mut u32)
 @@ -871,26 +902,26 @@ pub extern "C" fn Servo_NamespaceRule_Ge
  #[no_mangle]
  pub extern "C" fn Servo_NamespaceRule_GetURI(rule: RawServoNamespaceRuleBorrowed) -> *mut nsIAtom {
