@@ -1,0 +1,68 @@
+# HG changeset patch
+# User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
+# Parent  d2ba660a927db06e7b13a9060eeeb607e4bce6f3
+Bug 1350175 - stylo: Support getting line / column number of CSS rules. Part 2: StyleRule. r=xidorn
+
+diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/stylesheets.rs
+--- a/servo/components/style/stylesheets.rs
++++ b/servo/components/style/stylesheets.rs
+@@ -2,17 +2,17 @@
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ //! Style sheets and their CSS rules.
+ 
+ #![deny(missing_docs)]
+ 
+ use {Atom, Prefix, Namespace};
+-use cssparser::{AtRuleParser, Parser, QualifiedRuleParser};
++use cssparser::{AtRuleParser, Parser, QualifiedRuleParser, SourceLocation};
+ use cssparser::{AtRuleType, RuleListParser, Token, parse_one_rule};
+ use cssparser::ToCss as ParserToCss;
+ use error_reporting::{ParseErrorReporter, NullReporter};
+ #[cfg(feature = "servo")]
+ use font_face::FontFaceRuleData;
+ use font_face::parse_font_face_block;
+ #[cfg(feature = "gecko")]
+ pub use gecko::rules::FontFaceRule;
+@@ -612,16 +612,17 @@ impl ToCssWithGuard for PageRule {
+     }
+ }
+ 
+ #[allow(missing_docs)]
+ #[derive(Debug)]
+ pub struct StyleRule {
+     pub selectors: SelectorList<SelectorImpl>,
+     pub block: Arc<Locked<PropertyDeclarationBlock>>,
++    pub source_location: SourceLocation,
+ }
+ 
+ impl ToCssWithGuard for StyleRule {
+     // https://drafts.csswg.org/cssom/#serialize-a-css-rule CSSStyleRule
+     fn to_css<W>(&self, guard: &SharedRwLockReadGuard, dest: &mut W) -> fmt::Result
+     where W: fmt::Write {
+         // Step 1
+         try!(self.selectors.to_css(dest));
+@@ -1196,16 +1197,21 @@ impl<'a, 'b> QualifiedRuleParser for Nes
+             stylesheet_origin: self.stylesheet_origin,
+             namespaces: self.namespaces,
+         };
+         SelectorList::parse(&selector_parser, input)
+     }
+ 
+     fn parse_block(&mut self, prelude: SelectorList<SelectorImpl>, input: &mut Parser)
+                    -> Result<CssRule, ()> {
++        let location = input.current_source_location();
+         let context = ParserContext::new_with_rule_type(self.context, Some(CssRuleType::Style));
+         let declarations = parse_property_declaration_list(&context, input);
+         Ok(CssRule::Style(Arc::new(self.shared_lock.wrap(StyleRule {
+             selectors: prelude,
+-            block: Arc::new(self.shared_lock.wrap(declarations))
++            block: Arc::new(self.shared_lock.wrap(declarations)),
++            source_location: SourceLocation {
++                line: location.line + self.context.line_number_offset as usize - 1,
++                column: location.column,
++            }
+         }))))
+     }
+ }
