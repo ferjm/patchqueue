@@ -1,12 +1,17 @@
+
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
+# Date 1493146905 -7200
+# Node ID 5ca7e8e04d73ffa3126f91162cc96f5f7ee1964f
 # Parent  a30dc237c3a600a5231f2974fc2b85dfb5513414
 Bug 1350175 - stylo: Support getting line / column number of CSS rules. Part 0: Set stylesheet line offset. r=xidorn
+
+MozReview-Commit-ID: A5vDWyMKeDI
 
 diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
 --- a/layout/style/ServoBindingList.h
 +++ b/layout/style/ServoBindingList.h
-@@ -25,27 +25,29 @@ SERVO_BINDING_FUNC(Servo_Element_ClearDa
+@@ -25,27 +25,29 @@
  SERVO_BINDING_FUNC(Servo_StyleSheet_Empty, RawServoStyleSheetStrong,
                     mozilla::css::SheetParsingMode parsing_mode)
  SERVO_BINDING_FUNC(Servo_StyleSheet_FromUTF8Bytes, RawServoStyleSheetStrong,
@@ -41,7 +46,7 @@ diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
 diff --git a/layout/style/ServoStyleSheet.cpp b/layout/style/ServoStyleSheet.cpp
 --- a/layout/style/ServoStyleSheet.cpp
 +++ b/layout/style/ServoStyleSheet.cpp
-@@ -105,23 +105,24 @@ ServoStyleSheet::ParseSheet(css::Loader*
+@@ -105,23 +105,24 @@
  
    NS_ConvertUTF16toUTF8 input(aInput);
    if (!Inner()->mSheet) {
@@ -71,7 +76,7 @@ diff --git a/layout/style/ServoStyleSheet.cpp b/layout/style/ServoStyleSheet.cpp
 diff --git a/layout/style/test/gtest/StyloParsingBench.cpp b/layout/style/test/gtest/StyloParsingBench.cpp
 --- a/layout/style/test/gtest/StyloParsingBench.cpp
 +++ b/layout/style/test/gtest/StyloParsingBench.cpp
-@@ -23,17 +23,17 @@ static void ServoParsingBench() {
+@@ -23,17 +23,17 @@
    NS_NAMED_LITERAL_CSTRING(css_, EXAMPLE_STYLESHEET);
    const nsACString& css = css_;
    ASSERT_TRUE(IsUTF8(css));
@@ -93,7 +98,7 @@ diff --git a/layout/style/test/gtest/StyloParsingBench.cpp b/layout/style/test/g
 diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/stylesheets.rs
 --- a/servo/components/style/stylesheets.rs
 +++ b/servo/components/style/stylesheets.rs
-@@ -645,24 +645,25 @@ impl ToCssWithGuard for StyleRule {
+@@ -645,24 +645,25 @@
  pub type FontFaceRule = FontFaceRuleData;
  
  impl Stylesheet {
@@ -124,7 +129,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
 diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 --- a/servo/ports/geckolib/glue.rs
 +++ b/servo/ports/geckolib/glue.rs
-@@ -516,17 +516,18 @@ pub extern "C" fn Servo_StyleSheet_Empty
+@@ -516,17 +516,18 @@
  }
  
  #[no_mangle]
@@ -144,7 +149,7 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
          SheetParsingMode::eAuthorSheetFeatures => Origin::Author,
          SheetParsingMode::eUserSheetFeatures => Origin::User,
          SheetParsingMode::eAgentSheetFeatures => Origin::UserAgent,
-@@ -548,27 +549,28 @@ pub extern "C" fn Servo_StyleSheet_FromU
+@@ -548,27 +549,28 @@
      let shared_lock = global_style_data.shared_lock.clone();
      let media = if media_list.is_null() {
          Arc::new(shared_lock.wrap(MediaList::empty()))
@@ -176,7 +181,7 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
          None
      } else {
          Some(StylesheetLoader::new(loader, gecko_stylesheet))
-@@ -576,18 +578,18 @@ pub extern "C" fn Servo_StyleSheet_Clear
+@@ -576,18 +578,18 @@
  
      // FIXME(emilio): loader.as_ref() doesn't typecheck for some reason?
      let loader: Option<&StyleStylesheetLoader> = match loader {
@@ -197,3 +202,4 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
                                                    flush: bool) {
      let global_style_data = &*GLOBAL_STYLE_DATA;
      let guard = global_style_data.shared_lock.read();
+

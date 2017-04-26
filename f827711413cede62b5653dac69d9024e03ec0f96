@@ -1,0 +1,324 @@
+
+# HG changeset patch
+# User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
+# Date 1493130279 -7200
+# Node ID f827711413cede62b5653dac69d9024e03ec0f96
+# Parent  59f24155fad1486940303a2a5db859ca1c4709ac
+Bug 1350175 - stylo: Support getting line / column number of CSS rules. Part 1: StyleRule. r=xidorn
+
+MozReview-Commit-ID: 6ODvvX5JX7O
+
+diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
+--- a/layout/style/ServoBindingList.h
++++ b/layout/style/ServoBindingList.h
+@@ -90,17 +90,18 @@ SERVO_BINDING_FUNC(Servo_CssRules_Insert
+                    uint16_t* rule_type)
+ SERVO_BINDING_FUNC(Servo_CssRules_DeleteRule, nsresult,
+                    ServoCssRulesBorrowed rules, uint32_t index)
+ 
+ // CSS Rules
+ #define BASIC_RULE_FUNCS(type_) \
+   SERVO_BINDING_FUNC(Servo_CssRules_Get##type_##RuleAt, \
+                      RawServo##type_##RuleStrong, \
+-                     ServoCssRulesBorrowed rules, uint32_t index) \
++                     ServoCssRulesBorrowed rules, uint32_t index, \
++                     uint32_t* line, uint32_t* column) \
+   SERVO_BINDING_FUNC(Servo_##type_##Rule_Debug, void, \
+                      RawServo##type_##RuleBorrowed rule, nsACString* result) \
+   SERVO_BINDING_FUNC(Servo_##type_##Rule_GetCssText, void, \
+                      RawServo##type_##RuleBorrowed rule, nsAString* result)
+ BASIC_RULE_FUNCS(Style)
+ BASIC_RULE_FUNCS(Media)
+ BASIC_RULE_FUNCS(Namespace)
+ BASIC_RULE_FUNCS(Page)
+diff --git a/layout/style/ServoCSSRuleList.cpp b/layout/style/ServoCSSRuleList.cpp
+--- a/layout/style/ServoCSSRuleList.cpp
++++ b/layout/style/ServoCSSRuleList.cpp
+@@ -76,18 +76,22 @@ css::Rule*
+ ServoCSSRuleList::GetRule(uint32_t aIndex)
+ {
+   uintptr_t rule = mRules[aIndex];
+   if (rule <= kMaxRuleType) {
+     RefPtr<css::Rule> ruleObj = nullptr;
+     switch (rule) {
+ #define CASE_RULE(const_, name_)                                            \
+       case nsIDOMCSSRule::const_##_RULE: {                                  \
+-        ruleObj = new Servo##name_##Rule(                                   \
+-          Servo_CssRules_Get##name_##RuleAt(mRawRules, aIndex).Consume());  \
++        uint32_t line = 0, column = 0;                                      \
++        RefPtr<RawServo##name_##Rule> rule =                                \
++          Servo_CssRules_Get##name_##RuleAt(                                \
++              mRawRules, aIndex, &line, &column                             \
++          ).Consume();                                                      \
++        ruleObj = new Servo##name_##Rule(rule, line, column);               \
+         break;                                                              \
+       }
+       CASE_RULE(STYLE, Style)
+       CASE_RULE(MEDIA, Media)
+       CASE_RULE(NAMESPACE, Namespace)
+       CASE_RULE(PAGE, Page)
+ #undef CASE_RULE
+       case nsIDOMCSSRule::FONT_FACE_RULE: {
+diff --git a/layout/style/ServoMediaRule.cpp b/layout/style/ServoMediaRule.cpp
+--- a/layout/style/ServoMediaRule.cpp
++++ b/layout/style/ServoMediaRule.cpp
+@@ -10,17 +10,18 @@
+ 
+ #include "mozilla/ServoBindings.h"
+ #include "mozilla/ServoMediaList.h"
+ 
+ using namespace mozilla::dom;
+ 
+ namespace mozilla {
+ 
+-ServoMediaRule::ServoMediaRule(RefPtr<RawServoMediaRule> aRawRule)
++ServoMediaRule::ServoMediaRule(RefPtr<RawServoMediaRule> aRawRule,
++                               uint32_t, uint32_t)
+   : CSSMediaRule(Servo_MediaRule_GetRules(aRawRule).Consume())
+   , mRawRule(Move(aRawRule))
+ {
+ }
+ 
+ ServoMediaRule::~ServoMediaRule()
+ {
+ }
+diff --git a/layout/style/ServoMediaRule.h b/layout/style/ServoMediaRule.h
+--- a/layout/style/ServoMediaRule.h
++++ b/layout/style/ServoMediaRule.h
+@@ -14,17 +14,18 @@
+ 
+ namespace mozilla {
+ 
+ class ServoMediaList;
+ 
+ class ServoMediaRule final : public dom::CSSMediaRule
+ {
+ public:
+-  explicit ServoMediaRule(RefPtr<RawServoMediaRule> aRawRule);
++  ServoMediaRule(RefPtr<RawServoMediaRule> aRawRule,
++                 uint32_t, uint32_t);
+ 
+   NS_DECL_ISUPPORTS_INHERITED
+   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(ServoMediaRule, dom::CSSMediaRule)
+ 
+   already_AddRefed<css::Rule> Clone() const override;
+   bool UseForPresentation(nsPresContext* aPresContext,
+                           nsMediaQueryResultCacheKey& aKey) final;
+   void SetStyleSheet(StyleSheet* aSheet) override;
+diff --git a/layout/style/ServoNamespaceRule.h b/layout/style/ServoNamespaceRule.h
+--- a/layout/style/ServoNamespaceRule.h
++++ b/layout/style/ServoNamespaceRule.h
+@@ -10,18 +10,19 @@
+ #include "mozilla/ServoBindingTypes.h"
+ #include "mozilla/dom/CSSNamespaceRule.h"
+ 
+ namespace mozilla {
+ 
+ class ServoNamespaceRule : public dom::CSSNamespaceRule
+ {
+ public:
+-  explicit ServoNamespaceRule(already_AddRefed<RawServoNamespaceRule> aRule)
+-    : CSSNamespaceRule(0, 0)
++  ServoNamespaceRule(RefPtr<RawServoNamespaceRule> aRule,
++                     uint32_t aLine, uint32_t aColumn)
++    : CSSNamespaceRule(aLine, aColumn)
+     , mRawRule(Move(aRule))
+   {
+   }
+ 
+   NS_DECL_ISUPPORTS_INHERITED
+ 
+ #ifdef DEBUG
+   void List(FILE* out = stdout, int32_t aIndent = 0) const final;
+diff --git a/layout/style/ServoPageRule.cpp b/layout/style/ServoPageRule.cpp
+--- a/layout/style/ServoPageRule.cpp
++++ b/layout/style/ServoPageRule.cpp
+@@ -99,18 +99,19 @@ ServoPageRuleDeclaration::GetCSSParsingE
+ URLExtraData*
+ ServoPageRuleDeclaration::GetURLData() const
+ {
+   return GetURLDataForRule(Rule());
+ }
+ 
+ // -- ServoPageRule --------------------------------------------------
+ 
+-ServoPageRule::ServoPageRule(RefPtr<RawServoPageRule> aRawRule)
+-  : CSSPageRule(0, 0)
++ServoPageRule::ServoPageRule(RefPtr<RawServoPageRule> aRawRule,
++                             uint32_t aLine, uint32_t aColumn)
++  : CSSPageRule(aLine, aColumn)
+   , mRawRule(Move(aRawRule))
+   , mDecls(Servo_PageRule_GetStyle(mRawRule).Consume())
+ {
+ }
+ 
+ ServoPageRule::~ServoPageRule()
+ {
+ }
+diff --git a/layout/style/ServoPageRule.h b/layout/style/ServoPageRule.h
+--- a/layout/style/ServoPageRule.h
++++ b/layout/style/ServoPageRule.h
+@@ -46,17 +46,18 @@ private:
+   inline const ServoPageRule* Rule() const;
+ 
+   RefPtr<ServoDeclarationBlock> mDecls;
+ };
+ 
+ class ServoPageRule final : public dom::CSSPageRule
+ {
+ public:
+-  explicit ServoPageRule(RefPtr<RawServoPageRule> aRawRule);
++  ServoPageRule(RefPtr<RawServoPageRule> aRawRule,
++                uint32_t aLine, uint32_t aColumn);
+ 
+   NS_DECL_ISUPPORTS_INHERITED
+   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_INHERITED(
+     ServoPageRule, dom::CSSPageRule
+   )
+   bool IsCCLeaf() const final;
+ 
+   RawServoPageRule* Raw() const { return mRawRule; }
+diff --git a/layout/style/ServoStyleRule.cpp b/layout/style/ServoStyleRule.cpp
+--- a/layout/style/ServoStyleRule.cpp
++++ b/layout/style/ServoStyleRule.cpp
+@@ -104,18 +104,19 @@ ServoStyleRuleDeclaration::GetCSSParsing
+ URLExtraData*
+ ServoStyleRuleDeclaration::GetURLData() const
+ {
+   return GetURLDataForRule(Rule());
+ }
+ 
+ // -- ServoStyleRule --------------------------------------------------
+ 
+-ServoStyleRule::ServoStyleRule(already_AddRefed<RawServoStyleRule> aRawRule)
+-  : BindingStyleRule(0, 0)
++ServoStyleRule::ServoStyleRule(RefPtr<RawServoStyleRule> aRawRule,
++                               uint32_t aLine, uint32_t aColumn)
++  : BindingStyleRule(aLine, aColumn)
+   , mRawRule(aRawRule)
+   , mDecls(Servo_StyleRule_GetStyle(mRawRule).Consume())
+ {
+ }
+ 
+ // QueryInterface implementation for ServoStyleRule
+ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(ServoStyleRule)
+   NS_INTERFACE_MAP_ENTRY(nsIDOMCSSStyleRule)
+diff --git a/layout/style/ServoStyleRule.h b/layout/style/ServoStyleRule.h
+--- a/layout/style/ServoStyleRule.h
++++ b/layout/style/ServoStyleRule.h
+@@ -48,17 +48,18 @@ private:
+ 
+   RefPtr<ServoDeclarationBlock> mDecls;
+ };
+ 
+ class ServoStyleRule final : public BindingStyleRule
+                            , public nsIDOMCSSStyleRule
+ {
+ public:
+-  explicit ServoStyleRule(already_AddRefed<RawServoStyleRule> aRawRule);
++  ServoStyleRule(RefPtr<RawServoStyleRule> aRawRule,
++                 uint32_t aLine, uint32_t aColumn);
+ 
+   NS_DECL_ISUPPORTS_INHERITED
+   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_INHERITED(ServoStyleRule,
+                                                          css::Rule)
+   virtual bool IsCCLeaf() const final MOZ_MUST_OVERRIDE;
+   NS_DECL_NSIDOMCSSSTYLERULE
+ 
+   // WebIDL interface
+diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/stylesheets.rs
+--- a/servo/components/style/stylesheets.rs
++++ b/servo/components/style/stylesheets.rs
+@@ -2,17 +2,17 @@
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ //! Style sheets and their CSS rules.
+ 
+ #![deny(missing_docs)]
+ 
+ use {Atom, Prefix, Namespace};
+-use cssparser::{AtRuleParser, Parser, QualifiedRuleParser};
++use cssparser::{AtRuleParser, Parser, QualifiedRuleParser, SourceLocation};
+ use cssparser::{AtRuleType, RuleListParser, Token, parse_one_rule};
+ use cssparser::ToCss as ParserToCss;
+ use error_reporting::{ParseErrorReporter, NullReporter};
+ #[cfg(feature = "servo")]
+ use font_face::FontFaceRuleData;
+ use font_face::parse_font_face_block;
+ #[cfg(feature = "gecko")]
+ pub use gecko::rules::FontFaceRule;
+@@ -612,16 +612,17 @@ impl ToCssWithGuard for PageRule {
+     }
+ }
+ 
+ #[allow(missing_docs)]
+ #[derive(Debug)]
+ pub struct StyleRule {
+     pub selectors: SelectorList<SelectorImpl>,
+     pub block: Arc<Locked<PropertyDeclarationBlock>>,
++    pub source_location: SourceLocation,
+ }
+ 
+ impl ToCssWithGuard for StyleRule {
+     // https://drafts.csswg.org/cssom/#serialize-a-css-rule CSSStyleRule
+     fn to_css<W>(&self, guard: &SharedRwLockReadGuard, dest: &mut W) -> fmt::Result
+     where W: fmt::Write {
+         // Step 1
+         try!(self.selectors.to_css(dest));
+@@ -1196,16 +1197,21 @@ impl<'a, 'b> QualifiedRuleParser for Nes
+             stylesheet_origin: self.stylesheet_origin,
+             namespaces: self.namespaces,
+         };
+         SelectorList::parse(&selector_parser, input)
+     }
+ 
+     fn parse_block(&mut self, prelude: SelectorList<SelectorImpl>, input: &mut Parser)
+                    -> Result<CssRule, ()> {
++        let location = input.current_source_location();
+         let context = ParserContext::new_with_rule_type(self.context, Some(CssRuleType::Style));
+         let declarations = parse_property_declaration_list(&context, input);
+         Ok(CssRule::Style(Arc::new(self.shared_lock.wrap(StyleRule {
+             selectors: prelude,
+-            block: Arc::new(self.shared_lock.wrap(declarations))
++            block: Arc::new(self.shared_lock.wrap(declarations)),
++            source_location: SourceLocation {
++                line: location.line + self.context.line_number_offset as usize - 1,
++                column: location.column,
++            }
+         }))))
+     }
+ }
+diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
+--- a/servo/ports/geckolib/glue.rs
++++ b/servo/ports/geckolib/glue.rs
+@@ -746,20 +746,27 @@ pub extern "C" fn Servo_CssRules_DeleteR
+ 
+ macro_rules! impl_basic_rule_funcs {
+     { ($name:ident, $rule_type:ty, $raw_type:ty),
+         getter: $getter:ident,
+         debug: $debug:ident,
+         to_css: $to_css:ident,
+     } => {
+         #[no_mangle]
+-        pub extern "C" fn $getter(rules: ServoCssRulesBorrowed, index: u32) -> Strong<$raw_type> {
++        pub extern "C" fn $getter(rules: ServoCssRulesBorrowed, index: u32, line: *mut u32, column: *mut u32)
++            -> Strong<$raw_type> {
+             read_locked_arc(rules, |rules: &CssRules| {
+                 match rules.0[index as usize] {
+-                    CssRule::$name(ref rule) => rule.clone().into_strong(),
++                    CssRule::$name(ref rule) => {
++                        unsafe {
++                            *line = 0; // TODO rule.source_location.line as u32
++                            *column = 0; // TODO rule.source_location.column as u32
++                        }
++                        rule.clone().into_strong()
++                    },
+                     _ => {
+                         unreachable!(concat!(stringify!($getter), "should only be called ",
+                                              "on a ", stringify!($name), " rule"));
+                     }
+                 }
+             })
+         }
+ 
