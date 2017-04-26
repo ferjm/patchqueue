@@ -1,0 +1,5 @@
+# HG changeset patch
+# User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
+# Parent  4e07d801447f81a48ffd8d718857f32e7cba908f
+Bug 1350175 - stylo: Support getting line / column number of CSS rules. Part 5: MediaRule. r=xidorn
+
