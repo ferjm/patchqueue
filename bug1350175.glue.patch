@@ -1,36 +1,56 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  2bae64d29ad61fbd9f66661975ec1a68d3599974
-Bug 1350175 - stylo: Support getting line / column number of CSS rules. Part 7: Set line and column values. r=xidorn
+# Parent  0d453ac4a5f204846be17a74cc20684f42102dec
+Bug 1350175 - Send line and column values for CSS rules to Gecko. r=xidorn
 
 diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 --- a/servo/ports/geckolib/glue.rs
 +++ b/servo/ports/geckolib/glue.rs
-@@ -751,19 +751,24 @@ macro_rules! impl_basic_rule_funcs {
+@@ -746,31 +746,34 @@ pub extern "C" fn Servo_CssRules_DeleteR
+ 
+ macro_rules! impl_basic_rule_funcs {
+     { ($name:ident, $rule_type:ty, $raw_type:ty),
+         getter: $getter:ident,
+         debug: $debug:ident,
          to_css: $to_css:ident,
      } => {
          #[no_mangle]
-         pub extern "C" fn $getter(rules: ServoCssRulesBorrowed, index: u32, line: *mut u32, column: *mut u32)
+-        pub extern "C" fn $getter(rules: ServoCssRulesBorrowed, index: u32, line: *mut u32, column: *mut u32)
++        pub extern "C" fn $getter(rules: ServoCssRulesBorrowed, index: u32,
++                                  line: *mut u32, column: *mut u32)
              -> Strong<$raw_type> {
-             read_locked_arc(rules, |rules: &CssRules| {
-                 match rules.0[index as usize] {
-                     CssRule::$name(ref rule) => {
--                        unsafe {
--                            *line = 0; // TODO rule.source_location.line as u32
--                            *column = 0; // TODO rule.source_location.column as u32
-+                        {
-+                            let global_style_data = &*GLOBAL_STYLE_DATA;
-+                            let guard = global_style_data.shared_lock.read();
-+                            let rule = rule.read_with(&guard);
-+                            unsafe {
-+                                *line = rule.source_location.line as u32;
-+                                *column = rule.source_location.column as u32;
-+                            }
-                         }
-                         rule.clone().into_strong()
-                     },
-                     _ => {
-                         unreachable!(concat!(stringify!($getter), "should only be called ",
-                                              "on a ", stringify!($name), " rule"));
-                     }
+-            read_locked_arc(rules, |rules: &CssRules| {
+-                match rules.0[index as usize] {
+-                    CssRule::$name(ref rule) => {
+-                        *unsafe { line.as_mut().unwrap() } = 0;
+-                        *unsafe { column.as_mut().unwrap() } = 0;
+-                        rule.clone().into_strong()
+-                    },
+-                    _ => {
+-                        unreachable!(concat!(stringify!($getter), "should only be called ",
+-                                             "on a ", stringify!($name), " rule"));
+-                    }
++            let global_style_data = &*GLOBAL_STYLE_DATA;
++            let guard = global_style_data.shared_lock.read();
++            let rules = Locked::<CssRules>::as_arc(&rules).read_with(&guard);
++            match rules.0[index as usize] {
++                CssRule::$name(ref rule) => {
++                    let location = rule.read_with(&guard).source_location;
++                    *unsafe { line.as_mut().unwrap() } = location.line as u32;
++                    *unsafe { column.as_mut().unwrap() } = location.column as u32;
++                    rule.clone().into_strong()
++                },
++                _ => {
++                    unreachable!(concat!(stringify!($getter), "should only be called ",
++                                         "on a ", stringify!($name), " rule"));
                  }
+-            })
++            }
+         }
+ 
+         #[no_mangle]
+         pub extern "C" fn $debug(rule: &$raw_type, result: *mut nsACString) {
+             read_locked_arc(rule, |rule: &$rule_type| {
+                 write!(unsafe { result.as_mut().unwrap() }, "{:?}", *rule).unwrap();
+             })
+         }
