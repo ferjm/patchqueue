@@ -15,7 +15,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
  pub struct MediaRule {
      pub media_queries: Arc<Locked<MediaList>>,
      pub rules: Arc<Locked<CssRules>>,
-+    source_location: SourceLocation,
++    pub source_location: SourceLocation,
  }
  
  impl ToCssWithGuard for MediaRule {
