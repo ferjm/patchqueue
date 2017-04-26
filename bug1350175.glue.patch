@@ -1,7 +1,7 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
 # Parent  0d453ac4a5f204846be17a74cc20684f42102dec
-Bug 1350175 - Set line and column values for CSS rules from Gecko glue. r=xidorn
+Bug 1350175 - Set line and column values for CSS rules from Gecko glue. r?xidorn
 
 diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 --- a/servo/ports/geckolib/glue.rs
