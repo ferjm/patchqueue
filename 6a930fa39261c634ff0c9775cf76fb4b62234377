@@ -4,9 +4,7 @@
 # Date 1492696360 -7200
 # Node ID 6a930fa39261c634ff0c9775cf76fb4b62234377
 # Parent  03b6604707efc3b9986f4d76a480beb94f1af133
-Bug 1355408 - stylo: Support @-moz-document rule. Update test expectations. r=xidorn
-
-MozReview-Commit-ID: EZJoY1QTtfT
+Bug 1355408 - Update test expectations after @-moz-document support for stylo. r?xidorn
 
 diff --git a/layout/reftests/scoped-style/reftest-stylo.list b/layout/reftests/scoped-style/reftest-stylo.list
 --- a/layout/reftests/scoped-style/reftest-stylo.list
