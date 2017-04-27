@@ -4,9 +4,7 @@
 # Date 1492534783 -7200
 # Node ID 0ec07dd170bafb168fc1b6a92e0876120b13810b
 # Parent  a477e80f03b61be9961bc61770a2b55cce139b91
-Bug 1355408 - stylo: Support @-moz-document rule. r=xidorn
-
-MozReview-Commit-ID: Hb9HzIzviiV
+Bug 1355408 - Part 1: Support @-moz-document rule in stylo. r?xidorn
 
 diff --git a/layout/style/ServoBindings.cpp b/layout/style/ServoBindings.cpp
 --- a/layout/style/ServoBindings.cpp
