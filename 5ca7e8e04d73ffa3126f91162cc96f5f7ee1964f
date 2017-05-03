@@ -4,7 +4,7 @@
 # Date 1493146905 -7200
 # Node ID 5ca7e8e04d73ffa3126f91162cc96f5f7ee1964f
 # Parent  82c2d17e74ef9cdf38a5d5ac4eb3ae846ec30ba4
-Bug 1350175 - Set stylesheet line offset. r=xidorn
+Bug 1350175 - Part 1: Set stylesheet line offset. r=xidorn
 
 diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
 --- a/layout/style/ServoBindingList.h
