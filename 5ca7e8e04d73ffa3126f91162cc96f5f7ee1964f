@@ -3,7 +3,7 @@
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
 # Date 1493146905 -7200
 # Node ID 5ca7e8e04d73ffa3126f91162cc96f5f7ee1964f
-# Parent  3f0c8da53c5cb015933b10b52ded3f30432b378a
+# Parent  82c2d17e74ef9cdf38a5d5ac4eb3ae846ec30ba4
 Bug 1350175 - Set stylesheet line offset. r=xidorn
 
 diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
@@ -96,7 +96,7 @@ diff --git a/layout/style/test/gtest/StyloParsingBench.cpp b/layout/style/test/g
 diff --git a/servo/components/style/encoding_support.rs b/servo/components/style/encoding_support.rs
 --- a/servo/components/style/encoding_support.rs
 +++ b/servo/components/style/encoding_support.rs
-@@ -80,11 +80,12 @@ impl Stylesheet {
+@@ -83,11 +83,12 @@ impl Stylesheet {
                               stylesheet_loader: Option<&StylesheetLoader>,
                               error_reporter: &ParseErrorReporter) {
          let (string, _) = decode_stylesheet_bytes(
@@ -113,7 +113,7 @@ diff --git a/servo/components/style/encoding_support.rs b/servo/components/style
 diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/stylesheets.rs
 --- a/servo/components/style/stylesheets.rs
 +++ b/servo/components/style/stylesheets.rs
-@@ -645,24 +645,25 @@ impl ToCssWithGuard for StyleRule {
+@@ -655,25 +655,25 @@ impl ToCssWithGuard for StyleRule {
  pub type FontFaceRule = FontFaceRuleData;
  
  impl Stylesheet {
@@ -131,9 +131,9 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
          let (rules, dirty_on_viewport_size_change) = Stylesheet::parse_rules(
              css, url_data, existing.origin, &mut namespaces,
              &existing.shared_lock, stylesheet_loader, error_reporter,
--            0u64);
-+            line_number_offset);
- 
+-            existing.quirks_mode, 0u64);
+-
++            existing.quirks_mode, line_number_offset);
          *existing.namespaces.write() = namespaces;
          existing.dirty_on_viewport_size_change
              .store(dirty_on_viewport_size_change, Ordering::Release);
@@ -141,10 +141,11 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
          // Acquire the lock *after* parsing, to minimize the exclusive section.
          let mut guard = existing.shared_lock.write();
          *existing.rules.write_with(&mut guard) = CssRules(rules);
+     }
 diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 --- a/servo/ports/geckolib/glue.rs
 +++ b/servo/ports/geckolib/glue.rs
-@@ -516,17 +516,18 @@ pub extern "C" fn Servo_StyleSheet_Empty
+@@ -520,17 +520,18 @@ pub extern "C" fn Servo_StyleSheet_Empty
  }
  
  #[no_mangle]
@@ -164,8 +165,7 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
          SheetParsingMode::eAuthorSheetFeatures => Origin::Author,
          SheetParsingMode::eUserSheetFeatures => Origin::User,
          SheetParsingMode::eAgentSheetFeatures => Origin::UserAgent,
-@@ -548,27 +549,28 @@ pub extern "C" fn Servo_StyleSheet_FromU
-     let shared_lock = global_style_data.shared_lock.clone();
+@@ -554,26 +555,28 @@ pub extern "C" fn Servo_StyleSheet_FromU
      let media = if media_list.is_null() {
          Arc::new(shared_lock.wrap(MediaList::empty()))
      } else {
@@ -173,10 +173,10 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
      };
  
      Arc::new(Stylesheet::from_str(
--        input, url_data.clone(), origin, media,
--        shared_lock, loader, &RustLogReporter, 0u64)
-+        input, url_data.clone(), origin, media, shared_lock,
-+        loader, &RustLogReporter, line_number_offset as u64)
+         input, url_data.clone(), origin, media,
+-        shared_lock, loader, &RustLogReporter, QuirksMode::NoQuirks, 0u64)
++        shared_lock, loader, &RustLogReporter,
++        QuirksMode::NoQuirks, line_number_offset as u64)
      ).into_strong()
  }
  
@@ -196,7 +196,7 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
          None
      } else {
          Some(StylesheetLoader::new(loader, gecko_stylesheet))
-@@ -576,18 +578,18 @@ pub extern "C" fn Servo_StyleSheet_Clear
+@@ -581,18 +584,18 @@ pub extern "C" fn Servo_StyleSheet_Clear
  
      // FIXME(emilio): loader.as_ref() doesn't typecheck for some reason?
      let loader: Option<&StyleStylesheetLoader> = match loader {
@@ -214,6 +214,6 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
  #[no_mangle]
  pub extern "C" fn Servo_StyleSet_AppendStyleSheet(raw_data: RawServoStyleSetBorrowed,
                                                    raw_sheet: RawServoStyleSheetBorrowed,
+                                                   unique_id: u32,
                                                    flush: bool) {
      let global_style_data = &*GLOBAL_STYLE_DATA;
-     let guard = global_style_data.shared_lock.read();
