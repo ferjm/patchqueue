@@ -327,7 +327,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
                  }
              },
              // @charset is removed by rust-cssparser if it’s the first rule in the stylesheet
-@@ -1183,19 +1205,22 @@ impl<'a, 'b> AtRuleParser for NestedRule
+@@ -1183,48 +1205,57 @@ impl<'a, 'b> AtRuleParser for NestedRule
                     parse_font_face_block(&context, input).into()))))
              }
              AtRulePrelude::CounterStyle(name) => {
@@ -345,12 +345,22 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
                  }))))
              }
              AtRulePrelude::Supports(cond) => {
++                let location = input.current_source_location();
                  let enabled = cond.eval(self.context);
                  Ok(CssRule::Supports(Arc::new(self.shared_lock.wrap(SupportsRule {
                      condition: cond,
                      rules: self.parse_nested_rules(input, CssRuleType::Supports),
                      enabled: enabled,
-@@ -1210,21 +1235,24 @@ impl<'a, 'b> AtRuleParser for NestedRule
++                    source_location: get_location_with_offset(location,
++                                                              self.context.line_number_offset),
+                 }))))
+             }
+             AtRulePrelude::Viewport => {
+                 let context = ParserContext::new_with_rule_type(self.context, Some(CssRuleType::Viewport));
+                 Ok(CssRule::Viewport(Arc::new(self.shared_lock.wrap(
+                    try!(ViewportRule::parse(&context, input))))))
+             }
+             AtRulePrelude::Keyframes(name, prefix) => {
                  let context = ParserContext::new_with_rule_type(self.context, Some(CssRuleType::Keyframes));
                  Ok(CssRule::Keyframes(Arc::new(self.shared_lock.wrap(KeyframesRule {
                      name: name,
@@ -378,7 +388,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
  impl<'a, 'b> QualifiedRuleParser for NestedRuleParser<'a, 'b> {
      type Prelude = SelectorList<SelectorImpl>;
      type QualifiedRule = CssRule;
-@@ -1234,16 +1262,19 @@ impl<'a, 'b> QualifiedRuleParser for Nes
+@@ -1234,16 +1265,19 @@ impl<'a, 'b> QualifiedRuleParser for Nes
              stylesheet_origin: self.stylesheet_origin,
              namespaces: self.namespaces,
          };
