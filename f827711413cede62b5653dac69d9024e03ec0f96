@@ -4,7 +4,7 @@
 # Date 1493130279 -7200
 # Node ID f827711413cede62b5653dac69d9024e03ec0f96
 # Parent  d34b4e83d91c00235f1aef281913ef48b55b966e
-Bug 1350175 - FFI changes to get line and column. r=xidorn
+Bug 1350175 - Part 2: FFI changes to get line and column. r=xidorn
 
 diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
 --- a/layout/style/ServoBindingList.h
