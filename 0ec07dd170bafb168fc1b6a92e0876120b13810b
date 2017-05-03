@@ -3,7 +3,7 @@
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
 # Date 1492534783 -7200
 # Node ID 0ec07dd170bafb168fc1b6a92e0876120b13810b
-# Parent  a477e80f03b61be9961bc61770a2b55cce139b91
+# Parent  82c2d17e74ef9cdf38a5d5ac4eb3ae846ec30ba4
 Bug 1355408 - Part 1: Support @-moz-document rule in stylo. r?xidorn
 
 diff --git a/layout/style/ServoBindings.cpp b/layout/style/ServoBindings.cpp
@@ -27,7 +27,7 @@ diff --git a/layout/style/ServoBindings.cpp b/layout/style/ServoBindings.cpp
  #include "nsRuleNode.h"
  #include "nsString.h"
  #include "nsStyleStruct.h"
-@@ -1935,16 +1936,36 @@ Gecko_RegisterProfilerThread(const char*
+@@ -1972,16 +1973,36 @@ Gecko_RegisterProfilerThread(const char*
  }
  
  void
@@ -85,7 +85,7 @@ diff --git a/layout/style/ServoBindings.h b/layout/style/ServoBindings.h
  
  /*
   * API for Servo to access Gecko data structures. This file must compile as valid
-@@ -481,15 +482,19 @@ bool Gecko_MatchStringArgPseudo(RawGecko
+@@ -479,15 +480,19 @@ bool Gecko_MatchStringArgPseudo(RawGecko
  #include "nsStyleStructList.h"
  #undef STYLE_STRUCT
  
@@ -140,7 +140,7 @@ new file mode 100644
 diff --git a/layout/style/moz.build b/layout/style/moz.build
 --- a/layout/style/moz.build
 +++ b/layout/style/moz.build
-@@ -148,16 +148,17 @@ EXPORTS.mozilla.css += [
+@@ -150,16 +150,17 @@ EXPORTS.mozilla.css += [
      'GroupRule.h',
      'ImageLoader.h',
      'ImportRule.h',
@@ -179,7 +179,7 @@ diff --git a/layout/style/nsCSSParser.cpp b/layout/style/nsCSSParser.cpp
  #include "mozilla/css/Declaration.h"
  #include "nsStyleConsts.h"
  #include "nsNetUtil.h"
-@@ -3900,38 +3901,38 @@ CSSParserImpl::ParseMozDocumentRule(Rule
+@@ -3897,38 +3898,38 @@ CSSParserImpl::ParseMozDocumentRule(Rule
        REPORT_UNEXPECTED_TOKEN(PEMozDocRuleBadFunc2);
        UngetToken();
        delete urls;
@@ -225,7 +225,7 @@ diff --git a/layout/style/nsCSSParser.cpp b/layout/style/nsCSSParser.cpp
 diff --git a/layout/style/nsCSSRules.cpp b/layout/style/nsCSSRules.cpp
 --- a/layout/style/nsCSSRules.cpp
 +++ b/layout/style/nsCSSRules.cpp
-@@ -676,47 +676,61 @@ DocumentRule::UseForPresentation(nsPresC
+@@ -675,47 +675,61 @@ DocumentRule::UseForPresentation(nsPresC
    nsAutoCString docURISpec;
    if (docURI) {
      // If GetSpec fails (due to OOM) just skip these URI-specific CSS rules.
@@ -316,7 +316,7 @@ diff --git a/layout/style/nsCSSRules.cpp b/layout/style/nsCSSRules.cpp
  DocumentRule::URL::~URL()
  {
    NS_CSS_DELETE_LIST_MEMBER(DocumentRule::URL, this, next);
-@@ -1162,17 +1176,17 @@ nsCSSFontFaceStyleDecl::GetParentObject(
+@@ -1161,17 +1175,17 @@ nsCSSFontFaceStyleDecl::GetParentObject(
  JSObject*
  nsCSSFontFaceStyleDecl::WrapObject(JSContext *cx, JS::Handle<JSObject*> aGivenProto)
  {
@@ -350,13 +350,13 @@ diff --git a/layout/style/nsCSSRules.h b/layout/style/nsCSSRules.h
 +#include "mozilla/css/URLMatchingFunction.h"
  #include "mozilla/dom/CSSMediaRule.h"
  #include "mozilla/dom/CSSPageRule.h"
+ #include "mozilla/dom/CSSSupportsRule.h"
  #include "nsAutoPtr.h"
  #include "nsCSSPropertyID.h"
  #include "nsCSSValue.h"
  #include "nsDOMCSSDeclaration.h"
  #include "nsIDOMCSSConditionRule.h"
- #include "nsIDOMCSSCounterStyleRule.h"
-@@ -118,29 +119,28 @@ public:
+@@ -119,29 +120,28 @@ public:
    // nsIDOMCSSConditionRule interface
    NS_DECL_NSIDOMCSSCONDITIONRULE
  
@@ -396,14 +396,14 @@ diff --git a/layout/style/nsCSSRules.h b/layout/style/nsCSSRules.h
 diff --git a/servo/Cargo.lock b/servo/Cargo.lock
 --- a/servo/Cargo.lock
 +++ b/servo/Cargo.lock
-@@ -936,16 +936,17 @@ dependencies = [
+@@ -950,16 +950,17 @@ dependencies = [
  name = "geckoservo"
  version = "0.0.1"
  dependencies = [
   "atomic_refcell 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
   "cssparser 0.13.1 (registry+https://github.com/rust-lang/crates.io-index)",
   "env_logger 0.4.2 (registry+https://github.com/rust-lang/crates.io-index)",
-  "libc 0.2.21 (registry+https://github.com/rust-lang/crates.io-index)",
+  "libc 0.2.22 (registry+https://github.com/rust-lang/crates.io-index)",
   "log 0.3.7 (registry+https://github.com/rust-lang/crates.io-index)",
 + "nsstring_vendor 0.1.0",
   "parking_lot 0.3.8 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -417,9 +417,9 @@ diff --git a/servo/Cargo.lock b/servo/Cargo.lock
 diff --git a/servo/components/script/dom/cssrule.rs b/servo/components/script/dom/cssrule.rs
 --- a/servo/components/script/dom/cssrule.rs
 +++ b/servo/components/script/dom/cssrule.rs
-@@ -79,16 +79,17 @@ impl CSSRule {
-             StyleCssRule::Style(s) => Root::upcast(CSSStyleRule::new(window, parent_stylesheet, s)),
+@@ -80,16 +80,17 @@ impl CSSRule {
              StyleCssRule::FontFace(s) => Root::upcast(CSSFontFaceRule::new(window, parent_stylesheet, s)),
+             StyleCssRule::CounterStyle(_) => unimplemented!(),
              StyleCssRule::Keyframes(s) => Root::upcast(CSSKeyframesRule::new(window, parent_stylesheet, s)),
              StyleCssRule::Media(s) => Root::upcast(CSSMediaRule::new(window, parent_stylesheet, s)),
              StyleCssRule::Namespace(s) => Root::upcast(CSSNamespaceRule::new(window, parent_stylesheet, s)),
@@ -490,8 +490,7 @@ diff --git a/servo/components/style/build_gecko.rs b/servo/components/style/buil
              "mozilla::StyleGrid.*",
              "mozilla::UpdateAnimationsTasks",
              "mozilla::LookAndFeel",
-@@ -719,16 +721,17 @@ mod bindings {
-             "nscolor",
+@@ -720,16 +722,17 @@ mod bindings {
              "nscoord",
              "nsresult",
              "Loader",
@@ -499,6 +498,7 @@ diff --git a/servo/components/style/build_gecko.rs b/servo/components/style/buil
              "EffectCompositor_CascadeLevel",
              "UpdateAnimationsTasks",
              "LengthParsingMode",
+             "InheritTarget",
 +            "URLMatchingFunction",
          ];
          struct ArrayType {
@@ -722,13 +722,13 @@ new file mode 100644
 diff --git a/servo/components/style/lib.rs b/servo/components/style/lib.rs
 --- a/servo/components/style/lib.rs
 +++ b/servo/components/style/lib.rs
-@@ -86,16 +86,17 @@ pub mod animation;
- #[cfg(feature = "servo")] pub mod attr;
+@@ -87,16 +87,17 @@ pub mod animation;
  pub mod bezier;
  pub mod bloom;
  pub mod cache;
  pub mod cascade_info;
  pub mod context;
+ pub mod counter_style;
  pub mod custom_properties;
  pub mod data;
 +pub mod document;
@@ -743,14 +743,14 @@ diff --git a/servo/components/style/lib.rs b/servo/components/style/lib.rs
 diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/stylesheets.rs
 --- a/servo/components/style/stylesheets.rs
 +++ b/servo/components/style/stylesheets.rs
-@@ -5,16 +5,17 @@
- //! Style sheets and their CSS rules.
- 
+@@ -7,16 +7,17 @@
  #![deny(missing_docs)]
  
  use {Atom, Prefix, Namespace};
+ use context::QuirksMode;
+ use counter_style::{CounterStyleRule, parse_counter_style_name, parse_counter_style_body};
  use cssparser::{AtRuleParser, Parser, QualifiedRuleParser};
- use cssparser::{AtRuleType, RuleListParser, Token, parse_one_rule};
+ use cssparser::{AtRuleType, RuleListParser, parse_one_rule};
  use cssparser::ToCss as ParserToCss;
 +use document::DocumentCondition;
  use error_reporting::{ParseErrorReporter, NullReporter};
@@ -761,29 +761,11 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
  pub use gecko::rules::FontFaceRule;
  #[cfg(feature = "gecko")]
  use gecko_bindings::structs::URLExtraData;
-@@ -38,17 +39,16 @@ use std::sync::Arc;
- use std::sync::atomic::{AtomicBool, Ordering};
- use str::starts_with_ignore_ascii_case;
- use style_traits::ToCss;
- use stylist::FnvHashMap;
- use supports::SupportsCondition;
- use values::specified::url::SpecifiedUrl;
- use viewport::ViewportRule;
- 
--
- /// Extra data that the backend may need to resolve url values.
- #[cfg(not(feature = "gecko"))]
- pub type UrlExtraData = ServoUrl;
- 
- /// Extra data that the backend may need to resolve url values.
- #[cfg(feature = "gecko")]
- pub type UrlExtraData = RefPtr<URLExtraData>;
- 
-@@ -288,16 +288,17 @@ pub enum CssRule {
-     Import(Arc<Locked<ImportRule>>),
+@@ -294,16 +295,17 @@ pub enum CssRule {
      Style(Arc<Locked<StyleRule>>),
      Media(Arc<Locked<MediaRule>>),
      FontFace(Arc<Locked<FontFaceRule>>),
+     CounterStyle(Arc<Locked<CounterStyleRule>>),
      Viewport(Arc<Locked<ViewportRule>>),
      Keyframes(Arc<Locked<KeyframesRule>>),
      Supports(Arc<Locked<SupportsRule>>),
@@ -797,7 +779,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
      // https://drafts.csswg.org/cssom/#the-cssrule-interface
      Style               = 1,
      Charset             = 2,
-@@ -310,16 +311,18 @@ pub enum CssRuleType {
+@@ -316,16 +318,18 @@ pub enum CssRuleType {
      Keyframe            = 8,
      // https://drafts.csswg.org/cssom/#the-cssrule-interface
      Margin              = 9,
@@ -816,15 +798,15 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
  
  #[allow(missing_docs)]
  pub enum SingleRuleParseError {
-@@ -335,16 +338,17 @@ impl CssRule {
-             CssRule::Import(_)    => CssRuleType::Import,
-             CssRule::Media(_)     => CssRuleType::Media,
-             CssRule::FontFace(_)  => CssRuleType::FontFace,
+@@ -342,16 +346,17 @@ impl CssRule {
+             CssRule::Media(_) => CssRuleType::Media,
+             CssRule::FontFace(_) => CssRuleType::FontFace,
+             CssRule::CounterStyle(_) => CssRuleType::CounterStyle,
              CssRule::Keyframes(_) => CssRuleType::Keyframes,
              CssRule::Namespace(_) => CssRuleType::Namespace,
-             CssRule::Viewport(_)  => CssRuleType::Viewport,
-             CssRule::Supports(_)  => CssRuleType::Supports,
-             CssRule::Page(_)      => CssRuleType::Page,
+             CssRule::Viewport(_) => CssRuleType::Viewport,
+             CssRule::Supports(_) => CssRuleType::Supports,
+             CssRule::Page(_) => CssRuleType::Page,
 +            CssRule::Document(_)  => CssRuleType::Document,
          }
      }
@@ -834,7 +816,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
              // CssRule::Charset(..) => State::Start,
              CssRule::Import(..) => State::Imports,
              CssRule::Namespace(..) => State::Namespaces,
-@@ -353,49 +357,58 @@ impl CssRule {
+@@ -360,50 +365,59 @@ impl CssRule {
      }
  
      /// Call `f` with the slice of rules directly contained inside this rule.
@@ -860,6 +842,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
              CssRule::Namespace(_) |
              CssRule::Style(_) |
              CssRule::FontFace(_) |
+             CssRule::CounterStyle(_) |
              CssRule::Viewport(_) |
              CssRule::Keyframes(_) |
              CssRule::Page(_) => {
@@ -900,10 +883,10 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
      // input state is None for a nested rule
      // Returns a parsed CSS rule and the final state of the parser
      #[allow(missing_docs)]
-@@ -445,16 +458,17 @@ impl ToCssWithGuard for CssRule {
-             CssRule::Import(ref lock) => lock.read_with(guard).to_css(guard, dest),
+@@ -455,16 +469,17 @@ impl ToCssWithGuard for CssRule {
              CssRule::Style(ref lock) => lock.read_with(guard).to_css(guard, dest),
              CssRule::FontFace(ref lock) => lock.read_with(guard).to_css(guard, dest),
+             CssRule::CounterStyle(ref lock) => lock.read_with(guard).to_css(guard, dest),
              CssRule::Viewport(ref lock) => lock.read_with(guard).to_css(guard, dest),
              CssRule::Keyframes(ref lock) => lock.read_with(guard).to_css(guard, dest),
              CssRule::Media(ref lock) => lock.read_with(guard).to_css(guard, dest),
@@ -918,7 +901,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
  #[allow(missing_docs)]
  pub struct NamespaceRule {
      /// `None` for the default Namespace
-@@ -639,16 +653,39 @@ impl ToCssWithGuard for StyleRule {
+@@ -649,16 +664,39 @@ impl ToCssWithGuard for StyleRule {
          Ok(())
      }
  }
@@ -958,19 +941,19 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
                             stylesheet_loader: Option<&StylesheetLoader>,
                             error_reporter: &ParseErrorReporter) {
          let mut namespaces = Namespaces::default();
-@@ -795,22 +832,29 @@ impl Stylesheet {
-         self.disabled.swap(disabled, Ordering::SeqCst) != disabled
-     }
- }
- 
- fn effective_rules<F>(rules: &[CssRule], device: &Device, guard: &SharedRwLockReadGuard, f: &mut F)
- where F: FnMut(&CssRule) {
+@@ -815,22 +853,29 @@ fn effective_rules<F>(rules: &[CssRule],
+                       device: &Device,
+                       quirks_mode: QuirksMode,
+                       guard: &SharedRwLockReadGuard,
+                       f: &mut F)
+     where F: FnMut(&CssRule)
+ {
      for rule in rules {
          f(rule);
 -        rule.with_nested_rules_and_mq(guard, |rules, mq| {
 +        rule.with_nested_rules_mq_and_doc_rule(guard, |rules, mq, doc_rule| {
              if let Some(media_queries) = mq {
-                 if !media_queries.evaluate(device) {
+                 if !media_queries.evaluate(device, quirks_mode) {
                      return
                  }
              }
@@ -981,7 +964,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
 +                }
 +            }
 +
-             effective_rules(rules, device, guard, f)
+             effective_rules(rules, device, quirks_mode, guard, f)
          })
      }
  }
@@ -989,11 +972,11 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
  macro_rules! rule_filter {
      ($( $method: ident($variant:ident => $rule_type: ident), )+) => {
          impl Stylesheet {
-@@ -833,16 +877,17 @@ macro_rules! rule_filter {
- rule_filter! {
+@@ -854,16 +899,17 @@ rule_filter! {
      effective_style_rules(Style => StyleRule),
      effective_media_rules(Media => MediaRule),
      effective_font_face_rules(FontFace => FontFaceRule),
+     effective_counter_style_rules(CounterStyle => CounterStyleRule),
      effective_viewport_rules(Viewport => ViewportRule),
      effective_keyframes_rules(Keyframes => KeyframesRule),
      effective_supports_rules(Supports => SupportsRule),
@@ -1007,13 +990,13 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
      /// Request a stylesheet after parsing a given `@import` rule.
      ///
      /// The called code is responsible to update the `stylesheet` rules field
-@@ -920,16 +965,18 @@ enum AtRulePrelude {
+@@ -943,16 +989,18 @@ enum AtRulePrelude {
      /// An @supports rule, with its conditional
      Supports(SupportsCondition),
      /// A @viewport rule prelude.
      Viewport,
      /// A @keyframes rule, with its animation name and vendor prefix if exists.
-     Keyframes(Atom, Option<VendorPrefix>),
+     Keyframes(KeyframesName, Option<VendorPrefix>),
      /// A @page rule prelude.
      Page,
 +    /// A @document rule, with its conditional.
@@ -1026,7 +1009,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
      type AtRule = CssRule;
  
      fn parse_prelude(&mut self, name: &str, input: &mut Parser)
-@@ -1132,16 +1179,24 @@ impl<'a, 'b> AtRuleParser for NestedRule
+@@ -1166,16 +1214,24 @@ impl<'a, 'b> AtRuleParser for NestedRule
              },
              "page" => {
                  if cfg!(feature = "gecko") {
@@ -1051,7 +1034,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
          match prelude {
              AtRulePrelude::FontFace => {
                  let context = ParserContext::new_with_rule_type(self.context, Some(CssRuleType::FontFace));
-@@ -1177,16 +1232,26 @@ impl<'a, 'b> AtRuleParser for NestedRule
+@@ -1216,16 +1272,26 @@ impl<'a, 'b> AtRuleParser for NestedRule
              }
              AtRulePrelude::Page => {
                  let context = ParserContext::new_with_rule_type(self.context, Some(CssRuleType::Page));
@@ -1081,24 +1064,24 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
 diff --git a/servo/components/style/stylist.rs b/servo/components/style/stylist.rs
 --- a/servo/components/style/stylist.rs
 +++ b/servo/components/style/stylist.rs
-@@ -572,17 +572,18 @@ impl Stylist {
+@@ -591,17 +591,18 @@ impl Stylist {
  
          if let Some(ref constraints) = self.viewport_constraints {
              device.account_for_viewport_rule(constraints);
          }
  
          fn mq_eval_changed(guard: &SharedRwLockReadGuard, rules: &[CssRule],
-                            before: &Device, after: &Device) -> bool {
+                            before: &Device, after: &Device, quirks_mode: QuirksMode) -> bool {
              for rule in rules {
 -                let changed = rule.with_nested_rules_and_mq(guard, |rules, mq| {
 +                let changed = rule.with_nested_rules_mq_and_doc_rule(guard,
 +                                                                     |rules, mq, _| {
                      if let Some(mq) = mq {
-                         if mq.evaluate(before) != mq.evaluate(after) {
+                         if mq.evaluate(before, quirks_mode) != mq.evaluate(after, quirks_mode) {
                              return true
                          }
                      }
-                     mq_eval_changed(guard, rules, before, after)
+                     mq_eval_changed(guard, rules, before, after, quirks_mode)
                  });
                  if changed {
 diff --git a/servo/ports/geckolib/Cargo.toml b/servo/ports/geckolib/Cargo.toml
