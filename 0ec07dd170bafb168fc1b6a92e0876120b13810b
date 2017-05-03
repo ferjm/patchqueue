@@ -126,7 +126,7 @@ new file mode 100644
 + * Enum defining the type of URL matching function for a @-moz-document rule
 + * condition.
 + */
-+enum URLMatchingFunction {
++enum class URLMatchingFunction {
 +  eURL = 0,
 +  eURLPrefix,
 +  eDomain,
@@ -225,6 +225,37 @@ diff --git a/layout/style/nsCSSParser.cpp b/layout/style/nsCSSParser.cpp
 diff --git a/layout/style/nsCSSRules.cpp b/layout/style/nsCSSRules.cpp
 --- a/layout/style/nsCSSRules.cpp
 +++ b/layout/style/nsCSSRules.cpp
+@@ -558,26 +558,26 @@ DocumentRule::List(FILE* out, int32_t aI
+   for (int32_t indent = aIndent; --indent >= 0; ) {
+     indentStr.AppendLiteral("  ");
+   }
+ 
+   nsAutoCString str;
+   str.AppendLiteral("@-moz-document ");
+   for (URL *url = mURLs; url; url = url->next) {
+     switch (url->func) {
+-      case eURL:
++      case URLMatchingFunction::eURL:
+         str.AppendLiteral("url(\"");
+         break;
+-      case eURLPrefix:
++      case URLMatchingFunction::eURLPrefix:
+         str.AppendLiteral("url-prefix(\"");
+         break;
+-      case eDomain:
++      case URLMatchingFunction::eDomain:
+         str.AppendLiteral("domain(\"");
+         break;
+-      case eRegExp:
++      case URLMatchingFunction::eRegExp:
+         str.AppendLiteral("regexp(\"");
+         break;
+     }
+     nsAutoCString escapedURL(url->url);
+     escapedURL.ReplaceSubstring("\"", "\\\""); // escape quotes
+     str.Append(escapedURL);
+     str.AppendLiteral("\"), ");
+   }
 @@ -675,47 +675,61 @@ DocumentRule::UseForPresentation(nsPresC
    nsAutoCString docURISpec;
    if (docURI) {
@@ -257,15 +288,15 @@ diff --git a/layout/style/nsCSSRules.cpp b/layout/style/nsCSSRules.cpp
 +                                 URLMatchingFunction aUrlMatchingFunction)
 +{
 +  switch (aUrlMatchingFunction) {
-+    case eURL: {
++    case URLMatchingFunction::eURL: {
 +      if (aDocURISpec == aPattern)
 +        return true;
 +    } break;
-+    case eURLPrefix: {
++    case URLMatchingFunction::eURLPrefix: {
 +      if (StringBeginsWith(aDocURISpec, aPattern))
 +        return true;
 +    } break;
-+    case eDomain: {
++    case URLMatchingFunction::eDomain: {
 +      nsAutoCString host;
 +      if (aDocURI)
 +        aDocURI->GetHost(host);
@@ -301,7 +332,7 @@ diff --git a/layout/style/nsCSSRules.cpp b/layout/style/nsCSSRules.cpp
 -    }
 +      }
 +    } break;
-+    case eRegExp: {
++    case URLMatchingFunction::eRegExp: {
 +      NS_ConvertUTF8toUTF16 spec(aDocURISpec);
 +      NS_ConvertUTF8toUTF16 regex(aPattern);
 +      if (nsContentUtils::IsPatternMatching(spec, regex, aDoc)) {
@@ -316,6 +347,37 @@ diff --git a/layout/style/nsCSSRules.cpp b/layout/style/nsCSSRules.cpp
  DocumentRule::URL::~URL()
  {
    NS_CSS_DELETE_LIST_MEMBER(DocumentRule::URL, this, next);
+@@ -741,26 +755,26 @@ DocumentRule::WrapObject(JSContext* aCx,
+   return CSSMozDocumentRuleBinding::Wrap(aCx, this, aGivenProto);
+ }
+ 
+ void
+ DocumentRule::AppendConditionText(nsAString& aCssText) const
+ {
+   for (URL *url = mURLs; url; url = url->next) {
+     switch (url->func) {
+-      case eURL:
++      case URLMatchingFunction::eURL:
+         aCssText.AppendLiteral("url(");
+         break;
+-      case eURLPrefix:
++      case URLMatchingFunction::eURLPrefix:
+         aCssText.AppendLiteral("url-prefix(");
+         break;
+-      case eDomain:
++      case URLMatchingFunction::eDomain:
+         aCssText.AppendLiteral("domain(");
+         break;
+-      case eRegExp:
++      case URLMatchingFunction::eRegExp:
+         aCssText.AppendLiteral("regexp(");
+         break;
+     }
+     nsStyleUtil::AppendEscapedCSSString(NS_ConvertUTF8toUTF16(url->url),
+                                         aCssText);
+     aCssText.AppendLiteral("), ");
+   }
+   aCssText.Truncate(aCssText.Length() - 2); // remove last ", "
 @@ -1161,17 +1175,17 @@ nsCSSFontFaceStyleDecl::GetParentObject(
  JSObject*
  nsCSSFontFaceStyleDecl::WrapObject(JSContext *cx, JS::Handle<JSObject*> aGivenProto)
@@ -435,44 +497,10 @@ diff --git a/servo/components/script/dom/cssrule.rs b/servo/components/script/do
          self.deparent();
          // should set parent rule to None when we add parent rule support
      }
-diff --git a/servo/components/style/Cargo.toml b/servo/components/style/Cargo.toml
---- a/servo/components/style/Cargo.toml
-+++ b/servo/components/style/Cargo.toml
-@@ -60,11 +60,11 @@ time = "0.1"
- unicode-segmentation = "1.0"
- 
- [target.'cfg(windows)'.dependencies]
- kernel32-sys = "0.2"
- 
- [build-dependencies]
- lazy_static = "0.2"
- log = "0.3"
--bindgen = { version = "0.22", optional = true }
-+bindgen = {version = "0.22", optional = true}
- regex = {version = "0.2", optional = true}
- walkdir = "1.0"
 diff --git a/servo/components/style/build_gecko.rs b/servo/components/style/build_gecko.rs
 --- a/servo/components/style/build_gecko.rs
 +++ b/servo/components/style/build_gecko.rs
-@@ -298,16 +298,17 @@ mod bindings {
-             .include(add_include("mozilla/ServoElementSnapshot.h"))
-             .include(add_include("mozilla/dom/Element.h"))
-             .include(add_include("mozilla/dom/NameSpaceConstants.h"))
-             .include(add_include("mozilla/LookAndFeel.h"))
-             .include(add_include("mozilla/ServoBindings.h"))
-             .include(add_include("nsCSSFontFaceRule.h"))
-             .include(add_include("nsMediaFeatures.h"))
-             .include(add_include("nsMediaList.h"))
-+            .include(add_include("mozilla/css/Loader.h"))
-             // FIXME(emilio): Incrementally remove these "pub use"s. Probably
-             // mozilla::css and mozilla::dom are easier.
-             .raw_line("pub use self::root::*;")
-             .raw_line("pub use self::root::mozilla::*;")
-             .raw_line("pub use self::root::mozilla::css::*;")
-             .raw_line("pub use self::root::mozilla::dom::*;")
-             .raw_line("use atomic_refcell::AtomicRefCell;")
-             .raw_line("use data::ElementData;")
-@@ -335,16 +336,17 @@ mod bindings {
+@@ -335,16 +335,17 @@ mod bindings {
              "mozilla::AnimationPropertySegment",
              "mozilla::ComputedTiming",
              "mozilla::ComputedTimingFunction",
@@ -490,7 +518,7 @@ diff --git a/servo/components/style/build_gecko.rs b/servo/components/style/buil
              "mozilla::StyleGrid.*",
              "mozilla::UpdateAnimationsTasks",
              "mozilla::LookAndFeel",
-@@ -720,16 +722,17 @@ mod bindings {
+@@ -720,16 +721,17 @@ mod bindings {
              "nscoord",
              "nsresult",
              "Loader",
@@ -508,10 +536,10 @@ diff --git a/servo/components/style/build_gecko.rs b/servo/components/style/buil
          let array_types = [
              ArrayType { cpp_type: "uintptr_t", rust_type: "usize" },
          ];
-diff --git a/servo/components/style/document.rs b/servo/components/style/document.rs
+diff --git a/servo/components/style/document_condition.rs b/servo/components/style/document_condition.rs
 new file mode 100644
 --- /dev/null
-+++ b/servo/components/style/document.rs
++++ b/servo/components/style/document_condition.rs
 @@ -0,0 +1,206 @@
 +/* This Source Code Form is subject to the terms of the Mozilla Public
 + * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -555,30 +583,30 @@ new file mode 100644
 +        if input.try(|input| input.expect_function_matching("url-prefix")).is_ok() {
 +            input.parse_nested_block(|input| {
 +                let start = input.position();
-+                loop {
++                input.parse_entirely(|input| {
 +                    match input.next() {
-+                        Ok(Token::QuotedString(value)) => {
-+                            return Ok(UrlMatchingFunction::UrlPrefix(value.into_owned()));
-+                        },
-+                        Ok(_) => {},
-+                        Err(_) => { break; }
-+                    };
-+                }
-+                Ok(UrlMatchingFunction::UrlPrefix(input.slice_from(start).to_string()))
++                        Ok(Token::QuotedString(value)) =>
++                            Ok(UrlMatchingFunction::UrlPrefix(value.into_owned())),
++                        _ => Err(()),
++                    }
++                }).or_else(|_| {
++                    while let Ok(_) = input.next() {}
++                    Ok(UrlMatchingFunction::UrlPrefix(input.slice_from(start).to_string()))
++                })
 +            })
 +        } else if input.try(|input| input.expect_function_matching("domain")).is_ok() {
 +            input.parse_nested_block(|input| {
 +                let start = input.position();
-+                loop {
++                input.parse_entirely(|input| {
 +                    match input.next() {
-+                        Ok(Token::QuotedString(value)) => {
-+                            return Ok(UrlMatchingFunction::Domain(value.into_owned()));
-+                        },
-+                        Ok(_) => {},
-+                        Err(_) => { break; }
-+                    };
-+                }
-+                Ok(UrlMatchingFunction::Domain(input.slice_from(start).to_string()))
++                        Ok(Token::QuotedString(value)) =>
++                            Ok(UrlMatchingFunction::Domain(value.into_owned())),
++                        _ => Err(()),
++                    }
++                }).or_else(|_| {
++                    while let Ok(_) = input.next() {}
++                    Ok(UrlMatchingFunction::Domain(input.slice_from(start).to_string()))
++                })
 +            })
 +        } else if input.try(|input| input.expect_function_matching("regexp")).is_ok() {
 +            input.parse_nested_block(|input| {
@@ -731,7 +759,7 @@ diff --git a/servo/components/style/lib.rs b/servo/components/style/lib.rs
  pub mod counter_style;
  pub mod custom_properties;
  pub mod data;
-+pub mod document;
++pub mod document_condition;
  pub mod dom;
  pub mod element_state;
  #[cfg(feature = "servo")] mod encoding_support;
@@ -752,7 +780,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
  use cssparser::{AtRuleParser, Parser, QualifiedRuleParser};
  use cssparser::{AtRuleType, RuleListParser, parse_one_rule};
  use cssparser::ToCss as ParserToCss;
-+use document::DocumentCondition;
++use document_condition::DocumentCondition;
  use error_reporting::{ParseErrorReporter, NullReporter};
  #[cfg(feature = "servo")]
  use font_face::FontFaceRuleData;
