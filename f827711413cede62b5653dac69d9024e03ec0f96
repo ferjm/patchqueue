@@ -3,13 +3,13 @@
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
 # Date 1493130279 -7200
 # Node ID f827711413cede62b5653dac69d9024e03ec0f96
-# Parent  8bbc1e94733d5af3fc8f6dd97eaf252104e725f0
+# Parent  8bb91cdb3d4207def078e6de1ce50dcf706ea904
 Bug 1350175 - FFI changes to get line and column. r=xidorn
 
 diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
 --- a/layout/style/ServoBindingList.h
 +++ b/layout/style/ServoBindingList.h
-@@ -90,17 +90,18 @@ SERVO_BINDING_FUNC(Servo_CssRules_Insert
+@@ -101,17 +101,18 @@ SERVO_BINDING_FUNC(Servo_CssRules_Insert
                     uint16_t* rule_type)
  SERVO_BINDING_FUNC(Servo_CssRules_DeleteRule, nsresult,
                     ServoCssRulesBorrowed rules, uint32_t index)
@@ -25,14 +25,14 @@ diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
                       RawServo##type_##RuleBorrowed rule, nsACString* result) \
    SERVO_BINDING_FUNC(Servo_##type_##Rule_GetCssText, void, \
                       RawServo##type_##RuleBorrowed rule, nsAString* result)
- BASIC_RULE_FUNCS(Style)
- BASIC_RULE_FUNCS(Media)
- BASIC_RULE_FUNCS(Namespace)
- BASIC_RULE_FUNCS(Page)
+ #define GROUP_RULE_FUNCS(type_) \
+   BASIC_RULE_FUNCS(type_) \
+   SERVO_BINDING_FUNC(Servo_##type_##Rule_GetRules, ServoCssRulesStrong, \
+                      RawServo##type_##RuleBorrowed rule)
 diff --git a/layout/style/ServoCSSRuleList.cpp b/layout/style/ServoCSSRuleList.cpp
 --- a/layout/style/ServoCSSRuleList.cpp
 +++ b/layout/style/ServoCSSRuleList.cpp
-@@ -76,18 +76,22 @@ css::Rule*
+@@ -77,18 +77,22 @@ css::Rule*
  ServoCSSRuleList::GetRule(uint32_t aIndex)
  {
    uintptr_t rule = mRules[aIndex];
@@ -55,8 +55,8 @@ diff --git a/layout/style/ServoCSSRuleList.cpp b/layout/style/ServoCSSRuleList.c
        CASE_RULE(MEDIA, Media)
        CASE_RULE(NAMESPACE, Namespace)
        CASE_RULE(PAGE, Page)
+       CASE_RULE(SUPPORTS, Supports)
  #undef CASE_RULE
-       case nsIDOMCSSRule::FONT_FACE_RULE: {
 diff --git a/layout/style/ServoMediaRule.cpp b/layout/style/ServoMediaRule.cpp
 --- a/layout/style/ServoMediaRule.cpp
 +++ b/layout/style/ServoMediaRule.cpp
@@ -227,7 +227,7 @@ diff --git a/layout/style/ServoStyleRule.h b/layout/style/ServoStyleRule.h
 diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 --- a/servo/ports/geckolib/glue.rs
 +++ b/servo/ports/geckolib/glue.rs
-@@ -746,20 +746,25 @@ pub extern "C" fn Servo_CssRules_DeleteR
+@@ -753,20 +753,25 @@ pub extern "C" fn Servo_CssRules_DeleteR
  
  macro_rules! impl_basic_rule_funcs {
      { ($name:ident, $rule_type:ty, $raw_type:ty),
