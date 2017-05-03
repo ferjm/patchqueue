@@ -3,8 +3,8 @@
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
 # Date 1492696360 -7200
 # Node ID 6a930fa39261c634ff0c9775cf76fb4b62234377
-# Parent  9f5ba22427e46be61778560ec1791ec8e0ab9bb4
-Bug 1355408 - Part 2: Update test expectations after @-moz-document support for stylo. r?xidorn
+# Parent  3c2acef6b221da3e7f8422b39dc4d2745e5294bd
+Bug 1355408 - Part 2: Update test expectations after @-moz-document support for stylo. r=xidorn
 
 diff --git a/layout/reftests/scoped-style/reftest.list b/layout/reftests/scoped-style/reftest.list
 --- a/layout/reftests/scoped-style/reftest.list
