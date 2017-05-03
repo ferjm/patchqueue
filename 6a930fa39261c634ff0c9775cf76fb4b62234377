@@ -3,57 +3,57 @@
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
 # Date 1492696360 -7200
 # Node ID 6a930fa39261c634ff0c9775cf76fb4b62234377
-# Parent  03b6604707efc3b9986f4d76a480beb94f1af133
+# Parent  9f5ba22427e46be61778560ec1791ec8e0ab9bb4
 Bug 1355408 - Part 2: Update test expectations after @-moz-document support for stylo. r?xidorn
 
-diff --git a/layout/reftests/scoped-style/reftest-stylo.list b/layout/reftests/scoped-style/reftest-stylo.list
---- a/layout/reftests/scoped-style/reftest-stylo.list
-+++ b/layout/reftests/scoped-style/reftest-stylo.list
-@@ -44,15 +44,15 @@ fails == scoped-style-dynamic-011.html s
- == scoped-style-dynamic-012.svg scoped-style-dynamic-012.svg
- == scoped-style-dynamic-013.svg scoped-style-dynamic-013.svg
- == scoped-style-dynamic-014.svg scoped-style-dynamic-014.svg
- == scoped-style-dynamic-015.svg scoped-style-dynamic-015.svg
- fails == scoped-style-import.html scoped-style-import.html
- fails == scoped-style-media.html scoped-style-media.html
- fails == scoped-style-namespace.html scoped-style-namespace.html
- fails == scoped-style-charset.html scoped-style-charset.html
--fails == scoped-style-document.html scoped-style-document.html
-+== scoped-style-document.html scoped-style-document.html
- fails HTTP(..) == scoped-style-font-face.html scoped-style-font-face.html
- fails == scoped-style-keyframes.html scoped-style-keyframes.html
- fails == scoped-style-supports.html scoped-style-supports.html
- fails pref(layout.css.scope-pseudo.enabled,true) == scoped-style-pseudo-001.html scoped-style-pseudo-001.html
- fails pref(layout.css.scope-pseudo.enabled,true) == scoped-style-pseudo-002.html scoped-style-pseudo-002.html
- pref(layout.css.scope-pseudo.enabled,true) == scoped-style-pseudo-003.html scoped-style-pseudo-003.html
-diff --git a/layout/reftests/w3c-css/submitted/conditional3/reftest-stylo.list b/layout/reftests/w3c-css/submitted/conditional3/reftest-stylo.list
---- a/layout/reftests/w3c-css/submitted/conditional3/reftest-stylo.list
-+++ b/layout/reftests/w3c-css/submitted/conditional3/reftest-stylo.list
-@@ -20,18 +20,18 @@
- == css-supports-019.xht css-supports-019.xht
- == css-supports-020.xht css-supports-020.xht
- == css-supports-021.xht css-supports-021.xht
- == css-supports-022.xht css-supports-022.xht
- == css-supports-023.xht css-supports-023.xht
- == css-supports-024.xht css-supports-024.xht
- == css-supports-025.xht css-supports-025.xht
- == css-supports-026.xht css-supports-026.xht
--fails == css-supports-027.xht css-supports-027.xht
--fails == css-supports-028.xht css-supports-028.xht
-+== css-supports-027.xht css-supports-027.xht
-+== css-supports-028.xht css-supports-028.xht
- == css-supports-029.xht css-supports-029.xht
- == css-supports-030.xht css-supports-030.xht
- == css-supports-031.xht css-supports-031.xht
- == css-supports-032.xht css-supports-032.xht
- == css-supports-033.xht css-supports-033.xht
- == css-supports-034.xht css-supports-034.xht
- == css-supports-035.xht css-supports-035.xht
- == css-supports-036.xht css-supports-036.xht
+diff --git a/layout/reftests/scoped-style/reftest.list b/layout/reftests/scoped-style/reftest.list
+--- a/layout/reftests/scoped-style/reftest.list
++++ b/layout/reftests/scoped-style/reftest.list
+@@ -43,15 +43,15 @@ fails-if(stylo) == scoped-style-dynamic-
+ == scoped-style-dynamic-012.svg scoped-style-dynamic-012-ref.svg
+ == scoped-style-dynamic-013.svg scoped-style-dynamic-013-ref.svg
+ == scoped-style-dynamic-014.svg scoped-style-dynamic-014-ref.svg
+ == scoped-style-dynamic-015.svg scoped-style-dynamic-015-ref.svg
+ fails-if(stylo) == scoped-style-import.html scoped-style-import-ref.html
+ fails-if(stylo) == scoped-style-media.html scoped-style-media-ref.html
+ fails-if(stylo) == scoped-style-namespace.html scoped-style-namespace-ref.html
+ fails-if(stylo) == scoped-style-charset.html scoped-style-charset-ref.html
+-fails-if(stylo) == scoped-style-document.html scoped-style-document-ref.html
++== scoped-style-document.html scoped-style-document-ref.html
+ fails-if(stylo) HTTP(..) == scoped-style-font-face.html scoped-style-font-face-ref.html
+ fails-if(stylo) == scoped-style-keyframes.html scoped-style-keyframes-ref.html
+ fails-if(stylo) == scoped-style-supports.html scoped-style-supports-ref.html
+ pref(layout.css.scope-pseudo.enabled,true) fails-if(stylo) == scoped-style-pseudo-001.html scoped-style-pseudo-001-ref.html
+ pref(layout.css.scope-pseudo.enabled,true) fails-if(stylo) == scoped-style-pseudo-002.html scoped-style-pseudo-002-ref.html
+ pref(layout.css.scope-pseudo.enabled,true) == scoped-style-pseudo-003.html scoped-style-pseudo-003-ref.html
+diff --git a/layout/reftests/w3c-css/submitted/conditional3/reftest.list b/layout/reftests/w3c-css/submitted/conditional3/reftest.list
+--- a/layout/reftests/w3c-css/submitted/conditional3/reftest.list
++++ b/layout/reftests/w3c-css/submitted/conditional3/reftest.list
+@@ -19,18 +19,18 @@
+ == css-supports-019.xht support/pass.xht
+ == css-supports-020.xht support/pass.xht
+ == css-supports-021.xht support/pass.xht
+ == css-supports-022.xht support/pass.xht
+ == css-supports-023.xht support/pass.xht
+ == css-supports-024.xht support/pass.xht
+ == css-supports-025.xht support/pass.xht
+ == css-supports-026.xht support/pass.xht
+-fails-if(stylo) == css-supports-027.xht support/pass.xht
+-fails-if(stylo) == css-supports-028.xht support/pass.xht
++== css-supports-027.xht support/pass.xht
++== css-supports-028.xht support/pass.xht
+ == css-supports-029.xht support/pass.xht
+ == css-supports-030.xht support/pass.xht
+ == css-supports-031.xht support/pass.xht
+ == css-supports-032.xht support/pass.xht
+ == css-supports-033.xht support/pass.xht
+ == css-supports-034.xht support/pass.xht
+ == css-supports-035.xht support/pass.xht
+ == css-supports-036.xht support/pass.xht
 diff --git a/layout/style/test/stylo-failures.md b/layout/style/test/stylo-failures.md
 --- a/layout/style/test/stylo-failures.md
 +++ b/layout/style/test/stylo-failures.md
-@@ -266,18 +266,16 @@ to mochitest command.
+@@ -229,18 +229,16 @@ to mochitest command.
    * test_hover_quirk.html: hover quirks bug 1355724 [6]
  * test_pseudoelement_parsing.html: support parsing some pseudo-classes on some pseudo-elements [5]
  * Unit should be preserved after parsing servo/servo#15346
@@ -64,7 +64,7 @@ diff --git a/layout/style/test/stylo-failures.md b/layout/style/test/stylo-failu
    * test_rule_serialization.html [2]
 -  * test_moz_document_rules.html [13]
 -  * test_bug511909.html `@-moz-document` [4]
-   * test_condition_text.html: also \@supports [7]
+   * test_condition_text.html: also \@supports [11]
  * getComputedStyle style doesn't contain custom properties bug 1336891
    * test_variable_serialization_computed.html [35]
    * test_variables.html `custom property name` [2]
