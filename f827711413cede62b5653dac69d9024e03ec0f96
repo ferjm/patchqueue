@@ -3,7 +3,7 @@
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
 # Date 1493130279 -7200
 # Node ID f827711413cede62b5653dac69d9024e03ec0f96
-# Parent  8bb91cdb3d4207def078e6de1ce50dcf706ea904
+# Parent  d34b4e83d91c00235f1aef281913ef48b55b966e
 Bug 1350175 - FFI changes to get line and column. r=xidorn
 
 diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
@@ -224,6 +224,52 @@ diff --git a/layout/style/ServoStyleRule.h b/layout/style/ServoStyleRule.h
    NS_DECL_NSIDOMCSSSTYLERULE
  
    // WebIDL interface
+diff --git a/layout/style/ServoSupportsRule.cpp b/layout/style/ServoSupportsRule.cpp
+--- a/layout/style/ServoSupportsRule.cpp
++++ b/layout/style/ServoSupportsRule.cpp
+@@ -9,17 +9,18 @@
+ #include "mozilla/ServoSupportsRule.h"
+ 
+ #include "mozilla/ServoBindings.h"
+ 
+ using namespace mozilla::dom;
+ 
+ namespace mozilla {
+ 
+-ServoSupportsRule::ServoSupportsRule(RefPtr<RawServoSupportsRule> aRawRule)
++ServoSupportsRule::ServoSupportsRule(RefPtr<RawServoSupportsRule> aRawRule,
++                                     uint32_t aLine, uint32_t aColumn)
+   : CSSSupportsRule(Servo_SupportsRule_GetRules(aRawRule).Consume())
+   , mRawRule(Move(aRawRule))
+ {
+ }
+ 
+ ServoSupportsRule::~ServoSupportsRule()
+ {
+ }
+diff --git a/layout/style/ServoSupportsRule.h b/layout/style/ServoSupportsRule.h
+--- a/layout/style/ServoSupportsRule.h
++++ b/layout/style/ServoSupportsRule.h
+@@ -12,17 +12,18 @@
+ #include "mozilla/dom/CSSSupportsRule.h"
+ #include "mozilla/ServoBindingTypes.h"
+ 
+ namespace mozilla {
+ 
+ class ServoSupportsRule final : public dom::CSSSupportsRule
+ {
+ public:
+-  explicit ServoSupportsRule(RefPtr<RawServoSupportsRule> aRawRule);
++  ServoSupportsRule(RefPtr<RawServoSupportsRule> aRawRule,
++                    uint32_t aLine, uint32_t aColumn);
+ 
+   NS_DECL_ISUPPORTS_INHERITED
+ 
+   already_AddRefed<css::Rule> Clone() const override;
+   bool UseForPresentation(nsPresContext* aPresContext,
+                           nsMediaQueryResultCacheKey& aKey) final;
+ #ifdef DEBUG
+   void List(FILE* out = stdout, int32_t aIndent = 0) const final;
 diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 --- a/servo/ports/geckolib/glue.rs
 +++ b/servo/ports/geckolib/glue.rs
