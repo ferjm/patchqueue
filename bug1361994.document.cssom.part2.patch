@@ -1,0 +1,139 @@
+# HG changeset patch
+# User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
+# Parent  79dd5e85310a8a62be1dfc4db4f287ebad7bdffa
+Bug 1361994 - Part 2: Implement CSSOM support for @-moz-document. r?xidorn
+
+diff --git a/layout/style/ServoArcTypeList.h b/layout/style/ServoArcTypeList.h
+--- a/layout/style/ServoArcTypeList.h
++++ b/layout/style/ServoArcTypeList.h
+@@ -13,8 +13,9 @@ SERVO_ARC_TYPE(DeclarationBlock, RawServ
+ SERVO_ARC_TYPE(StyleRule, RawServoStyleRule)
+ SERVO_ARC_TYPE(ImportRule, RawServoImportRule)
+ SERVO_ARC_TYPE(AnimationValue, RawServoAnimationValue)
+ SERVO_ARC_TYPE(MediaList, RawServoMediaList)
+ SERVO_ARC_TYPE(MediaRule, RawServoMediaRule)
+ SERVO_ARC_TYPE(NamespaceRule, RawServoNamespaceRule)
+ SERVO_ARC_TYPE(PageRule, RawServoPageRule)
+ SERVO_ARC_TYPE(SupportsRule, RawServoSupportsRule)
++SERVO_ARC_TYPE(DocumentRule, RawServoDocumentRule)
+diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
+--- a/layout/style/ServoBindingList.h
++++ b/layout/style/ServoBindingList.h
+@@ -113,16 +113,17 @@ SERVO_BINDING_FUNC(Servo_CssRules_Delete
+   BASIC_RULE_FUNCS(type_) \
+   SERVO_BINDING_FUNC(Servo_##type_##Rule_GetRules, ServoCssRulesStrong, \
+                      RawServo##type_##RuleBorrowed rule)
+ BASIC_RULE_FUNCS(Style)
+ GROUP_RULE_FUNCS(Media)
+ BASIC_RULE_FUNCS(Namespace)
+ BASIC_RULE_FUNCS(Page)
+ GROUP_RULE_FUNCS(Supports)
++GROUP_RULE_FUNCS(Document)
+ #undef GROUP_RULE_FUNCS
+ #undef BASIC_RULE_FUNCS
+ SERVO_BINDING_FUNC(Servo_CssRules_GetFontFaceRuleAt, nsCSSFontFaceRule*,
+                    ServoCssRulesBorrowed rules, uint32_t index)
+ SERVO_BINDING_FUNC(Servo_StyleRule_GetStyle, RawServoDeclarationBlockStrong,
+                    RawServoStyleRuleBorrowed rule)
+ SERVO_BINDING_FUNC(Servo_StyleRule_SetStyle, void,
+                    RawServoStyleRuleBorrowed rule,
+@@ -137,16 +138,18 @@ SERVO_BINDING_FUNC(Servo_NamespaceRule_G
+                    RawServoNamespaceRuleBorrowed rule)
+ SERVO_BINDING_FUNC(Servo_PageRule_GetStyle, RawServoDeclarationBlockStrong,
+                    RawServoPageRuleBorrowed rule)
+ SERVO_BINDING_FUNC(Servo_PageRule_SetStyle, void,
+                    RawServoPageRuleBorrowed rule,
+                    RawServoDeclarationBlockBorrowed declarations)
+ SERVO_BINDING_FUNC(Servo_SupportsRule_GetConditionText, void,
+                    RawServoSupportsRuleBorrowed rule, nsAString* result)
++SERVO_BINDING_FUNC(Servo_DocumentRule_GetConditionText, void,
++                   RawServoDocumentRuleBorrowed rule, nsAString* result)
+ 
+ // Animations API
+ SERVO_BINDING_FUNC(Servo_ParseProperty,
+                    RawServoDeclarationBlockStrong,
+                    nsCSSPropertyID property, const nsACString* value,
+                    RawGeckoURLExtraData* data)
+ SERVO_BINDING_FUNC(Servo_ParseEasing, bool,
+                    const nsAString* easing,
+diff --git a/layout/style/ServoCSSRuleList.cpp b/layout/style/ServoCSSRuleList.cpp
+--- a/layout/style/ServoCSSRuleList.cpp
++++ b/layout/style/ServoCSSRuleList.cpp
+@@ -1,23 +1,23 @@
+ /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+ /* vim: set ts=8 sts=2 et sw=2 tw=80: */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ /* representation of CSSRuleList for stylo */
+ 
++#include "mozilla/ServoBindings.h"
+ #include "mozilla/ServoCSSRuleList.h"
+-
+-#include "mozilla/ServoBindings.h"
+-#include "mozilla/ServoStyleRule.h"
++#include "mozilla/ServoDocumentRule.h"
+ #include "mozilla/ServoMediaRule.h"
+ #include "mozilla/ServoNamespaceRule.h"
+ #include "mozilla/ServoPageRule.h"
++#include "mozilla/ServoStyleRule.h"
+ #include "mozilla/ServoSupportsRule.h"
+ 
+ namespace mozilla {
+ 
+ ServoCSSRuleList::ServoCSSRuleList(already_AddRefed<ServoCssRules> aRawRules)
+   : mRawRules(aRawRules)
+ {
+   Servo_CssRules_ListTypes(mRawRules, &mRules);
+@@ -86,16 +86,17 @@ ServoCSSRuleList::GetRule(uint32_t aInde
+           Servo_CssRules_Get##name_##RuleAt(mRawRules, aIndex).Consume());  \
+         break;                                                              \
+       }
+       CASE_RULE(STYLE, Style)
+       CASE_RULE(MEDIA, Media)
+       CASE_RULE(NAMESPACE, Namespace)
+       CASE_RULE(PAGE, Page)
+       CASE_RULE(SUPPORTS, Supports)
++      CASE_RULE(DOCUEMNT, Document)
+ #undef CASE_RULE
+       case nsIDOMCSSRule::FONT_FACE_RULE: {
+         // Returns a borrowed nsCSSFontFaceRule object directly, so we
+         // don't need to create anything here, but we still need to have
+         // the style sheet and parent rule set properly.
+         ruleObj = Servo_CssRules_GetFontFaceRuleAt(mRawRules, aIndex);
+         break;
+       }
+@@ -211,17 +212,18 @@ ServoCSSRuleList::FillStyleRuleHashtable
+ {
+   for (uint32_t i = 0; i < mRules.Length(); i++) {
+     uint16_t type = GetRuleType(i);
+     if (type == nsIDOMCSSRule::STYLE_RULE) {
+       ServoStyleRule* castedRule = static_cast<ServoStyleRule*>(GetRule(i));
+       RawServoStyleRule* rawRule = castedRule->Raw();
+       aTable.Put(rawRule, castedRule);
+     } else if (type == nsIDOMCSSRule::MEDIA_RULE ||
+-               type == nsIDOMCSSRule::SUPPORTS_RULE) {
++               type == nsIDOMCSSRule::SUPPORTS_RULE ||
++               type == nsIDOMCSSRule::DOCUMENT_RULE) {
+       GroupRule* castedRule = static_cast<GroupRule*>(GetRule(i));
+ 
+       // Call this method recursively on the ServoCSSRuleList in the rule.
+       ServoCSSRuleList* castedRuleList = static_cast<ServoCSSRuleList*>(
+         castedRule->CssRules());
+       castedRuleList->FillStyleRuleHashtable(aTable);
+     }
+   }
+diff --git a/layout/style/ServoDocumentRule.h b/layout/style/ServoDocumentRule.h
+new file mode 100644
+--- /dev/null
++++ b/layout/style/ServoDocumentRule.h
+@@ -0,0 +1,8 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++/* representation of CSSDocumentRule for stylo */
++
