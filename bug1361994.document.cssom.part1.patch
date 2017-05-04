@@ -1,0 +1,5 @@
+# HG changeset patch
+# User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
+# Parent  13bca1177506061c1c477e444e72da47b97250b9
+Bug 1361994 - stylo: Implement access to DocumentRule. r?xidorn
+
