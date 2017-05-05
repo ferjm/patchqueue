@@ -1,0 +1,5 @@
+# HG changeset patch
+# User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
+# Parent  dfe23ce993f5bf28d25fcfcc9c8a0b8367b230b1
+Bug 1361994 - Part 0: Add MOZ_DOCUMENT to nsIDOMCSSRule. r?xidorn
+
