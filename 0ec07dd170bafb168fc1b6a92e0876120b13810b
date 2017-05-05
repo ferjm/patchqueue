@@ -1094,7 +1094,27 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
 diff --git a/servo/components/style/stylist.rs b/servo/components/style/stylist.rs
 --- a/servo/components/style/stylist.rs
 +++ b/servo/components/style/stylist.rs
-@@ -591,22 +591,33 @@ impl Stylist {
+@@ -36,17 +36,18 @@ use smallvec::VecLike;
+ use std::borrow::Borrow;
+ use std::collections::HashMap;
+ use std::fmt;
+ use std::hash::Hash;
+ #[cfg(feature = "servo")]
+ use std::marker::PhantomData;
+ use std::sync::Arc;
+ use style_traits::viewport::ViewportConstraints;
+-use stylesheets::{CssRule, FontFaceRule, Origin, StyleRule, Stylesheet, UserAgentStylesheets};
++use stylesheets::{CssRule, FontFaceRule, Origin, StyleRule, Stylesheet};
++use stylesheets::{NestedRulesResult, UserAgentStylesheets};
+ use thread_state;
+ use viewport::{self, MaybeNew, ViewportRule};
+ 
+ pub use ::fnv::FnvHashMap;
+ 
+ /// This structure holds all the selectors and device characteristics
+ /// for a given document. The selectors are converted into `Rule`s
+ /// (defined in rust-selectors), and introduced in a `SelectorMap`
+@@ -591,22 +592,33 @@ impl Stylist {
  
          if let Some(ref constraints) = self.viewport_constraints {
              device.account_for_viewport_rule(constraints);
