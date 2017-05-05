@@ -3,7 +3,7 @@
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
 # Date 1492534783 -7200
 # Node ID 0ec07dd170bafb168fc1b6a92e0876120b13810b
-# Parent  82c2d17e74ef9cdf38a5d5ac4eb3ae846ec30ba4
+# Parent  0b255199db9d6a6f189b89b7906f99155bde3726
 Bug 1355408 - Part 1: Support @-moz-document rule in stylo. r?xidorn
 
 diff --git a/layout/style/ServoBindings.cpp b/layout/style/ServoBindings.cpp
@@ -726,7 +726,7 @@ new file mode 100644
 diff --git a/servo/components/style/lib.rs b/servo/components/style/lib.rs
 --- a/servo/components/style/lib.rs
 +++ b/servo/components/style/lib.rs
-@@ -87,16 +87,17 @@ pub mod animation;
+@@ -88,16 +88,17 @@ pub mod animation;
  pub mod bezier;
  pub mod bloom;
  pub mod cache;
@@ -1101,8 +1101,8 @@ diff --git a/servo/components/style/stylist.rs b/servo/components/style/stylist.
  use std::hash::Hash;
  #[cfg(feature = "servo")]
  use std::marker::PhantomData;
- use std::sync::Arc;
  use style_traits::viewport::ViewportConstraints;
+ use stylearc::Arc;
 -use stylesheets::{CssRule, FontFaceRule, Origin, StyleRule, Stylesheet, UserAgentStylesheets};
 +use stylesheets::{CssRule, FontFaceRule, Origin, StyleRule, Stylesheet};
 +use stylesheets::{NestedRulesResult, UserAgentStylesheets};
