@@ -3,7 +3,7 @@
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
 # Date 1492534783 -7200
 # Node ID 0ec07dd170bafb168fc1b6a92e0876120b13810b
-# Parent  0b255199db9d6a6f189b89b7906f99155bde3726
+# Parent  1fda52a1f3b81cf1a821155998dca637bb64e3d9
 Bug 1355408 - Part 1: Support @-moz-document rule in stylo. r?xidorn
 
 diff --git a/layout/style/ServoBindings.cpp b/layout/style/ServoBindings.cpp
@@ -27,7 +27,7 @@ diff --git a/layout/style/ServoBindings.cpp b/layout/style/ServoBindings.cpp
  #include "nsRuleNode.h"
  #include "nsString.h"
  #include "nsStyleStruct.h"
-@@ -1972,16 +1973,36 @@ Gecko_RegisterProfilerThread(const char*
+@@ -2021,16 +2022,36 @@ Gecko_RegisterProfilerThread(const char*
  }
  
  void
@@ -85,7 +85,7 @@ diff --git a/layout/style/ServoBindings.h b/layout/style/ServoBindings.h
  
  /*
   * API for Servo to access Gecko data structures. This file must compile as valid
-@@ -479,15 +480,19 @@ bool Gecko_MatchStringArgPseudo(RawGecko
+@@ -488,15 +489,19 @@ bool Gecko_MatchStringArgPseudo(RawGecko
  #include "nsStyleStructList.h"
  #undef STYLE_STRUCT
  
@@ -140,7 +140,7 @@ new file mode 100644
 diff --git a/layout/style/moz.build b/layout/style/moz.build
 --- a/layout/style/moz.build
 +++ b/layout/style/moz.build
-@@ -150,16 +150,17 @@ EXPORTS.mozilla.css += [
+@@ -151,16 +151,17 @@ EXPORTS.mozilla.css += [
      'GroupRule.h',
      'ImageLoader.h',
      'ImportRule.h',
@@ -179,7 +179,7 @@ diff --git a/layout/style/nsCSSParser.cpp b/layout/style/nsCSSParser.cpp
  #include "mozilla/css/Declaration.h"
  #include "nsStyleConsts.h"
  #include "nsNetUtil.h"
-@@ -3897,38 +3898,38 @@ CSSParserImpl::ParseMozDocumentRule(Rule
+@@ -3895,38 +3896,38 @@ CSSParserImpl::ParseMozDocumentRule(Rule
        REPORT_UNEXPECTED_TOKEN(PEMozDocRuleBadFunc2);
        UngetToken();
        delete urls;
@@ -383,7 +383,7 @@ diff --git a/layout/style/nsCSSRules.cpp b/layout/style/nsCSSRules.cpp
      aCssText.AppendLiteral("), ");
    }
    aCssText.Truncate(aCssText.Length() - 2); // remove last ", "
-@@ -1161,17 +1180,17 @@ nsCSSFontFaceStyleDecl::GetParentObject(
+@@ -1164,17 +1183,17 @@ nsCSSFontFaceStyleDecl::GetParentObject(
  JSObject*
  nsCSSFontFaceStyleDecl::WrapObject(JSContext *cx, JS::Handle<JSObject*> aGivenProto)
  {
@@ -463,7 +463,7 @@ diff --git a/layout/style/nsCSSRules.h b/layout/style/nsCSSRules.h
 diff --git a/servo/Cargo.lock b/servo/Cargo.lock
 --- a/servo/Cargo.lock
 +++ b/servo/Cargo.lock
-@@ -950,16 +950,17 @@ dependencies = [
+@@ -955,16 +955,17 @@ dependencies = [
  name = "geckoservo"
  version = "0.0.1"
  dependencies = [
@@ -523,7 +523,7 @@ diff --git a/servo/components/style/build_gecko.rs b/servo/components/style/buil
              "mozilla::StyleGrid.*",
              "mozilla::UpdateAnimationsTasks",
              "mozilla::LookAndFeel",
-@@ -720,16 +721,17 @@ mod bindings {
+@@ -721,16 +722,17 @@ mod bindings {
              "nscoord",
              "nsresult",
              "Loader",
@@ -1094,8 +1094,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
 diff --git a/servo/components/style/stylist.rs b/servo/components/style/stylist.rs
 --- a/servo/components/style/stylist.rs
 +++ b/servo/components/style/stylist.rs
-@@ -36,17 +36,18 @@ use smallvec::VecLike;
- use std::borrow::Borrow;
+@@ -37,16 +37,18 @@ use std::borrow::Borrow;
  use std::collections::HashMap;
  use std::fmt;
  use std::hash::Hash;
@@ -1103,9 +1102,9 @@ diff --git a/servo/components/style/stylist.rs b/servo/components/style/stylist.
  use std::marker::PhantomData;
  use style_traits::viewport::ViewportConstraints;
  use stylearc::Arc;
--use stylesheets::{CssRule, FontFaceRule, Origin, StyleRule, Stylesheet, UserAgentStylesheets};
-+use stylesheets::{CssRule, FontFaceRule, Origin, StyleRule, Stylesheet};
-+use stylesheets::{NestedRulesResult, UserAgentStylesheets};
+ use stylesheets::{CssRule, FontFaceRule, Origin, StyleRule, Stylesheet, UserAgentStylesheets};
++#[cfg(feature = "servo")]
++use stylesheets::NestedRulesResult;
  use thread_state;
  use viewport::{self, MaybeNew, ViewportRule};
  
@@ -1114,7 +1113,7 @@ diff --git a/servo/components/style/stylist.rs b/servo/components/style/stylist.
  /// This structure holds all the selectors and device characteristics
  /// for a given document. The selectors are converted into `Rule`s
  /// (defined in rust-selectors), and introduced in a `SelectorMap`
-@@ -591,22 +592,33 @@ impl Stylist {
+@@ -591,22 +593,33 @@ impl Stylist {
  
          if let Some(ref constraints) = self.viewport_constraints {
              device.account_for_viewport_rule(constraints);
