@@ -3,7 +3,7 @@
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
 # Date 1492534783 -7200
 # Node ID 0ec07dd170bafb168fc1b6a92e0876120b13810b
-# Parent  1fda52a1f3b81cf1a821155998dca637bb64e3d9
+# Parent  9348b76977e833f108cf77dff75b0fab887a2fc1
 Bug 1355408 - Part 1: Support @-moz-document rule in stylo. r?xidorn
 
 diff --git a/layout/style/ServoBindings.cpp b/layout/style/ServoBindings.cpp
@@ -27,7 +27,7 @@ diff --git a/layout/style/ServoBindings.cpp b/layout/style/ServoBindings.cpp
  #include "nsRuleNode.h"
  #include "nsString.h"
  #include "nsStyleStruct.h"
-@@ -2021,16 +2022,36 @@ Gecko_RegisterProfilerThread(const char*
+@@ -2004,16 +2005,36 @@ Gecko_RegisterProfilerThread(const char*
  }
  
  void
@@ -85,7 +85,7 @@ diff --git a/layout/style/ServoBindings.h b/layout/style/ServoBindings.h
  
  /*
   * API for Servo to access Gecko data structures. This file must compile as valid
-@@ -488,15 +489,19 @@ bool Gecko_MatchStringArgPseudo(RawGecko
+@@ -484,15 +485,19 @@ bool Gecko_MatchStringArgPseudo(RawGecko
  #include "nsStyleStructList.h"
  #undef STYLE_STRUCT
  
@@ -179,7 +179,7 @@ diff --git a/layout/style/nsCSSParser.cpp b/layout/style/nsCSSParser.cpp
  #include "mozilla/css/Declaration.h"
  #include "nsStyleConsts.h"
  #include "nsNetUtil.h"
-@@ -3895,38 +3896,38 @@ CSSParserImpl::ParseMozDocumentRule(Rule
+@@ -3897,38 +3898,38 @@ CSSParserImpl::ParseMozDocumentRule(Rule
        REPORT_UNEXPECTED_TOKEN(PEMozDocRuleBadFunc2);
        UngetToken();
        delete urls;
@@ -723,6 +723,116 @@ new file mode 100644
 +        Ok(())
 +    }
 +}
+diff --git a/servo/components/style/gecko_bindings/bindings.rs b/servo/components/style/gecko_bindings/bindings.rs
+--- a/servo/components/style/gecko_bindings/bindings.rs
++++ b/servo/components/style/gecko_bindings/bindings.rs
+@@ -187,16 +187,17 @@ use gecko_bindings::structs::nscolor;
+ use gecko_bindings::structs::nscoord;
+ use gecko_bindings::structs::nsresult;
+ use gecko_bindings::structs::Loader;
+ use gecko_bindings::structs::ServoStyleSheet;
+ use gecko_bindings::structs::EffectCompositor_CascadeLevel;
+ use gecko_bindings::structs::UpdateAnimationsTasks;
+ use gecko_bindings::structs::LengthParsingMode;
+ use gecko_bindings::structs::InheritTarget;
++use gecko_bindings::structs::URLMatchingFunction;
+ pub type nsTArrayBorrowed_uintptr_t<'a> = &'a mut ::gecko_bindings::structs::nsTArray<usize>;
+ pub type ServoCssRulesStrong = ::gecko_bindings::sugar::ownership::Strong<ServoCssRules>;
+ pub type ServoCssRulesBorrowed<'a> = &'a ServoCssRules;
+ pub type ServoCssRulesBorrowedOrNull<'a> = Option<&'a ServoCssRules>;
+ enum ServoCssRulesVoid { }
+ pub struct ServoCssRules(ServoCssRulesVoid);
+ pub type RawServoStyleSheetStrong = ::gecko_bindings::sugar::ownership::Strong<RawServoStyleSheet>;
+ pub type RawServoStyleSheetBorrowed<'a> = &'a RawServoStyleSheet;
+@@ -1534,16 +1535,24 @@ extern "C" {
+ }
+ extern "C" {
+     pub fn Gecko_RegisterProfilerThread(name: *const ::std::os::raw::c_char);
+ }
+ extern "C" {
+     pub fn Gecko_UnregisterProfilerThread();
+ }
+ extern "C" {
++    pub fn Gecko_DocumentRule_UseForPresentation(arg1:
++                                                     RawGeckoPresContextBorrowed,
++                                                 aPattern: *const nsACString,
++                                                 aURLMatchingFunction:
++                                                     URLMatchingFunction)
++     -> bool;
++}
++extern "C" {
+     pub fn Servo_Element_ClearData(node: RawGeckoElementBorrowed);
+ }
+ extern "C" {
+     pub fn Servo_StyleSheet_Empty(parsing_mode: SheetParsingMode)
+      -> RawServoStyleSheetStrong;
+ }
+ extern "C" {
+     pub fn Servo_StyleSheet_FromUTF8Bytes(loader: *mut Loader,
+diff --git a/servo/components/style/gecko_bindings/structs_debug.rs b/servo/components/style/gecko_bindings/structs_debug.rs
+--- a/servo/components/style/gecko_bindings/structs_debug.rs
++++ b/servo/components/style/gecko_bindings/structs_debug.rs
+@@ -5783,16 +5783,28 @@ pub mod root {
+                 assert_eq! (unsafe {
+                             & ( * ( 0 as * const ComplexColorValue ) ) .
+                             _mOwningThread as * const _ as usize } , 32usize ,
+                             concat ! (
+                             "Alignment of field: " , stringify ! (
+                             ComplexColorValue ) , "::" , stringify ! (
+                             _mOwningThread ) ));
+             }
++            #[repr(i32)]
++            /**
++ * Enum defining the type of URL matching function for a @-moz-document rule
++ * condition.
++ */
++            #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
++            pub enum URLMatchingFunction {
++                eURL = 0,
++                eURLPrefix = 1,
++                eDomain = 2,
++                eRegExp = 3,
++            }
+             #[repr(C)]
+             #[derive(Debug, Copy, Clone)]
+             pub struct DocumentRule([u8; 0]);
+         }
+         /**
+  * Superclass for data common to CSSStyleSheet and ServoStyleSheet.
+  */
+         #[repr(C)]
+diff --git a/servo/components/style/gecko_bindings/structs_release.rs b/servo/components/style/gecko_bindings/structs_release.rs
+--- a/servo/components/style/gecko_bindings/structs_release.rs
++++ b/servo/components/style/gecko_bindings/structs_release.rs
+@@ -5681,16 +5681,28 @@ pub mod root {
+                 assert_eq! (unsafe {
+                             & ( * ( 0 as * const ComplexColorValue ) ) .
+                             mRefCnt as * const _ as usize } , 24usize , concat
+                             ! (
+                             "Alignment of field: " , stringify ! (
+                             ComplexColorValue ) , "::" , stringify ! ( mRefCnt
+                             ) ));
+             }
++            #[repr(i32)]
++            /**
++ * Enum defining the type of URL matching function for a @-moz-document rule
++ * condition.
++ */
++            #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
++            pub enum URLMatchingFunction {
++                eURL = 0,
++                eURLPrefix = 1,
++                eDomain = 2,
++                eRegExp = 3,
++            }
+             #[repr(C)]
+             #[derive(Debug, Copy, Clone)]
+             pub struct DocumentRule([u8; 0]);
+         }
+         /**
+  * Superclass for data common to CSSStyleSheet and ServoStyleSheet.
+  */
+         #[repr(C)]
 diff --git a/servo/components/style/lib.rs b/servo/components/style/lib.rs
 --- a/servo/components/style/lib.rs
 +++ b/servo/components/style/lib.rs
