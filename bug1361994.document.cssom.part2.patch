@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  2b4c0ed4d384f0fc81bd76e6de8fe2902c9a027e
+# Parent  5a535a71bedba64c12a08990be23688776793889
 Bug 1361994 - Part 2: Implement CSSOM support for @-moz-document. r?xidorn
 
 diff --git a/layout/style/ServoArcTypeList.h b/layout/style/ServoArcTypeList.h
@@ -59,7 +59,7 @@ diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
 diff --git a/layout/style/ServoCSSRuleList.cpp b/layout/style/ServoCSSRuleList.cpp
 --- a/layout/style/ServoCSSRuleList.cpp
 +++ b/layout/style/ServoCSSRuleList.cpp
-@@ -1,23 +1,23 @@
+@@ -1,26 +1,25 @@
  /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
  /* vim: set ts=8 sts=2 et sw=2 tw=80: */
  /* This Source Code Form is subject to the terms of the Mozilla Public
@@ -68,6 +68,8 @@ diff --git a/layout/style/ServoCSSRuleList.cpp b/layout/style/ServoCSSRuleList.c
  
  /* representation of CSSRuleList for stylo */
  
+-#include "nsCSSFontFaceRule.h"
+-
 +#include "mozilla/ServoBindings.h"
  #include "mozilla/ServoCSSRuleList.h"
 -
@@ -79,6 +81,7 @@ diff --git a/layout/style/ServoCSSRuleList.cpp b/layout/style/ServoCSSRuleList.c
  #include "mozilla/ServoPageRule.h"
 +#include "mozilla/ServoStyleRule.h"
  #include "mozilla/ServoSupportsRule.h"
++#include "nsCSSFontFaceRule.h"
  
  namespace mozilla {
  
@@ -86,7 +89,8 @@ diff --git a/layout/style/ServoCSSRuleList.cpp b/layout/style/ServoCSSRuleList.c
    : mRawRules(aRawRules)
  {
    Servo_CssRules_ListTypes(mRawRules, &mRules);
-@@ -86,16 +86,17 @@ ServoCSSRuleList::GetRule(uint32_t aInde
+   // XXX We may want to eagerly create object for import rule, so that
+@@ -88,16 +87,17 @@ ServoCSSRuleList::GetRule(uint32_t aInde
            Servo_CssRules_Get##name_##RuleAt(mRawRules, aIndex).Consume());  \
          break;                                                              \
        }
@@ -104,7 +108,7 @@ diff --git a/layout/style/ServoCSSRuleList.cpp b/layout/style/ServoCSSRuleList.c
          ruleObj = Servo_CssRules_GetFontFaceRuleAt(mRawRules, aIndex);
          break;
        }
-@@ -211,17 +212,18 @@ ServoCSSRuleList::FillStyleRuleHashtable
+@@ -213,17 +213,18 @@ ServoCSSRuleList::FillStyleRuleHashtable
  {
    for (uint32_t i = 0; i < mRules.Length(); i++) {
      uint16_t type = GetRuleType(i);
@@ -116,7 +120,7 @@ diff --git a/layout/style/ServoCSSRuleList.cpp b/layout/style/ServoCSSRuleList.c
 -               type == nsIDOMCSSRule::SUPPORTS_RULE) {
 +               type == nsIDOMCSSRule::SUPPORTS_RULE ||
 +               type == nsIDOMCSSRule::DOCUMENT_RULE) {
-       GroupRule* castedRule = static_cast<GroupRule*>(GetRule(i));
+       css::GroupRule* castedRule = static_cast<css::GroupRule*>(GetRule(i));
  
        // Call this method recursively on the ServoCSSRuleList in the rule.
        ServoCSSRuleList* castedRuleList = static_cast<ServoCSSRuleList*>(
@@ -284,7 +288,7 @@ new file mode 100644
 diff --git a/layout/style/moz.build b/layout/style/moz.build
 --- a/layout/style/moz.build
 +++ b/layout/style/moz.build
-@@ -97,16 +97,17 @@ EXPORTS.mozilla += [
+@@ -98,16 +98,17 @@ EXPORTS.mozilla += [
      'RuleNodeCacheConditions.h',
      'RuleProcessorCache.h',
      'ServoArcTypeList.h',
@@ -302,9 +306,9 @@ diff --git a/layout/style/moz.build b/layout/style/moz.build
      'ServoPropPrefList.h',
      'ServoSpecifiedValues.h',
      'ServoStyleRule.h',
-@@ -223,16 +224,17 @@ UNIFIED_SOURCES += [
-     'nsStyleUtil.cpp',
+@@ -225,16 +226,17 @@ UNIFIED_SOURCES += [
      'nsTransitionManager.cpp',
+     'PostTraversalTask.cpp',
      'PreloadedStyleSheet.cpp',
      'RuleNodeCacheConditions.cpp',
      'RuleProcessorCache.cpp',
