@@ -3,9 +3,29 @@
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
 # Date 1492696360 -7200
 # Node ID 6a930fa39261c634ff0c9775cf76fb4b62234377
-# Parent  1329b4c008b4ee3e2623a496c8ef82f610d6e3ce
+# Parent  c5f0b8bf585d813b52f8391e1240a00b8d2869f5
 Bug 1355408 - Part 2: Update test expectations after @-moz-document support for stylo. r=xidorn
 
+diff --git a/layout/reftests/scoped-style/reftest.list b/layout/reftests/scoped-style/reftest.list
+--- a/layout/reftests/scoped-style/reftest.list
++++ b/layout/reftests/scoped-style/reftest.list
+@@ -43,15 +43,15 @@ fails-if(stylo) == scoped-style-dynamic-
+ asserts-if(stylo,1) == scoped-style-dynamic-012.svg scoped-style-dynamic-012-ref.svg
+ fails-if(stylo) asserts-if(stylo,1) == scoped-style-dynamic-013.svg scoped-style-dynamic-013-ref.svg
+ asserts-if(stylo,1) == scoped-style-dynamic-014.svg scoped-style-dynamic-014-ref.svg
+ fails-if(stylo) asserts-if(stylo,1) == scoped-style-dynamic-015.svg scoped-style-dynamic-015-ref.svg
+ fails-if(stylo) == scoped-style-import.html scoped-style-import-ref.html
+ fails-if(stylo) == scoped-style-media.html scoped-style-media-ref.html
+ fails-if(stylo) == scoped-style-namespace.html scoped-style-namespace-ref.html
+ fails-if(stylo) == scoped-style-charset.html scoped-style-charset-ref.html
+-fails-if(stylo) == scoped-style-document.html scoped-style-document-ref.html
++== scoped-style-document.html scoped-style-document-ref.html
+ fails-if(stylo) HTTP(..) == scoped-style-font-face.html scoped-style-font-face-ref.html
+ fails-if(stylo) == scoped-style-keyframes.html scoped-style-keyframes-ref.html
+ fails-if(stylo) == scoped-style-supports.html scoped-style-supports-ref.html
+ pref(layout.css.scope-pseudo.enabled,true) fails-if(stylo) == scoped-style-pseudo-001.html scoped-style-pseudo-001-ref.html
+ pref(layout.css.scope-pseudo.enabled,true) fails-if(stylo) == scoped-style-pseudo-002.html scoped-style-pseudo-002-ref.html
+ pref(layout.css.scope-pseudo.enabled,true) == scoped-style-pseudo-003.html scoped-style-pseudo-003-ref.html
 diff --git a/layout/reftests/usercss/reftest.list b/layout/reftests/usercss/reftest.list
 --- a/layout/reftests/usercss/reftest.list
 +++ b/layout/reftests/usercss/reftest.list
