@@ -3,17 +3,17 @@
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
 # Date 1492696360 -7200
 # Node ID 6a930fa39261c634ff0c9775cf76fb4b62234377
-# Parent  b9b5be79e363f2341eb549562f8a32efdafb68e4
+# Parent  1329b4c008b4ee3e2623a496c8ef82f610d6e3ce
 Bug 1355408 - Part 2: Update test expectations after @-moz-document support for stylo. r=xidorn
 
 diff --git a/layout/reftests/scoped-style/reftest.list b/layout/reftests/scoped-style/reftest.list
 --- a/layout/reftests/scoped-style/reftest.list
 +++ b/layout/reftests/scoped-style/reftest.list
 @@ -43,15 +43,15 @@ fails-if(stylo) == scoped-style-dynamic-
- == scoped-style-dynamic-012.svg scoped-style-dynamic-012-ref.svg
- == scoped-style-dynamic-013.svg scoped-style-dynamic-013-ref.svg
- == scoped-style-dynamic-014.svg scoped-style-dynamic-014-ref.svg
- == scoped-style-dynamic-015.svg scoped-style-dynamic-015-ref.svg
+ asserts-if(stylo,1) == scoped-style-dynamic-012.svg scoped-style-dynamic-012-ref.svg
+ fails-if(stylo) asserts-if(stylo,1) == scoped-style-dynamic-013.svg scoped-style-dynamic-013-ref.svg
+ asserts-if(stylo,1) == scoped-style-dynamic-014.svg scoped-style-dynamic-014-ref.svg
+ fails-if(stylo) asserts-if(stylo,1) == scoped-style-dynamic-015.svg scoped-style-dynamic-015-ref.svg
  fails-if(stylo) == scoped-style-import.html scoped-style-import-ref.html
  fails-if(stylo) == scoped-style-media.html scoped-style-media-ref.html
  fails-if(stylo) == scoped-style-namespace.html scoped-style-namespace-ref.html
@@ -61,7 +61,7 @@ diff --git a/layout/reftests/w3c-css/submitted/conditional3/reftest.list b/layou
 diff --git a/layout/style/test/stylo-failures.md b/layout/style/test/stylo-failures.md
 --- a/layout/style/test/stylo-failures.md
 +++ b/layout/style/test/stylo-failures.md
-@@ -226,18 +226,16 @@ to mochitest command.
+@@ -218,18 +218,16 @@ to mochitest command.
    * test_hover_quirk.html: hover quirks bug 1355724 [6]
  * test_pseudoelement_parsing.html: support parsing some pseudo-classes on some pseudo-elements [5]
  * Unit should be preserved after parsing servo/servo#15346
