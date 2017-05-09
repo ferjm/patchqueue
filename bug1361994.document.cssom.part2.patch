@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  5a535a71bedba64c12a08990be23688776793889
+# Parent  e7090f3c1af9f799980d34bf3db6c4650ee95e20
 Bug 1361994 - Part 2: Implement CSSOM support for @-moz-document. r?xidorn
 
 diff --git a/layout/style/ServoArcTypeList.h b/layout/style/ServoArcTypeList.h
@@ -132,7 +132,7 @@ diff --git a/layout/style/ServoDocumentRule.cpp b/layout/style/ServoDocumentRule
 new file mode 100644
 --- /dev/null
 +++ b/layout/style/ServoDocumentRule.cpp
-@@ -0,0 +1,96 @@
+@@ -0,0 +1,95 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -179,7 +179,6 @@ new file mode 100644
 +ServoDocumentRule::UseForPresentation(nsPresContext* aPresContext,
 +                                      nsMediaQueryResultCacheKey& aKey)
 +{
-+  // XXX
 +  // GroupRule::UseForPresentation is only used in nsCSSRuleProcessor,
 +  // so this should never be called.
 +  MOZ_ASSERT_UNREACHABLE("Shouldn't be calling UseForPresentation");
