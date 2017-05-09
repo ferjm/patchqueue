@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  d64a2bcec2f8ee4b457b3df7420ed018e1dd76e8
+# Parent  c48fbe2c6fdc7acb6b2bae6983bd26a6b938ca35
 Bug 1361994 - Part 1: Add separate CSSDocumentRule class. r?xidorn
 
 diff --git a/dom/bindings/Bindings.conf b/dom/bindings/Bindings.conf
@@ -95,7 +95,7 @@ diff --git a/layout/style/CSSMozDocumentRule.h b/layout/style/CSSMozDocumentRule
 new file mode 100644
 --- /dev/null
 +++ b/layout/style/CSSMozDocumentRule.h
-@@ -0,0 +1,54 @@
+@@ -0,0 +1,53 @@
 +/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 +/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 +/* This Source Code Form is subject to the terms of the Mozilla Public
@@ -135,8 +135,7 @@ new file mode 100644
 +
 +  // WebIDL interface
 +  uint16_t Type() const override {
-+    // XXX What should really happen here?
-+    return nsIDOMCSSRule::UNKNOWN_RULE;
++    return nsIDOMCSSRule::DOCUMENT_RULE;
 +  }
 +  // Our XPCOM GetConditionText is OK
 +  void SetConditionText(const nsAString& aConditionText,
