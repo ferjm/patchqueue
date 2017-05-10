@@ -1,7 +1,7 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  9867460454c822e6556ea7827266c22cd2a3d38c
-Bug 1361994 - Part 1: Add separate CSSDocumentRule class. r?xidorn
+# Parent  1adb64406c094654d9a6cc3af466e232354acccc
+Bug 1361994 - Part 1: Add separate CSSDocumentRule class. r=xidorn
 
 diff --git a/dom/bindings/Bindings.conf b/dom/bindings/Bindings.conf
 --- a/dom/bindings/Bindings.conf
