@@ -1,7 +1,7 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  dd8257769dab03c429479c08c86fd54e2b0a4565
-stylo: Implement access to CSSMozDocumentRule. r?xidorn
+# Parent  455c2d9f1d91242132cb13ce2bd7ee2803d74a48
+stylo: Implement access to CSSMozDocumentRule. r=xidorn
 
 diff --git a/servo/components/style/gecko/arc_types.rs b/servo/components/style/gecko/arc_types.rs
 --- a/servo/components/style/gecko/arc_types.rs
