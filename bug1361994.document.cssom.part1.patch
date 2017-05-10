@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  1adb64406c094654d9a6cc3af466e232354acccc
+# Parent  1cc06cc45564966222782a53223e0f8951579e3c
 Bug 1361994 - Part 1: Add separate CSSDocumentRule class. r=xidorn
 
 diff --git a/dom/bindings/Bindings.conf b/dom/bindings/Bindings.conf
@@ -121,7 +121,7 @@ new file mode 100644
 +public:
 +  NS_DECL_ISUPPORTS_INHERITED
 +
-+  final int32_t GetType() const override { return css::Rule::DOCUMENT_RULE; }
++  int32_t GetType() const final override { return css::Rule::DOCUMENT_RULE; }
 +  using Rule::GetType;
 +
 +  // nsIDOMCSSGroupingRule interface
@@ -134,7 +134,7 @@ new file mode 100644
 +  NS_DECL_NSIDOMCSSMOZDOCUMENTRULE
 +
 +  // WebIDL interface
-+  final uint16_t Type() const override {
++  uint16_t Type() const final override {
 +    return nsIDOMCSSRule::DOCUMENT_RULE;
 +  }
 +  // Our XPCOM GetConditionText is OK
