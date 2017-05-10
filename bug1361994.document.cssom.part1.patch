@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  c48fbe2c6fdc7acb6b2bae6983bd26a6b938ca35
+# Parent  9867460454c822e6556ea7827266c22cd2a3d38c
 Bug 1361994 - Part 1: Add separate CSSDocumentRule class. r?xidorn
 
 diff --git a/dom/bindings/Bindings.conf b/dom/bindings/Bindings.conf
@@ -121,7 +121,7 @@ new file mode 100644
 +public:
 +  NS_DECL_ISUPPORTS_INHERITED
 +
-+  int32_t GetType() const override { return css::Rule::DOCUMENT_RULE; }
++  final int32_t GetType() const override { return css::Rule::DOCUMENT_RULE; }
 +  using Rule::GetType;
 +
 +  // nsIDOMCSSGroupingRule interface
@@ -134,7 +134,7 @@ new file mode 100644
 +  NS_DECL_NSIDOMCSSMOZDOCUMENTRULE
 +
 +  // WebIDL interface
-+  uint16_t Type() const override {
++  final uint16_t Type() const override {
 +    return nsIDOMCSSRule::DOCUMENT_RULE;
 +  }
 +  // Our XPCOM GetConditionText is OK
@@ -149,47 +149,6 @@ new file mode 100644
 +} // namespace mozilla
 +
 +#endif // mozilla_dom_CSSMozDocumentRule_h
-diff --git a/layout/style/ServoCSSRuleList.cpp b/layout/style/ServoCSSRuleList.cpp
---- a/layout/style/ServoCSSRuleList.cpp
-+++ b/layout/style/ServoCSSRuleList.cpp
-@@ -1,16 +1,18 @@
- /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
- /* vim: set ts=8 sts=2 et sw=2 tw=80: */
- /* This Source Code Form is subject to the terms of the Mozilla Public
-  * License, v. 2.0. If a copy of the MPL was not distributed with this
-  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
- 
- /* representation of CSSRuleList for stylo */
- 
-+#include "nsCSSFontFaceRule.h"
-+
- #include "mozilla/ServoCSSRuleList.h"
- 
- #include "mozilla/ServoBindings.h"
- #include "mozilla/ServoStyleRule.h"
- #include "mozilla/ServoMediaRule.h"
- #include "mozilla/ServoNamespaceRule.h"
- #include "mozilla/ServoPageRule.h"
- #include "mozilla/ServoSupportsRule.h"
-@@ -212,17 +214,17 @@ ServoCSSRuleList::FillStyleRuleHashtable
-   for (uint32_t i = 0; i < mRules.Length(); i++) {
-     uint16_t type = GetRuleType(i);
-     if (type == nsIDOMCSSRule::STYLE_RULE) {
-       ServoStyleRule* castedRule = static_cast<ServoStyleRule*>(GetRule(i));
-       RawServoStyleRule* rawRule = castedRule->Raw();
-       aTable.Put(rawRule, castedRule);
-     } else if (type == nsIDOMCSSRule::MEDIA_RULE ||
-                type == nsIDOMCSSRule::SUPPORTS_RULE) {
--      GroupRule* castedRule = static_cast<GroupRule*>(GetRule(i));
-+      css::GroupRule* castedRule = static_cast<css::GroupRule*>(GetRule(i));
- 
-       // Call this method recursively on the ServoCSSRuleList in the rule.
-       ServoCSSRuleList* castedRuleList = static_cast<ServoCSSRuleList*>(
-         castedRule->CssRules());
-       castedRuleList->FillStyleRuleHashtable(aTable);
-     }
-   }
- }
 diff --git a/layout/style/moz.build b/layout/style/moz.build
 --- a/layout/style/moz.build
 +++ b/layout/style/moz.build
