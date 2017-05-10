@@ -1,7 +1,7 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  e7090f3c1af9f799980d34bf3db6c4650ee95e20
-Bug 1361994 - Part 2: Implement CSSOM support for @-moz-document. r?xidorn
+# Parent  37a55a2492de6ad0762ce3d8007cee236fac2c96
+Bug 1361994 - Part 3: Implement CSSOM support for @-moz-document. r?xidorn
 
 diff --git a/layout/style/ServoArcTypeList.h b/layout/style/ServoArcTypeList.h
 --- a/layout/style/ServoArcTypeList.h
@@ -59,21 +59,15 @@ diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
 diff --git a/layout/style/ServoCSSRuleList.cpp b/layout/style/ServoCSSRuleList.cpp
 --- a/layout/style/ServoCSSRuleList.cpp
 +++ b/layout/style/ServoCSSRuleList.cpp
-@@ -1,26 +1,25 @@
- /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
- /* vim: set ts=8 sts=2 et sw=2 tw=80: */
- /* This Source Code Form is subject to the terms of the Mozilla Public
+@@ -4,20 +4,21 @@
   * License, v. 2.0. If a copy of the MPL was not distributed with this
   * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
  
  /* representation of CSSRuleList for stylo */
  
--#include "nsCSSFontFaceRule.h"
--
-+#include "mozilla/ServoBindings.h"
  #include "mozilla/ServoCSSRuleList.h"
--
--#include "mozilla/ServoBindings.h"
+ 
+ #include "mozilla/ServoBindings.h"
 -#include "mozilla/ServoStyleRule.h"
 +#include "mozilla/ServoDocumentRule.h"
  #include "mozilla/ServoMediaRule.h"
@@ -81,16 +75,14 @@ diff --git a/layout/style/ServoCSSRuleList.cpp b/layout/style/ServoCSSRuleList.c
  #include "mozilla/ServoPageRule.h"
 +#include "mozilla/ServoStyleRule.h"
  #include "mozilla/ServoSupportsRule.h"
-+#include "nsCSSFontFaceRule.h"
+ #include "nsCSSFontFaceRule.h"
  
  namespace mozilla {
  
  ServoCSSRuleList::ServoCSSRuleList(already_AddRefed<ServoCssRules> aRawRules)
    : mRawRules(aRawRules)
  {
-   Servo_CssRules_ListTypes(mRawRules, &mRules);
-   // XXX We may want to eagerly create object for import rule, so that
-@@ -88,16 +87,17 @@ ServoCSSRuleList::GetRule(uint32_t aInde
+@@ -87,16 +88,17 @@ ServoCSSRuleList::GetRule(uint32_t aInde
            Servo_CssRules_Get##name_##RuleAt(mRawRules, aIndex).Consume());  \
          break;                                                              \
        }
@@ -108,7 +100,7 @@ diff --git a/layout/style/ServoCSSRuleList.cpp b/layout/style/ServoCSSRuleList.c
          ruleObj = Servo_CssRules_GetFontFaceRuleAt(mRawRules, aIndex);
          break;
        }
-@@ -213,17 +213,18 @@ ServoCSSRuleList::FillStyleRuleHashtable
+@@ -212,17 +214,18 @@ ServoCSSRuleList::FillStyleRuleHashtable
  {
    for (uint32_t i = 0; i < mRules.Length(); i++) {
      uint16_t type = GetRuleType(i);
