@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  41926dfab5404bfef8196b747a43280be29f2e10
+# Parent  65d3c0551d94dfaaad570eb214c6635c0910f39b
 Bug 1361994 - Part 4: Update expected stylo test failures. r?xidorn
 
 diff --git a/layout/style/test/stylo-failures.md b/layout/style/test/stylo-failures.md
@@ -57,7 +57,7 @@ diff --git a/layout/style/test/stylo-failures.md b/layout/style/test/stylo-failu
 -* CSSOM support for @-moz-document bug 1361994
 -  * test_rule_serialization.html [1]
 -  * test_condition_text.html: also \@supports [1]
-+* test_rule_insertion.html: bug 1363665 [119]
++* test_rule_insertion.html: bug 1363665 [83]
 +* test_condition_text.html: \@supports bug 1363662 [1]
  * getComputedStyle style doesn't contain custom properties bug 1336891
    * test_variable_serialization_computed.html [35]
