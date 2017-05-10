@@ -1,7 +1,7 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  37a55a2492de6ad0762ce3d8007cee236fac2c96
-Bug 1361994 - Part 3: Implement CSSOM support for @-moz-document. r?xidorn
+# Parent  247466cbfdb01106f3b68f6323cf06a61e102309
+Bug 1361994 - Part 3: Implement CSSOM support for @-moz-document. r=xidorn
 
 diff --git a/layout/style/ServoArcTypeList.h b/layout/style/ServoArcTypeList.h
 --- a/layout/style/ServoArcTypeList.h
