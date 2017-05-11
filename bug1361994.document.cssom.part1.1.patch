@@ -1,7 +1,7 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  70515a8daabb15b2316d213cb35bdf6eac98bf0d
-Bug 1361994 - Part 2: Fix build error in ServoCSSRuleList. r?xidorn
+# Parent  30c0deb1d44bef986ce4105474d4384c9a4d530f
+Bug 1361994 - Part 2: Fix build error in ServoCSSRuleList. r=xidorn
 
 diff --git a/layout/style/ServoCSSRuleList.cpp b/layout/style/ServoCSSRuleList.cpp
 --- a/layout/style/ServoCSSRuleList.cpp
