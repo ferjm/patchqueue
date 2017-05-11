@@ -1,0 +1,253 @@
+# HG changeset patch
+# User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
+# Parent  41120d07f225f6775d3680001921f642b16d582b
+
+diff --git a/servo/components/style/gecko/arc_types.rs b/servo/components/style/gecko/arc_types.rs
+--- a/servo/components/style/gecko/arc_types.rs
++++ b/servo/components/style/gecko/arc_types.rs
+@@ -4,30 +4,30 @@
+ 
+ //! This file lists all arc FFI types and defines corresponding addref
+ //! and release functions. This list corresponds to ServoArcTypeList.h
+ //! file in Gecko.
+ 
+ #![allow(non_snake_case, missing_docs)]
+ 
+ use gecko_bindings::bindings::{RawServoMediaList, RawServoMediaRule, RawServoNamespaceRule, RawServoPageRule};
+-use gecko_bindings::bindings::{RawServoRuleNode, RawServoRuleNodeStrong};
++use gecko_bindings::bindings::{RawServoRuleNode, RawServoRuleNodeStrong, RawServoDocumentRule};
+ use gecko_bindings::bindings::{RawServoStyleSheet, RawServoImportRule, RawServoSupportsRule};
+ use gecko_bindings::bindings::{ServoComputedValues, ServoCssRules};
+ use gecko_bindings::structs::{RawServoDeclarationBlock, RawServoStyleRule};
+ use gecko_bindings::structs::RawServoAnimationValue;
+ use gecko_bindings::sugar::ownership::{HasArcFFI, HasFFI};
+ use media_queries::MediaList;
+ use properties::{ComputedValues, PropertyDeclarationBlock};
+ use properties::animated_properties::AnimationValue;
+ use rule_tree::StrongRuleNode;
+ use shared_lock::Locked;
+ use std::{mem, ptr};
+ use stylesheets::{CssRules, Stylesheet, StyleRule, ImportRule, MediaRule};
+-use stylesheets::{NamespaceRule, PageRule, SupportsRule};
++use stylesheets::{NamespaceRule, PageRule, SupportsRule, DocumentRule};
+ 
+ macro_rules! impl_arc_ffi {
+     ($servo_type:ty => $gecko_type:ty [$addref:ident, $release:ident]) => {
+         unsafe impl HasFFI for $servo_type {
+             type FFIType = $gecko_type;
+         }
+         unsafe impl HasArcFFI for $servo_type {}
+ 
+@@ -74,16 +74,19 @@ impl_arc_ffi!(Locked<NamespaceRule> => R
+               [Servo_NamespaceRule_AddRef, Servo_NamespaceRule_Release]);
+ 
+ impl_arc_ffi!(Locked<PageRule> => RawServoPageRule
+               [Servo_PageRule_AddRef, Servo_PageRule_Release]);
+ 
+ impl_arc_ffi!(Locked<SupportsRule> => RawServoSupportsRule
+               [Servo_SupportsRule_AddRef, Servo_SupportsRule_Release]);
+ 
++impl_arc_ffi!(Locked<DocumentRule> => RawServoDocumentRule
++              [Servo_DocumentRule_AddRef, Servo_DocumentRule_Release]);
++
+ // RuleNode is a Arc-like type but it does not use Arc.
+ 
+ impl StrongRuleNode {
+     pub fn into_strong(self) -> RawServoRuleNodeStrong {
+         let ptr = self.ptr();
+         mem::forget(self);
+         unsafe { mem::transmute(ptr) }
+     }
+diff --git a/servo/components/style/gecko/generated/bindings.rs b/servo/components/style/gecko/generated/bindings.rs
+--- a/servo/components/style/gecko/generated/bindings.rs
++++ b/servo/components/style/gecko/generated/bindings.rs
+@@ -250,16 +250,21 @@ pub type RawServoSupportsRuleBorrowed<'a
+ pub type RawServoSupportsRuleBorrowedOrNull<'a> = Option<&'a RawServoSupportsRule>;
+ enum RawServoSupportsRuleVoid { }
+ pub struct RawServoSupportsRule(RawServoSupportsRuleVoid);
+ pub type RawServoRuleNodeStrong = ::gecko_bindings::sugar::ownership::Strong<RawServoRuleNode>;
+ pub type RawServoRuleNodeBorrowed<'a> = &'a RawServoRuleNode;
+ pub type RawServoRuleNodeBorrowedOrNull<'a> = Option<&'a RawServoRuleNode>;
+ enum RawServoRuleNodeVoid { }
+ pub struct RawServoRuleNode(RawServoRuleNodeVoid);
++pub type RawServoDocumentRuleStrong = ::gecko_bindings::sugar::ownership::Strong<RawServoDocumentRule>;
++pub type RawServoDocumentRuleBorrowed<'a> = &'a RawServoDocumentRule;
++pub type RawServoDocumentRuleBorrowedOrNull<'a> = Option<&'a RawServoDocumentRule>;
++enum RawServoDocumentRuleVoid { }
++pub struct RawServoDocumentRule(RawServoDocumentRuleVoid);
+ pub type RawServoStyleSetOwned = ::gecko_bindings::sugar::ownership::Owned<RawServoStyleSet>;
+ pub type RawServoStyleSetOwnedOrNull = ::gecko_bindings::sugar::ownership::OwnedOrNull<RawServoStyleSet>;
+ pub type RawServoStyleSetBorrowed<'a> = &'a RawServoStyleSet;
+ pub type RawServoStyleSetBorrowedOrNull<'a> = Option<&'a RawServoStyleSet>;
+ pub type RawServoStyleSetBorrowedMut<'a> = &'a mut RawServoStyleSet;
+ pub type RawServoStyleSetBorrowedMutOrNull<'a> = Option<&'a mut RawServoStyleSet>;
+ enum RawServoStyleSetVoid { }
+ pub struct RawServoStyleSet(RawServoStyleSetVoid);
+@@ -418,16 +423,22 @@ extern "C" {
+ }
+ extern "C" {
+     pub fn Servo_RuleNode_AddRef(ptr: RawServoRuleNodeBorrowed);
+ }
+ extern "C" {
+     pub fn Servo_RuleNode_Release(ptr: RawServoRuleNodeBorrowed);
+ }
+ extern "C" {
++    pub fn Servo_DocumentRule_AddRef(ptr: RawServoDocumentRuleBorrowed);
++}
++extern "C" {
++    pub fn Servo_DocumentRule_Release(ptr: RawServoDocumentRuleBorrowed);
++}
++extern "C" {
+     pub fn Servo_StyleSet_Drop(ptr: RawServoStyleSetOwned);
+ }
+ extern "C" {
+     pub fn Gecko_ChildrenCount(node: RawGeckoNodeBorrowed) -> u32;
+ }
+ extern "C" {
+     pub fn Gecko_NodeIsElement(node: RawGeckoNodeBorrowed) -> bool;
+ }
+@@ -1763,16 +1774,33 @@ extern "C" {
+     pub fn Servo_SupportsRule_GetCssText(rule: RawServoSupportsRuleBorrowed,
+                                          result: *mut nsAString);
+ }
+ extern "C" {
+     pub fn Servo_SupportsRule_GetRules(rule: RawServoSupportsRuleBorrowed)
+      -> ServoCssRulesStrong;
+ }
+ extern "C" {
++    pub fn Servo_CssRules_GetDocumentRuleAt(rules: ServoCssRulesBorrowed,
++                                            index: u32)
++     -> RawServoDocumentRuleStrong;
++}
++extern "C" {
++    pub fn Servo_DocumentRule_Debug(rule: RawServoDocumentRuleBorrowed,
++                                    result: *mut nsACString);
++}
++extern "C" {
++    pub fn Servo_DocumentRule_GetCssText(rule: RawServoDocumentRuleBorrowed,
++                                         result: *mut nsAString);
++}
++extern "C" {
++    pub fn Servo_DocumentRule_GetRules(rule: RawServoDocumentRuleBorrowed)
++     -> ServoCssRulesStrong;
++}
++extern "C" {
+     pub fn Servo_CssRules_GetFontFaceRuleAt(rules: ServoCssRulesBorrowed,
+                                             index: u32)
+      -> *mut nsCSSFontFaceRule;
+ }
+ extern "C" {
+     pub fn Servo_StyleRule_GetStyle(rule: RawServoStyleRuleBorrowed)
+      -> RawServoDeclarationBlockStrong;
+ }
+@@ -1807,16 +1835,21 @@ extern "C" {
+                                        RawServoDeclarationBlockBorrowed);
+ }
+ extern "C" {
+     pub fn Servo_SupportsRule_GetConditionText(rule:
+                                                    RawServoSupportsRuleBorrowed,
+                                                result: *mut nsAString);
+ }
+ extern "C" {
++    pub fn Servo_DocumentRule_GetConditionText(rule:
++                                                   RawServoDocumentRuleBorrowed,
++                                               result: *mut nsAString);
++}
++extern "C" {
+     pub fn Servo_ParseProperty(property: nsCSSPropertyID,
+                                value: *const nsACString,
+                                data: *mut RawGeckoURLExtraData,
+                                length_parsing_mode: LengthParsingMode)
+      -> RawServoDeclarationBlockStrong;
+ }
+ extern "C" {
+     pub fn Servo_ParseEasing(easing: *const nsAString,
+diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
+--- a/servo/ports/geckolib/glue.rs
++++ b/servo/ports/geckolib/glue.rs
+@@ -23,16 +23,17 @@ use style::gecko::data::{PerDocumentStyl
+ use style::gecko::global_style_data::{GLOBAL_STYLE_DATA, GlobalStyleData};
+ use style::gecko::restyle_damage::GeckoRestyleDamage;
+ use style::gecko::selector_parser::PseudoElement;
+ use style::gecko::traversal::RecalcStyleOnly;
+ use style::gecko::wrapper::GeckoElement;
+ use style::gecko_bindings::bindings;
+ use style::gecko_bindings::bindings::{RawGeckoKeyframeListBorrowed, RawGeckoKeyframeListBorrowedMut};
+ use style::gecko_bindings::bindings::{RawServoDeclarationBlockBorrowed, RawServoDeclarationBlockStrong};
++use style::gecko_bindings::bindings::{RawServoDocumentRule, RawServoDocumentRuleBorrowed};
+ use style::gecko_bindings::bindings::{RawServoMediaList, RawServoMediaListBorrowed, RawServoMediaListStrong};
+ use style::gecko_bindings::bindings::{RawServoMediaRule, RawServoMediaRuleBorrowed};
+ use style::gecko_bindings::bindings::{RawServoNamespaceRule, RawServoNamespaceRuleBorrowed};
+ use style::gecko_bindings::bindings::{RawServoPageRule, RawServoPageRuleBorrowed};
+ use style::gecko_bindings::bindings::{RawServoRuleNodeBorrowed, RawServoRuleNodeStrong};
+ use style::gecko_bindings::bindings::{RawServoStyleSetBorrowed, RawServoStyleSetOwned};
+ use style::gecko_bindings::bindings::{RawServoStyleSheetBorrowed, ServoComputedValuesBorrowed};
+ use style::gecko_bindings::bindings::{RawServoStyleSheetStrong, ServoComputedValuesStrong};
+@@ -83,17 +84,17 @@ use style::rule_tree::{StrongRuleNode, S
+ use style::selector_parser::PseudoElementCascadeType;
+ use style::sequential;
+ use style::shared_lock::{SharedRwLock, SharedRwLockReadGuard, StylesheetGuards, ToCssWithGuard, Locked};
+ use style::string_cache::Atom;
+ use style::style_adjuster::StyleAdjuster;
+ use style::stylearc::Arc;
+ use style::stylesheets::{CssRule, CssRules, CssRuleType, CssRulesHelpers};
+ use style::stylesheets::{ImportRule, MediaRule, NamespaceRule, Origin};
+-use style::stylesheets::{PageRule, Stylesheet, StyleRule, SupportsRule};
++use style::stylesheets::{PageRule, Stylesheet, StyleRule, SupportsRule, DocumentRule};
+ use style::stylesheets::StylesheetLoader as StyleStylesheetLoader;
+ use style::supports::parse_condition_or_declaration;
+ use style::thread_state;
+ use style::timer::Timer;
+ use style::traversal::{ANIMATION_ONLY, FOR_RECONSTRUCT, UNSTYLED_CHILDREN_ONLY};
+ use style::traversal::{resolve_style, DomTraversal, TraversalDriver, TraversalFlags};
+ use style_traits::ToCss;
+ use super::stylesheet_loader::StylesheetLoader;
+@@ -834,16 +835,23 @@ impl_basic_rule_funcs! { (Page, PageRule
+ 
+ impl_group_rule_funcs! { (Supports, SupportsRule, RawServoSupportsRule),
+     get_rules: Servo_SupportsRule_GetRules,
+     getter: Servo_CssRules_GetSupportsRuleAt,
+     debug: Servo_SupportsRule_Debug,
+     to_css: Servo_SupportsRule_GetCssText,
+ }
+ 
++impl_group_rule_funcs! { (Document, DocumentRule, RawServoDocumentRule),
++    get_rules: Servo_DocumentRule_GetRules,
++    getter: Servo_CssRules_GetDocumentRuleAt,
++    debug: Servo_DocumentRule_Debug,
++    to_css: Servo_DocumentRule_GetCssText,
++}
++
+ #[no_mangle]
+ pub extern "C" fn Servo_CssRules_GetFontFaceRuleAt(rules: ServoCssRulesBorrowed, index: u32)
+                                                    -> *mut nsCSSFontFaceRule
+ {
+     let global_style_data = &*GLOBAL_STYLE_DATA;
+     let guard = global_style_data.shared_lock.read();
+     let rules = Locked::<CssRules>::as_arc(&rules).read_with(&guard);
+     match rules.0[index as usize] {
+@@ -914,16 +922,24 @@ pub extern "C" fn Servo_PageRule_SetStyl
+ pub extern "C" fn Servo_SupportsRule_GetConditionText(rule: RawServoSupportsRuleBorrowed,
+                                                       result: *mut nsAString) {
+     read_locked_arc(rule, |rule: &SupportsRule| {
+         rule.condition.to_css(unsafe { result.as_mut().unwrap() }).unwrap();
+     })
+ }
+ 
+ #[no_mangle]
++pub extern "C" fn Servo_DocumentRule_GetConditionText(rule: RawServoDocumentRuleBorrowed,
++                                                      result: *mut nsAString) {
++    read_locked_arc(rule, |rule: &DocumentRule| {
++        rule.condition.to_css(unsafe { result.as_mut().unwrap() }).unwrap();
++    })
++}
++
++#[no_mangle]
+ pub extern "C" fn Servo_ComputedValues_GetForAnonymousBox(parent_style_or_null: ServoComputedValuesBorrowedOrNull,
+                                                           pseudo_tag: *mut nsIAtom,
+                                                           skip_display_fixup: bool,
+                                                           raw_data: RawServoStyleSetBorrowed)
+      -> ServoComputedValuesStrong {
+     let global_style_data = &*GLOBAL_STYLE_DATA;
+     let guard = global_style_data.shared_lock.read();
+     let guards = StylesheetGuards::same(&guard);
