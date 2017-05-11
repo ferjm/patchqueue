@@ -1,12 +1,12 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  247466cbfdb01106f3b68f6323cf06a61e102309
+# Parent  6ee30d69949f49b1925330851a8007553be71be6
 Bug 1361994 - Part 3: Implement CSSOM support for @-moz-document. r=xidorn
 
 diff --git a/layout/style/ServoArcTypeList.h b/layout/style/ServoArcTypeList.h
 --- a/layout/style/ServoArcTypeList.h
 +++ b/layout/style/ServoArcTypeList.h
-@@ -13,8 +13,9 @@ SERVO_ARC_TYPE(DeclarationBlock, RawServ
+@@ -13,9 +13,10 @@ SERVO_ARC_TYPE(DeclarationBlock, RawServ
  SERVO_ARC_TYPE(StyleRule, RawServoStyleRule)
  SERVO_ARC_TYPE(ImportRule, RawServoImportRule)
  SERVO_ARC_TYPE(AnimationValue, RawServoAnimationValue)
@@ -16,10 +16,11 @@ diff --git a/layout/style/ServoArcTypeList.h b/layout/style/ServoArcTypeList.h
  SERVO_ARC_TYPE(PageRule, RawServoPageRule)
  SERVO_ARC_TYPE(SupportsRule, RawServoSupportsRule)
 +SERVO_ARC_TYPE(DocumentRule, RawServoDocumentRule)
+ SERVO_ARC_TYPE(RuleNode, RawServoRuleNode)
 diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
 --- a/layout/style/ServoBindingList.h
 +++ b/layout/style/ServoBindingList.h
-@@ -113,16 +113,17 @@ SERVO_BINDING_FUNC(Servo_CssRules_Delete
+@@ -109,16 +109,17 @@ SERVO_BINDING_FUNC(Servo_CssRules_Delete
    BASIC_RULE_FUNCS(type_) \
    SERVO_BINDING_FUNC(Servo_##type_##Rule_GetRules, ServoCssRulesStrong, \
                       RawServo##type_##RuleBorrowed rule)
@@ -37,7 +38,7 @@ diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
                     RawServoStyleRuleBorrowed rule)
  SERVO_BINDING_FUNC(Servo_StyleRule_SetStyle, void,
                     RawServoStyleRuleBorrowed rule,
-@@ -137,16 +138,18 @@ SERVO_BINDING_FUNC(Servo_NamespaceRule_G
+@@ -133,16 +134,18 @@ SERVO_BINDING_FUNC(Servo_NamespaceRule_G
                     RawServoNamespaceRuleBorrowed rule)
  SERVO_BINDING_FUNC(Servo_PageRule_GetStyle, RawServoDeclarationBlockStrong,
                     RawServoPageRuleBorrowed rule)
@@ -53,9 +54,9 @@ diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
  SERVO_BINDING_FUNC(Servo_ParseProperty,
                     RawServoDeclarationBlockStrong,
                     nsCSSPropertyID property, const nsACString* value,
-                    RawGeckoURLExtraData* data)
+                    RawGeckoURLExtraData* data,
+                    mozilla::LengthParsingMode length_parsing_mode)
  SERVO_BINDING_FUNC(Servo_ParseEasing, bool,
-                    const nsAString* easing,
 diff --git a/layout/style/ServoCSSRuleList.cpp b/layout/style/ServoCSSRuleList.cpp
 --- a/layout/style/ServoCSSRuleList.cpp
 +++ b/layout/style/ServoCSSRuleList.cpp
@@ -290,14 +291,14 @@ diff --git a/layout/style/moz.build b/layout/style/moz.build
      'ServoDeclarationBlock.h',
 +    'ServoDocumentRule.h',
      'ServoElementSnapshot.h',
+     'ServoElementSnapshotTable.h',
      'ServoMediaList.h',
      'ServoMediaRule.h',
      'ServoNamespaceRule.h',
      'ServoPageRule.h',
      'ServoPropPrefList.h',
      'ServoSpecifiedValues.h',
-     'ServoStyleRule.h',
-@@ -225,16 +226,17 @@ UNIFIED_SOURCES += [
+@@ -226,16 +227,17 @@ UNIFIED_SOURCES += [
      'nsTransitionManager.cpp',
      'PostTraversalTask.cpp',
      'PreloadedStyleSheet.cpp',
