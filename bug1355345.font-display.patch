@@ -1,0 +1,5 @@
+# HG changeset patch
+# User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
+# Parent  ebbcdaa5b5802ecd39624dd2acbdda8547b8384d
+Bug 1355345 - stylo: Support font-display descriptor in @font-face rule. r? xidorn
+
