@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  65d3c0551d94dfaaad570eb214c6635c0910f39b
+# Parent  a4d539a44bcaf2f0f8d36297609d3ad2104ea579
 Bug 1361994 - Part 4: Update expected stylo test failures. r?xidorn
 
 diff --git a/layout/style/test/stylo-failures.md b/layout/style/test/stylo-failures.md
@@ -38,12 +38,12 @@ diff --git a/layout/style/test/stylo-failures.md b/layout/style/test/stylo-failu
    * test_value_storage.html `symbols(` [30]
    * ... `list-style-type` [60]
    * ... `'list-style'` [30]
-   * ... `'content`: various value as list-style-type in counter functions [12]
+   * ... `'content`: various value as list-style-type in counter functions [2]
    * test_html_attribute_computed_values.html `list-style-type` [8]
  * @page support:
    * test_bug887741_at-rules_in_declaration_lists.html `exception` [1]
  * Unimplemented \@font-face descriptors:
-@@ -213,21 +212,18 @@ to mochitest command.
+@@ -211,21 +210,18 @@ to mochitest command.
      * ... ` 2 ` [26]
      * ... `: 5 ` [84]
      * ... `border-spacing: ` [6]
