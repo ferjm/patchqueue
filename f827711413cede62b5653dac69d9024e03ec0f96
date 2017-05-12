@@ -3,13 +3,13 @@
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
 # Date 1493130279 -7200
 # Node ID f827711413cede62b5653dac69d9024e03ec0f96
-# Parent  d34b4e83d91c00235f1aef281913ef48b55b966e
+# Parent  db106b0825dcf42ddf95fda091517698fee793f6
 Bug 1350175 - Part 2: FFI changes to get line and column. r=xidorn
 
 diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
 --- a/layout/style/ServoBindingList.h
 +++ b/layout/style/ServoBindingList.h
-@@ -101,17 +101,18 @@ SERVO_BINDING_FUNC(Servo_CssRules_Insert
+@@ -97,17 +97,18 @@ SERVO_BINDING_FUNC(Servo_CssRules_Insert
                     uint16_t* rule_type)
  SERVO_BINDING_FUNC(Servo_CssRules_DeleteRule, nsresult,
                     ServoCssRulesBorrowed rules, uint32_t index)
@@ -32,7 +32,7 @@ diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
 diff --git a/layout/style/ServoCSSRuleList.cpp b/layout/style/ServoCSSRuleList.cpp
 --- a/layout/style/ServoCSSRuleList.cpp
 +++ b/layout/style/ServoCSSRuleList.cpp
-@@ -77,18 +77,22 @@ css::Rule*
+@@ -79,18 +79,22 @@ css::Rule*
  ServoCSSRuleList::GetRule(uint32_t aIndex)
  {
    uintptr_t rule = mRules[aIndex];
@@ -56,7 +56,53 @@ diff --git a/layout/style/ServoCSSRuleList.cpp b/layout/style/ServoCSSRuleList.c
        CASE_RULE(NAMESPACE, Namespace)
        CASE_RULE(PAGE, Page)
        CASE_RULE(SUPPORTS, Supports)
- #undef CASE_RULE
+       CASE_RULE(DOCUMENT, Document)
+diff --git a/layout/style/ServoDocumentRule.cpp b/layout/style/ServoDocumentRule.cpp
+--- a/layout/style/ServoDocumentRule.cpp
++++ b/layout/style/ServoDocumentRule.cpp
+@@ -8,17 +8,18 @@
+ 
+ #include "mozilla/ServoBindings.h"
+ #include "mozilla/ServoDocumentRule.h"
+ 
+ using namespace mozilla::dom;
+ 
+ namespace mozilla {
+ 
+-ServoDocumentRule::ServoDocumentRule(RefPtr<RawServoDocumentRule> aRawRule)
++ServoDocumentRule::ServoDocumentRule(RefPtr<RawServoDocumentRule> aRawRule,
++                                     uint32_t aLine, uint32_t aColumn)
+   : CSSMozDocumentRule(Servo_DocumentRule_GetRules(aRawRule).Consume())
+   , mRawRule(Move(aRawRule))
+ {
+ }
+ 
+ ServoDocumentRule::~ServoDocumentRule()
+ {
+ }
+diff --git a/layout/style/ServoDocumentRule.h b/layout/style/ServoDocumentRule.h
+--- a/layout/style/ServoDocumentRule.h
++++ b/layout/style/ServoDocumentRule.h
+@@ -12,17 +12,18 @@
+ #include "mozilla/dom/CSSMozDocumentRule.h"
+ #include "mozilla/ServoBindingTypes.h"
+ 
+ namespace mozilla {
+ 
+ class ServoDocumentRule final : public dom::CSSMozDocumentRule
+ {
+ public:
+-  explicit ServoDocumentRule(RefPtr<RawServoDocumentRule> aRawRule);
++  ServoDocumentRule(RefPtr<RawServoDocumentRule> aRawRule,
++                    uint32_t aLine, uint32_t aColumn);
+ 
+   NS_DECL_ISUPPORTS_INHERITED
+ 
+   already_AddRefed<css::Rule> Clone() const override;
+   bool UseForPresentation(nsPresContext* aPresContext,
+                           nsMediaQueryResultCacheKey& aKey) final;
+ #ifdef DEBUG
+   void List(FILE* out = stdout, int32_t aIndent = 0) const final;
 diff --git a/layout/style/ServoMediaRule.cpp b/layout/style/ServoMediaRule.cpp
 --- a/layout/style/ServoMediaRule.cpp
 +++ b/layout/style/ServoMediaRule.cpp
@@ -273,7 +319,7 @@ diff --git a/layout/style/ServoSupportsRule.h b/layout/style/ServoSupportsRule.h
 diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 --- a/servo/ports/geckolib/glue.rs
 +++ b/servo/ports/geckolib/glue.rs
-@@ -753,20 +753,25 @@ pub extern "C" fn Servo_CssRules_DeleteR
+@@ -761,20 +761,25 @@ pub extern "C" fn Servo_CssRules_DeleteR
  
  macro_rules! impl_basic_rule_funcs {
      { ($name:ident, $rule_type:ty, $raw_type:ty),
