@@ -1,5 +1,44 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  ebbcdaa5b5802ecd39624dd2acbdda8547b8384d
+# Parent  86754a7acc0e12cf3c575e9867958c2bacc8f465
 Bug 1355345 - stylo: Support font-display descriptor in @font-face rule. r? xidorn
 
+diff --git a/servo/components/style/build_gecko.rs b/servo/components/style/build_gecko.rs
+--- a/servo/components/style/build_gecko.rs
++++ b/servo/components/style/build_gecko.rs
+@@ -293,16 +293,17 @@ mod bindings {
+                 vars: true,
+                 ..CodegenConfig::nothing()
+             })
+             .header(add_include("nsCSSPseudoClasses.h"))   // servo/rust-bindgen#599
+             .include(add_include("nsStyleStruct.h"))
+             .include(add_include("mozilla/ServoPropPrefList.h"))
+             .include(add_include("mozilla/StyleAnimationValue.h"))
+             .include(add_include("gfxFontConstants.h"))
++            .include(add_include("gfxUserFontSet.h"))
+             .include(add_include("nsThemeConstants.h"))
+             .include(add_include("mozilla/dom/AnimationEffectReadOnlyBinding.h"))
+             .include(add_include("mozilla/AnimationPropertySegment.h"))
+             .include(add_include("mozilla/ComputedTiming.h"))
+             .include(add_include("mozilla/ComputedTimingFunction.h"))
+             .include(add_include("mozilla/Keyframe.h"))
+             .include(add_include("mozilla/ServoElementSnapshot.h"))
+             .include(add_include("mozilla/ServoElementSnapshotTable.h"))
+@@ -375,16 +376,17 @@ mod bindings {
+             "FontSizePrefs",
+             "FragmentOrURL",
+             "FrameRequestCallback",
+             "GeckoParserExtraData",
+             "GeckoFontMetrics",
+             "gfxAlternateValue",
+             "gfxFontFeature",
+             "gfxFontVariation",
++            "gfxUserFontEntry",
+             "GridNamedArea",
+             "HalfCorner",
+             "Image",
+             "ImageURL",
+             "Keyframe",
+             "nsAttrName",
+             "nsAttrValue",
+             "nsBorderColors",
