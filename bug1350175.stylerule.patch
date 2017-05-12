@@ -1,12 +1,12 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  90a98bf1d38829a53731ddd27728160a920ab32b
+# Parent  dd736514d9d22ebdc209aef79859cc87100b8073
 Bug 1350175 - Part 3: Set source position for style, page, namespace, media, supports and font-face. r?SimonSapin
 
 diff --git a/layout/style/ServoBindings.cpp b/layout/style/ServoBindings.cpp
 --- a/layout/style/ServoBindings.cpp
 +++ b/layout/style/ServoBindings.cpp
-@@ -1908,19 +1908,19 @@ Gecko_CSSKeywordString(nsCSSKeyword aKey
+@@ -1946,19 +1946,19 @@ Gecko_CSSKeywordString(nsCSSKeyword aKey
    MOZ_ASSERT(NS_IsMainThread());
    MOZ_ASSERT(aLength);
    const nsAFlatCString& value = nsCSSKeywords::GetStringValue(aKeyword);
@@ -31,7 +31,7 @@ diff --git a/layout/style/ServoBindings.cpp b/layout/style/ServoBindings.cpp
 diff --git a/layout/style/ServoBindings.h b/layout/style/ServoBindings.h
 --- a/layout/style/ServoBindings.h
 +++ b/layout/style/ServoBindings.h
-@@ -447,17 +447,17 @@ void InitializeServo();
+@@ -463,17 +463,17 @@ void InitializeServo();
  void ShutdownServo();
  
  const nsMediaFeature* Gecko_GetMediaFeatures();
@@ -151,8 +151,7 @@ diff --git a/servo/components/style/gecko/rules.rs b/servo/components/style/geck
 diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/stylesheets.rs
 --- a/servo/components/style/stylesheets.rs
 +++ b/servo/components/style/stylesheets.rs
-@@ -4,17 +4,17 @@
- 
+@@ -5,17 +5,17 @@
  //! Style sheets and their CSS rules.
  
  #![deny(missing_docs)]
@@ -160,21 +159,22 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
  use {Atom, Prefix, Namespace};
  use context::QuirksMode;
  use counter_style::{CounterStyleRule, parse_counter_style_name, parse_counter_style_body};
--use cssparser::{AtRuleParser, Parser, QualifiedRuleParser};
-+use cssparser::{AtRuleParser, Parser, QualifiedRuleParser, SourceLocation};
- use cssparser::{AtRuleType, RuleListParser, parse_one_rule};
+ use cssparser::{AtRuleParser, Parser, QualifiedRuleParser};
+-use cssparser::{AtRuleType, RuleListParser, parse_one_rule};
++use cssparser::{AtRuleType, RuleListParser, parse_one_rule, SourceLocation};
  use cssparser::ToCss as ParserToCss;
+ use document_condition::DocumentCondition;
  use error_reporting::{ParseErrorReporter, NullReporter};
  #[cfg(feature = "servo")]
  use font_face::FontFaceRuleData;
  use font_face::parse_font_face_block;
  #[cfg(feature = "gecko")]
  pub use gecko::rules::FontFaceRule;
-@@ -459,22 +459,32 @@ impl ToCssWithGuard for CssRule {
-             CssRule::Keyframes(ref lock) => lock.read_with(guard).to_css(guard, dest),
+@@ -484,22 +484,32 @@ impl ToCssWithGuard for CssRule {
              CssRule::Media(ref lock) => lock.read_with(guard).to_css(guard, dest),
              CssRule::Supports(ref lock) => lock.read_with(guard).to_css(guard, dest),
              CssRule::Page(ref lock) => lock.read_with(guard).to_css(guard, dest),
+             CssRule::Document(ref lock) => lock.read_with(guard).to_css(guard, dest),
          }
      }
  }
@@ -203,7 +203,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
      where W: fmt::Write {
          try!(dest.write_str("@namespace "));
          if let Some(ref prefix) = self.prefix {
-@@ -551,16 +561,17 @@ impl ToCssWithGuard for KeyframesRule {
+@@ -576,16 +586,17 @@ impl ToCssWithGuard for KeyframesRule {
      }
  }
  
@@ -221,7 +221,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
      fn to_css<W>(&self, guard: &SharedRwLockReadGuard, dest: &mut W) -> fmt::Result
      where W: fmt::Write {
          try!(dest.write_str("@media "));
-@@ -579,16 +590,18 @@ impl ToCssWithGuard for MediaRule {
+@@ -604,16 +615,18 @@ impl ToCssWithGuard for MediaRule {
  /// An @supports rule
  pub struct SupportsRule {
      /// The parsed condition
@@ -240,7 +240,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
          try!(dest.write_str("@supports "));
          try!(self.condition.to_css(dest));
          try!(dest.write_str(" {"));
-@@ -600,38 +613,43 @@ impl ToCssWithGuard for SupportsRule {
+@@ -625,38 +638,43 @@ impl ToCssWithGuard for SupportsRule {
      }
  }
  
@@ -286,7 +286,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
      where W: fmt::Write {
          // Step 1
          try!(self.selectors.to_css(dest));
-@@ -930,29 +948,29 @@ pub enum VendorPrefix {
+@@ -991,29 +1009,29 @@ pub enum VendorPrefix {
      /// -moz prefix.
      Moz,
      /// -webkit prefix.
@@ -312,15 +312,15 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
      /// A @page rule prelude.
 -    Page,
 +    Page(SourceLocation),
+     /// A @document rule, with its conditional.
+     Document(DocumentCondition),
  }
  
  
  impl<'a> AtRuleParser for TopLevelRuleParser<'a> {
      type Prelude = AtRulePrelude;
      type AtRule = CssRule;
- 
-     fn parse_prelude(&mut self, name: &str, input: &mut Parser)
-@@ -998,32 +1016,36 @@ impl<'a> AtRuleParser for TopLevelRulePa
+@@ -1061,32 +1079,36 @@ impl<'a> AtRuleParser for TopLevelRulePa
                      self.state.set(State::Invalid);
                      return Err(())  // "@import must be before any rule but @charset"
                  }
@@ -357,7 +357,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
                  }
              },
              // @charset is removed by rust-cssparser if it’s the first rule in the stylesheet
-@@ -1108,28 +1130,30 @@ fn is_viewport_enabled() -> bool {
+@@ -1171,28 +1193,30 @@ fn is_viewport_enabled() -> bool {
  }
  
  impl<'a, 'b> AtRuleParser for NestedRuleParser<'a, 'b> {
@@ -391,7 +391,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
                  }
                  let name = parse_counter_style_name(input)?;
                  // ASCII-case-insensitive matches for "decimal" are already lower-cased
-@@ -1161,70 +1185,73 @@ impl<'a, 'b> AtRuleParser for NestedRule
+@@ -1224,17 +1248,17 @@ impl<'a, 'b> AtRuleParser for NestedRule
                      return Err(())
                  }
                  let name = KeyframesName::parse(self.context, input)?;
@@ -404,6 +404,13 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
 +                    Ok(AtRuleType::WithBlock(AtRulePrelude::Page(location)))
                  } else {
                      Err(())
+                 }
+             },
+             "-moz-document" => {
+                 if cfg!(feature = "gecko") {
+                     let cond = DocumentCondition::parse(self.context, input)?;
+                     Ok(AtRuleType::WithBlock(AtRulePrelude::Document(cond)))
+@@ -1243,59 +1267,62 @@ impl<'a, 'b> AtRuleParser for NestedRule
                  }
              },
              _ => Err(())
@@ -467,14 +474,14 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
 +                    source_location: location,
 +                }))))
              }
-         }
-     }
- }
- 
- impl<'a, 'b> QualifiedRuleParser for NestedRuleParser<'a, 'b> {
-     type Prelude = SelectorList<SelectorImpl>;
-     type QualifiedRule = CssRule;
-@@ -1234,16 +1261,19 @@ impl<'a, 'b> QualifiedRuleParser for Nes
+             AtRulePrelude::Document(cond) => {
+                 if cfg!(feature = "gecko") {
+                     Ok(CssRule::Document(Arc::new(self.shared_lock.wrap(DocumentRule {
+                         condition: cond,
+                         rules: self.parse_nested_rules(input, CssRuleType::Document),
+                     }))))
+                 } else {
+@@ -1315,16 +1342,19 @@ impl<'a, 'b> QualifiedRuleParser for Nes
              stylesheet_origin: self.stylesheet_origin,
              namespaces: self.namespaces,
          };
@@ -498,7 +505,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
 diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 --- a/servo/ports/geckolib/glue.rs
 +++ b/servo/ports/geckolib/glue.rs
-@@ -893,26 +893,26 @@ pub extern "C" fn Servo_NamespaceRule_Ge
+@@ -908,26 +908,26 @@ pub extern "C" fn Servo_NamespaceRule_Ge
  #[no_mangle]
  pub extern "C" fn Servo_NamespaceRule_GetURI(rule: RawServoNamespaceRuleBorrowed) -> *mut nsIAtom {
      read_locked_arc(rule, |rule: &NamespaceRule| rule.url.0.as_ptr())
