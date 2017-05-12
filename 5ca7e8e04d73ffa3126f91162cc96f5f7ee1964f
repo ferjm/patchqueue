@@ -3,7 +3,7 @@
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
 # Date 1493146905 -7200
 # Node ID 5ca7e8e04d73ffa3126f91162cc96f5f7ee1964f
-# Parent  82c2d17e74ef9cdf38a5d5ac4eb3ae846ec30ba4
+# Parent  8a7d0b15595f9916123848ca906f29c62d4914c9
 Bug 1350175 - Part 1: Set stylesheet line offset. r=xidorn
 
 diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
@@ -113,8 +113,8 @@ diff --git a/servo/components/style/encoding_support.rs b/servo/components/style
 diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/stylesheets.rs
 --- a/servo/components/style/stylesheets.rs
 +++ b/servo/components/style/stylesheets.rs
-@@ -655,25 +655,25 @@ impl ToCssWithGuard for StyleRule {
- pub type FontFaceRule = FontFaceRuleData;
+@@ -703,25 +703,25 @@ impl ToCssWithGuard for DocumentRule {
+ }
  
  impl Stylesheet {
      /// Updates an empty stylesheet from a given string of text.
@@ -145,7 +145,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
 diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 --- a/servo/ports/geckolib/glue.rs
 +++ b/servo/ports/geckolib/glue.rs
-@@ -520,17 +520,18 @@ pub extern "C" fn Servo_StyleSheet_Empty
+@@ -547,17 +547,18 @@ pub extern "C" fn Servo_StyleSheet_Empty
  }
  
  #[no_mangle]
@@ -165,7 +165,7 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
          SheetParsingMode::eAuthorSheetFeatures => Origin::Author,
          SheetParsingMode::eUserSheetFeatures => Origin::User,
          SheetParsingMode::eAgentSheetFeatures => Origin::UserAgent,
-@@ -554,26 +555,28 @@ pub extern "C" fn Servo_StyleSheet_FromU
+@@ -581,26 +582,28 @@ pub extern "C" fn Servo_StyleSheet_FromU
      let media = if media_list.is_null() {
          Arc::new(shared_lock.wrap(MediaList::empty()))
      } else {
@@ -196,7 +196,7 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
          None
      } else {
          Some(StylesheetLoader::new(loader, gecko_stylesheet))
-@@ -581,18 +584,18 @@ pub extern "C" fn Servo_StyleSheet_Clear
+@@ -608,18 +611,18 @@ pub extern "C" fn Servo_StyleSheet_Clear
  
      // FIXME(emilio): loader.as_ref() doesn't typecheck for some reason?
      let loader: Option<&StyleStylesheetLoader> = match loader {
@@ -214,6 +214,6 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
  #[no_mangle]
  pub extern "C" fn Servo_StyleSet_AppendStyleSheet(raw_data: RawServoStyleSetBorrowed,
                                                    raw_sheet: RawServoStyleSheetBorrowed,
-                                                   unique_id: u32,
-                                                   flush: bool) {
-     let global_style_data = &*GLOBAL_STYLE_DATA;
+                                                   unique_id: u32) {
+     let mut data = PerDocumentStyleData::from_ffi(raw_data).borrow_mut();
+     let sheet = HasArcFFI::as_arc(&raw_sheet);
