@@ -1,7 +1,7 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
 # Parent  dd736514d9d22ebdc209aef79859cc87100b8073
-Bug 1350175 - Part 3: Set source position for style, page, namespace, media, supports and font-face. r?SimonSapin
+Bug 1350175 - Part 3: Set source position for the different rules. r=SimonSapin
 
 diff --git a/layout/style/ServoBindings.cpp b/layout/style/ServoBindings.cpp
 --- a/layout/style/ServoBindings.cpp
@@ -286,7 +286,26 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
      where W: fmt::Write {
          // Step 1
          try!(self.selectors.to_css(dest));
-@@ -991,29 +1009,29 @@ pub enum VendorPrefix {
+@@ -681,16 +699,18 @@ pub type FontFaceRule = FontFaceRuleData
+ 
+ #[derive(Debug)]
+ /// A @-moz-document rule
+ pub struct DocumentRule {
+     /// The parsed condition
+     pub condition: DocumentCondition,
+     /// Child rules
+     pub rules: Arc<Locked<CssRules>>,
++    /// The line and column of the rule's source code.
++    pub source_location: SourceLocation,
+ }
+ 
+ impl ToCssWithGuard for DocumentRule {
+     fn to_css<W>(&self, guard: &SharedRwLockReadGuard, dest: &mut W) -> fmt::Result
+     where W: fmt::Write {
+         try!(dest.write_str("@-moz-document "));
+         try!(self.condition.to_css(dest));
+         try!(dest.write_str(" {"));
+@@ -991,31 +1011,31 @@ pub enum VendorPrefix {
      /// -moz prefix.
      Moz,
      /// -webkit prefix.
@@ -313,14 +332,17 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
 -    Page,
 +    Page(SourceLocation),
      /// A @document rule, with its conditional.
-     Document(DocumentCondition),
+-    Document(DocumentCondition),
++    Document(DocumentCondition, SourceLocation),
  }
  
  
  impl<'a> AtRuleParser for TopLevelRuleParser<'a> {
      type Prelude = AtRulePrelude;
      type AtRule = CssRule;
-@@ -1061,32 +1079,36 @@ impl<'a> AtRuleParser for TopLevelRulePa
+ 
+     fn parse_prelude(&mut self, name: &str, input: &mut Parser)
+@@ -1061,32 +1081,36 @@ impl<'a> AtRuleParser for TopLevelRulePa
                      self.state.set(State::Invalid);
                      return Err(())  // "@import must be before any rule but @charset"
                  }
@@ -357,7 +379,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
                  }
              },
              // @charset is removed by rust-cssparser if it’s the first rule in the stylesheet
-@@ -1171,28 +1193,30 @@ fn is_viewport_enabled() -> bool {
+@@ -1171,28 +1195,30 @@ fn is_viewport_enabled() -> bool {
  }
  
  impl<'a, 'b> AtRuleParser for NestedRuleParser<'a, 'b> {
@@ -391,7 +413,7 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
                  }
                  let name = parse_counter_style_name(input)?;
                  // ASCII-case-insensitive matches for "decimal" are already lower-cased
-@@ -1224,17 +1248,17 @@ impl<'a, 'b> AtRuleParser for NestedRule
+@@ -1224,84 +1250,88 @@ impl<'a, 'b> AtRuleParser for NestedRule
                      return Err(())
                  }
                  let name = KeyframesName::parse(self.context, input)?;
@@ -409,8 +431,10 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
              "-moz-document" => {
                  if cfg!(feature = "gecko") {
                      let cond = DocumentCondition::parse(self.context, input)?;
-                     Ok(AtRuleType::WithBlock(AtRulePrelude::Document(cond)))
-@@ -1243,59 +1267,62 @@ impl<'a, 'b> AtRuleParser for NestedRule
+-                    Ok(AtRuleType::WithBlock(AtRulePrelude::Document(cond)))
++                    Ok(AtRuleType::WithBlock(AtRulePrelude::Document(cond, location)))
+                 } else {
+                     Err(())
                  }
              },
              _ => Err(())
@@ -474,14 +498,22 @@ diff --git a/servo/components/style/stylesheets.rs b/servo/components/style/styl
 +                    source_location: location,
 +                }))))
              }
-             AtRulePrelude::Document(cond) => {
+-            AtRulePrelude::Document(cond) => {
++            AtRulePrelude::Document(cond, location) => {
                  if cfg!(feature = "gecko") {
                      Ok(CssRule::Document(Arc::new(self.shared_lock.wrap(DocumentRule {
                          condition: cond,
                          rules: self.parse_nested_rules(input, CssRuleType::Document),
++                        source_location: location,
                      }))))
                  } else {
-@@ -1315,16 +1342,19 @@ impl<'a, 'b> QualifiedRuleParser for Nes
+                     unreachable!()
+                 }
+             }
+         }
+     }
+ }
+@@ -1315,16 +1345,19 @@ impl<'a, 'b> QualifiedRuleParser for Nes
              stylesheet_origin: self.stylesheet_origin,
              namespaces: self.namespaces,
          };
