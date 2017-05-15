@@ -1,12 +1,12 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  497a704bdadaabf1cccaf4e2fa8dce3e0469e0d3
+# Parent  9eb06e06f25230f0af04146fdb66c2fd5d9d815d
 Bug 1350175 - Part 3: Set source position for the different rules. r=SimonSapin
 
 diff --git a/layout/style/ServoBindings.cpp b/layout/style/ServoBindings.cpp
 --- a/layout/style/ServoBindings.cpp
 +++ b/layout/style/ServoBindings.cpp
-@@ -1946,19 +1946,19 @@ Gecko_CSSKeywordString(nsCSSKeyword aKey
+@@ -2092,19 +2092,19 @@ Gecko_CSSKeywordString(nsCSSKeyword aKey
    MOZ_ASSERT(NS_IsMainThread());
    MOZ_ASSERT(aLength);
    const nsAFlatCString& value = nsCSSKeywords::GetStringValue(aKeyword);
@@ -31,7 +31,7 @@ diff --git a/layout/style/ServoBindings.cpp b/layout/style/ServoBindings.cpp
 diff --git a/layout/style/ServoBindings.h b/layout/style/ServoBindings.h
 --- a/layout/style/ServoBindings.h
 +++ b/layout/style/ServoBindings.h
-@@ -463,17 +463,17 @@ void InitializeServo();
+@@ -510,17 +510,17 @@ void InitializeServo();
  void ShutdownServo();
  
  const nsMediaFeature* Gecko_GetMediaFeatures();
@@ -705,6 +705,6 @@ diff --git a/servo/tests/unit/style/stylist.rs b/servo/tests/unit/style/stylist.
          let guard = shared_lock.read();
          let rule = locked.read_with(&guard);
          rule.selectors.0.iter().map(|s| {
-             Rule::new(&guard,
-                       s.inner.clone(),
+             Rule::new(s.inner.clone(),
                        locked.clone(),
+                       i,
