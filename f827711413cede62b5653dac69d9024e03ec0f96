@@ -3,7 +3,7 @@
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
 # Date 1493130279 -7200
 # Node ID f827711413cede62b5653dac69d9024e03ec0f96
-# Parent  db106b0825dcf42ddf95fda091517698fee793f6
+# Parent  3852b52a7ff5e54528ce875d2c7bec00376cd372
 Bug 1350175 - Part 2: FFI changes to get line and column. r=xidorn
 
 diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
@@ -178,10 +178,10 @@ diff --git a/layout/style/ServoPageRule.cpp b/layout/style/ServoPageRule.cpp
 --- a/layout/style/ServoPageRule.cpp
 +++ b/layout/style/ServoPageRule.cpp
 @@ -99,18 +99,19 @@ ServoPageRuleDeclaration::GetCSSParsingE
- URLExtraData*
- ServoPageRuleDeclaration::GetURLData() const
+ nsDOMCSSDeclaration::ServoCSSParsingEnvironment
+ ServoPageRuleDeclaration::GetServoCSSParsingEnvironment() const
  {
-   return GetURLDataForRule(Rule());
+   return GetServoCSSParsingEnvironmentForRule(Rule());
  }
  
  // -- ServoPageRule --------------------------------------------------
@@ -226,10 +226,10 @@ diff --git a/layout/style/ServoStyleRule.cpp b/layout/style/ServoStyleRule.cpp
 --- a/layout/style/ServoStyleRule.cpp
 +++ b/layout/style/ServoStyleRule.cpp
 @@ -104,18 +104,19 @@ ServoStyleRuleDeclaration::GetCSSParsing
- URLExtraData*
- ServoStyleRuleDeclaration::GetURLData() const
+ nsDOMCSSDeclaration::ServoCSSParsingEnvironment
+ ServoStyleRuleDeclaration::GetServoCSSParsingEnvironment() const
  {
-   return GetURLDataForRule(Rule());
+   return GetServoCSSParsingEnvironmentForRule(Rule());
  }
  
  // -- ServoStyleRule --------------------------------------------------
