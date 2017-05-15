@@ -3,7 +3,7 @@
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
 # Date 1493146905 -7200
 # Node ID 5ca7e8e04d73ffa3126f91162cc96f5f7ee1964f
-# Parent  8a7d0b15595f9916123848ca906f29c62d4914c9
+# Parent  e66dedabe582ba7b394aee4f89ed70fe389b3c46
 Bug 1350175 - Part 1: Set stylesheet line offset. r=xidorn
 
 diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
@@ -214,6 +214,6 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
  #[no_mangle]
  pub extern "C" fn Servo_StyleSet_AppendStyleSheet(raw_data: RawServoStyleSetBorrowed,
                                                    raw_sheet: RawServoStyleSheetBorrowed,
-                                                   unique_id: u32) {
+                                                   unique_id: u64) {
      let mut data = PerDocumentStyleData::from_ffi(raw_data).borrow_mut();
      let sheet = HasArcFFI::as_arc(&raw_sheet);
