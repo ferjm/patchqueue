@@ -24,43 +24,147 @@ diff --git a/servo/components/style/build_gecko.rs b/servo/components/style/buil
              .include(add_include("mozilla/Keyframe.h"))
              .include(add_include("mozilla/ServoElementSnapshot.h"))
              .include(add_include("mozilla/ServoElementSnapshotTable.h"))
-@@ -388,16 +389,17 @@ mod bindings {
-             "FontSizePrefs",
-             "FragmentOrURL",
-             "FrameRequestCallback",
-             "GeckoParserExtraData",
-             "GeckoFontMetrics",
-             "gfxAlternateValue",
-             "gfxFontFeature",
-             "gfxFontVariation",
-+            "gfxUserFontEntry",
-             "GridNamedArea",
-             "HalfCorner",
-             "Image",
-             "ImageURL",
-             "Keyframe",
-             "nsAttrName",
-             "nsAttrValue",
-             "nsBorderColors",
-@@ -532,16 +534,21 @@ mod bindings {
-             "gfxSize_Super",  // Ditto.
-             "mozilla::ErrorResult",  // Causes JSWhyMagic to be included & handled incorrectly.
-             "mozilla::StyleAnimationValue",
-             "StyleAnimationValue", // pulls in a whole bunch of stuff we don't need in the bindings
-         ];
-         let blacklist = [
-             ".*char_traits",
-             ".*incompatible_char_type",
-+            "gfxShapedText_DetailedGlyphStore", // servo/rust-bindgen#701
-+            "gfxShapedText", // servo/rust-bindgen#701
-+            "gfxShapedWord", // servo/rust-bindgen#701
-+            "gfxFont_CacheHashEntry", // servo/rust-bindgen#701
-+            "mozilla::gfx::BaseMargin_SideT", // servo/rust-bindgen#701
-         ];
+diff --git a/servo/components/style/font_face.rs b/servo/components/style/font_face.rs
+--- a/servo/components/style/font_face.rs
++++ b/servo/components/style/font_face.rs
+@@ -67,16 +67,62 @@ pub struct UrlSource {
+ impl ToCss for UrlSource {
+     fn to_css<W>(&self, dest: &mut W) -> fmt::Result
+         where W: fmt::Write,
+     {
+         dest.write_str(self.url.as_str())
+     }
+ }
  
-         struct MappedGenericType {
-             generic: bool,
-             gecko: &'static str,
-             servo: &'static str,
++/// A font-display value for a @font-face rule.
++/// The font-display descriptor determines how a font face is displayed based
++/// on whether and when it is downloaded and ready to use.
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub enum FontDisplay {
++    /// The font display strategy is user-agent-defined.
++    Auto,
++    /// Gives the font face a short block period (3s is recommended in most cases)
++    /// and an infinite swap period.
++    Block,
++    /// Gives the font face a 0s block period and an infinite swap period.
++    Swap,
++    /// Gives the font face an extremely small block period (100ms or less is
++    /// recommended in most cases) and a short swap period (3s is recommended in most
++    /// cases).
++    Fallback,
++    /// Gives the font face an extremely small block period (100ms or less is
++    /// recommended in most cases) and a 0s swap period.
++    Optional,
++}
++
++impl ToCss for FontDisplay {
++    fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
++        match *self {
++            FontDisplay::Auto => dest.write_str("auto"),
++            FontDisplay::Block => dest.write_str("block"),
++            FontDisplay::Swap => dest.write_str("swap"),
++            FontDisplay::Fallback => dest.write_str("fallback"),
++            FontDisplay::Optional => dest.write_str("optional"),
++        }
++    }
++}
++
++impl Parse for FontDisplay {
++    fn parse(_: &ParserContext, input: &mut Parser) -> Result<FontDisplay, ()> {
++        Ok(match_ignore_ascii_case! {&*input.expect_ident()?,
++            "auto" => FontDisplay::Auto,
++            "block" => FontDisplay::Block,
++            "swap" => FontDisplay::Swap,
++            "fallback" => FontDisplay::Fallback,
++            "optional" => FontDisplay::Optional,
++            _ => return Err(())
++        })
++    }
++}
++
+ /// Parse the block inside a `@font-face` rule.
+ ///
+ /// Note that the prelude parsing code lives in the `stylesheets` module.
+ pub fn parse_font_face_block(context: &ParserContext, input: &mut Parser, location: SourceLocation)
+     -> FontFaceRuleData {
+     let mut rule = FontFaceRuleData::empty();
+     rule.source_location = location;
+     {
+@@ -327,22 +373,25 @@ font_face_descriptors! {
+         "font-style" style / mStyle: font_style::T = font_style::T::normal,
+ 
+         /// The weight of this font face
+         "font-weight" weight / mWeight: font_weight::T = font_weight::T::Weight400 /* normal */,
+ 
+         /// The stretch of this font face
+         "font-stretch" stretch / mStretch: font_stretch::T = font_stretch::T::normal,
+ 
++        /// The display of this font face
++        "font-display" display / mDisplay: FontDisplay = FontDisplay::Auto,
++
+         /// The ranges of code points outside of which this font face should not be used.
+         "unicode-range" unicode_range / mUnicodeRange: Vec<UnicodeRange> = vec![
+             UnicodeRange { start: 0, end: 0x10FFFF }
+         ],
+ 
+-        // FIXME: add font-feature-settings, font-language-override, and font-display
++        // FIXME: add font-feature-settings and font-language-override
+     ]
+ }
+ 
+ #[cfg(feature = "servo")]
+ font_face_descriptors! {
+     mandatory descriptors = [
+         /// The name of this font face
+         "font-family" family / mFamily: FamilyName,
+diff --git a/servo/components/style/gecko/rules.rs b/servo/components/style/gecko/rules.rs
+--- a/servo/components/style/gecko/rules.rs
++++ b/servo/components/style/gecko/rules.rs
+@@ -3,17 +3,17 @@
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ //! Bindings for CSS Rule objects
+ 
+ use computed_values::{font_style, font_weight, font_stretch};
+ use computed_values::font_family::FamilyName;
+ use counter_style;
+ use cssparser::UnicodeRange;
+-use font_face::{FontFaceRuleData, Source};
++use font_face::{FontFaceRuleData, Source, FontDisplay};
+ use gecko_bindings::bindings;
+ use gecko_bindings::structs::{self, nsCSSFontFaceRule, nsCSSValue};
+ use gecko_bindings::structs::{nsCSSCounterDesc, nsCSSCounterStyleRule};
+ use gecko_bindings::sugar::ns_css_value::ToNsCssValue;
+ use gecko_bindings::sugar::refptr::{RefPtr, UniqueRefPtr};
+ use shared_lock::{ToCssWithGuard, SharedRwLockReadGuard};
+ use std::fmt;
+ 
+@@ -110,16 +110,28 @@ impl ToNsCssValue for Vec<UnicodeRange> 
+             .as_mut_slice().chunks_mut(2);
+         for (range, target) in self.iter().zip(target_ranges) {
+             target[0].set_integer(range.start as i32);
+             target[1].set_integer(range.end as i32);
          }
-         let servo_mapped_generic_types = [
+     }
+ }
+ 
++impl ToNsCssValue for FontDisplay {
++    fn convert(self, nscssvalue: &mut nsCSSValue) {
++        nscssvalue.set_enum(match self {
++            FontDisplay::Auto => structs::NS_FONT_DISPLAY_AUTO as i32,
++            FontDisplay::Block => structs::NS_FONT_DISPLAY_BLOCK as i32,
++            FontDisplay::Swap => structs::NS_FONT_DISPLAY_SWAP as i32,
++            FontDisplay::Fallback => structs::NS_FONT_DISPLAY_FALLBACK as i32,
++            FontDisplay::Optional => structs::NS_FONT_DISPLAY_OPTIONAL as i32,
++        })
++    }
++}
++
+ impl From<FontFaceRuleData> for FontFaceRule {
+     fn from(data: FontFaceRuleData) -> FontFaceRule {
+         let mut result = unsafe {
+             UniqueRefPtr::from_addrefed(bindings::Gecko_CSSFontFaceRule_Create(
+                 data.source_location.line as u32, data.source_location.column as u32
+             ))
+         };
+         data.set_descriptors(&mut result.mDecl.mDescriptors);
