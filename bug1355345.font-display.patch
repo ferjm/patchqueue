@@ -51,11 +51,11 @@ diff --git a/servo/components/style/build_gecko.rs b/servo/components/style/buil
          let blacklist = [
              ".*char_traits",
              ".*incompatible_char_type",
-+            "gfxShapedText_DetailedGlyphStore",
-+            "gfxShapedText",
-+            "gfxShapedWord",
-+            "gfxFont_CacheHashEntry",
-+            "mozilla::gfx::BaseMargin_SideT",
++            "gfxShapedText_DetailedGlyphStore", // servo/rust-bindgen#701
++            "gfxShapedText", // servo/rust-bindgen#701
++            "gfxShapedWord", // servo/rust-bindgen#701
++            "gfxFont_CacheHashEntry", // servo/rust-bindgen#701
++            "mozilla::gfx::BaseMargin_SideT", // servo/rust-bindgen#701
          ];
  
          struct MappedGenericType {
