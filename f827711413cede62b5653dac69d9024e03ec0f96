@@ -316,34 +316,4 @@ diff --git a/layout/style/ServoSupportsRule.h b/layout/style/ServoSupportsRule.h
                            nsMediaQueryResultCacheKey& aKey) final;
  #ifdef DEBUG
    void List(FILE* out = stdout, int32_t aIndent = 0) const final;
-diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
---- a/servo/ports/geckolib/glue.rs
-+++ b/servo/ports/geckolib/glue.rs
-@@ -761,20 +761,25 @@ pub extern "C" fn Servo_CssRules_DeleteR
- 
- macro_rules! impl_basic_rule_funcs {
-     { ($name:ident, $rule_type:ty, $raw_type:ty),
-         getter: $getter:ident,
-         debug: $debug:ident,
-         to_css: $to_css:ident,
-     } => {
-         #[no_mangle]
--        pub extern "C" fn $getter(rules: ServoCssRulesBorrowed, index: u32) -> Strong<$raw_type> {
-+        pub extern "C" fn $getter(rules: ServoCssRulesBorrowed, index: u32, line: *mut u32, column: *mut u32)
-+            -> Strong<$raw_type> {
-             read_locked_arc(rules, |rules: &CssRules| {
-                 match rules.0[index as usize] {
--                    CssRule::$name(ref rule) => rule.clone().into_strong(),
-+                    CssRule::$name(ref rule) => {
-+                        *unsafe { line.as_mut().unwrap() } = 0;
-+                        *unsafe { column.as_mut().unwrap() } = 0;
-+                        rule.clone().into_strong()
-+                    },
-                     _ => {
-                         unreachable!(concat!(stringify!($getter), "should only be called ",
-                                              "on a ", stringify!($name), " rule"));
-                     }
-                 }
-             })
-         }
- 
+
