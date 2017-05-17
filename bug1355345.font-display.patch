@@ -3,27 +3,6 @@
 # Parent  41958333867b0f537271dbd4cb4ba9e8a67a85a8
 Bug 1355345 - stylo: Support font-display descriptor in @font-face rule. r? xidorn
 
-diff --git a/servo/components/style/build_gecko.rs b/servo/components/style/build_gecko.rs
---- a/servo/components/style/build_gecko.rs
-+++ b/servo/components/style/build_gecko.rs
-@@ -302,16 +302,17 @@ mod bindings {
-                 vars: true,
-                 ..CodegenConfig::nothing()
-             })
-             .header(add_include("nsCSSPseudoClasses.h"))   // servo/rust-bindgen#599
-             .include(add_include("nsStyleStruct.h"))
-             .include(add_include("mozilla/ServoPropPrefList.h"))
-             .include(add_include("mozilla/StyleAnimationValue.h"))
-             .include(add_include("gfxFontConstants.h"))
-+            .include(add_include("gfxUserFontSet.h"))
-             .include(add_include("nsThemeConstants.h"))
-             .include(add_include("mozilla/dom/AnimationEffectReadOnlyBinding.h"))
-             .include(add_include("mozilla/AnimationPropertySegment.h"))
-             .include(add_include("mozilla/ComputedTiming.h"))
-             .include(add_include("mozilla/ComputedTimingFunction.h"))
-             .include(add_include("mozilla/Keyframe.h"))
-             .include(add_include("mozilla/ServoElementSnapshot.h"))
-             .include(add_include("mozilla/ServoElementSnapshotTable.h"))
 diff --git a/servo/components/style/font_face.rs b/servo/components/style/font_face.rs
 --- a/servo/components/style/font_face.rs
 +++ b/servo/components/style/font_face.rs
