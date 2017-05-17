@@ -3,6 +3,29 @@
 # Parent  41958333867b0f537271dbd4cb4ba9e8a67a85a8
 Bug 1355345 - stylo: Support font-display descriptor in @font-face rule. r?emilio
 
+diff --git a/layout/style/test/stylo-failures.md b/layout/style/test/stylo-failures.md
+--- a/layout/style/test/stylo-failures.md
++++ b/layout/style/test/stylo-failures.md
+@@ -78,19 +78,16 @@ to mochitest command.
+   * test_counter_descriptor_storage.html asserts [110]
+ * symbols() function and string value on list-style-type bug 1363596
+   * test_value_storage.html `symbols(` [30]
+   * ... `list-style-type` [8]
+   * ... `'list-style'` [18]
+ * @page support:
+   * test_bug887741_at-rules_in_declaration_lists.html `exception` [1]
+ * Unimplemented \@font-face descriptors:
+-  * font-display bug 1355345
+-    * test_descriptor_storage.html `font-display` [5]
+-    * test_font_face_parser.html `font-display` [15]
+   * test_font_face_parser.html `font-language-override`: bug 1355364 [8]
+   * ... `font-feature-settings`: bug 1355366 [10]
+ * test_font_face_parser.html `font-weight`: keyword values should be preserved in \@font-face [4]
+ * @namespace support:
+   * test_namespace_rule.html: bug 1355715 [16]
+ * test_dont_use_document_colors.html: support of disabling document color bug 1355716 [21]
+ * test_font_feature_values_parsing.html: \@font-feature-values support bug 1355721 [107]
+ * Grid support bug 1341802
 diff --git a/servo/components/style/font_face.rs b/servo/components/style/font_face.rs
 --- a/servo/components/style/font_face.rs
 +++ b/servo/components/style/font_face.rs
