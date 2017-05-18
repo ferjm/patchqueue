@@ -29,7 +29,7 @@ diff --git a/layout/style/test/stylo-failures.md b/layout/style/test/stylo-failu
 diff --git a/servo/components/style/font_face.rs b/servo/components/style/font_face.rs
 --- a/servo/components/style/font_face.rs
 +++ b/servo/components/style/font_face.rs
-@@ -67,16 +67,41 @@ pub struct UrlSource {
+@@ -67,16 +67,39 @@ pub struct UrlSource {
  impl ToCss for UrlSource {
      fn to_css<W>(&self, dest: &mut W) -> fmt::Result
          where W: fmt::Write,
@@ -41,7 +41,6 @@ diff --git a/servo/components/style/font_face.rs b/servo/components/style/font_f
 +/// A font-display value for a @font-face rule.
 +/// The font-display descriptor determines how a font face is displayed based
 +/// on whether and when it is downloaded and ready to use.
-+#[cfg(feature = "gecko")]
 +define_css_keyword_enum!(FontDisplay:
 +                         "auto" => Auto,
 +                         "block" => Block,
@@ -49,7 +48,6 @@ diff --git a/servo/components/style/font_face.rs b/servo/components/style/font_f
 +                         "fallback" => Fallback,
 +                         "optional" => Optional);
 +
-+#[cfg(feature = "gecko")]
 +impl Parse for FontDisplay {
 +    fn parse(_: &ParserContext, input: &mut Parser) -> Result<FontDisplay, ()> {
 +        Ok(match_ignore_ascii_case! { &*input.expect_ident()?,
@@ -71,7 +69,7 @@ diff --git a/servo/components/style/font_face.rs b/servo/components/style/font_f
      let mut rule = FontFaceRuleData::empty();
      rule.source_location = location;
      {
-@@ -327,22 +352,25 @@ font_face_descriptors! {
+@@ -327,22 +350,25 @@ font_face_descriptors! {
          "font-style" style / mStyle: font_style::T = font_style::T::normal,
  
          /// The weight of this font face
@@ -132,12 +130,12 @@ diff --git a/servo/components/style/gecko/rules.rs b/servo/components/style/geck
 +impl ToNsCssValue for FontDisplay {
 +    fn convert(self, nscssvalue: &mut nsCSSValue) {
 +        nscssvalue.set_enum(match self {
-+            FontDisplay::Auto => structs::NS_FONT_DISPLAY_AUTO as i32,
-+            FontDisplay::Block => structs::NS_FONT_DISPLAY_BLOCK as i32,
-+            FontDisplay::Swap => structs::NS_FONT_DISPLAY_SWAP as i32,
-+            FontDisplay::Fallback => structs::NS_FONT_DISPLAY_FALLBACK as i32,
-+            FontDisplay::Optional => structs::NS_FONT_DISPLAY_OPTIONAL as i32,
-+        })
++            FontDisplay::Auto => structs::NS_FONT_DISPLAY_AUTO,
++            FontDisplay::Block => structs::NS_FONT_DISPLAY_BLOCK,
++            FontDisplay::Swap => structs::NS_FONT_DISPLAY_SWAP,
++            FontDisplay::Fallback => structs::NS_FONT_DISPLAY_FALLBACK,
++            FontDisplay::Optional => structs::NS_FONT_DISPLAY_OPTIONAL,
++        } as i32)
 +    }
 +}
 +
