@@ -29,7 +29,7 @@ diff --git a/layout/style/test/stylo-failures.md b/layout/style/test/stylo-failu
 diff --git a/servo/components/style/font_face.rs b/servo/components/style/font_face.rs
 --- a/servo/components/style/font_face.rs
 +++ b/servo/components/style/font_face.rs
-@@ -67,16 +67,65 @@ pub struct UrlSource {
+@@ -67,16 +67,41 @@ pub struct UrlSource {
  impl ToCss for UrlSource {
      fn to_css<W>(&self, dest: &mut W) -> fmt::Result
          where W: fmt::Write,
@@ -42,36 +42,12 @@ diff --git a/servo/components/style/font_face.rs b/servo/components/style/font_f
 +/// The font-display descriptor determines how a font face is displayed based
 +/// on whether and when it is downloaded and ready to use.
 +#[cfg(feature = "gecko")]
-+#[derive(Clone, Debug, PartialEq, Eq)]
-+pub enum FontDisplay {
-+    /// The font display strategy is user-agent-defined.
-+    Auto,
-+    /// Gives the font face a short block period (3s is recommended in most cases)
-+    /// and an infinite swap period.
-+    Block,
-+    /// Gives the font face a 0s block period and an infinite swap period.
-+    Swap,
-+    /// Gives the font face an extremely small block period (100ms or less is
-+    /// recommended in most cases) and a short swap period (3s is recommended in most
-+    /// cases).
-+    Fallback,
-+    /// Gives the font face an extremely small block period (100ms or less is
-+    /// recommended in most cases) and a 0s swap period.
-+    Optional,
-+}
-+
-+#[cfg(feature = "gecko")]
-+impl ToCss for FontDisplay {
-+    fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
-+        match *self {
-+            FontDisplay::Auto => dest.write_str("auto"),
-+            FontDisplay::Block => dest.write_str("block"),
-+            FontDisplay::Swap => dest.write_str("swap"),
-+            FontDisplay::Fallback => dest.write_str("fallback"),
-+            FontDisplay::Optional => dest.write_str("optional"),
-+        }
-+    }
-+}
++define_css_keyword_enum!(FontDisplay:
++                         "auto" => Auto,
++                         "block" => Block,
++                         "swap" => Swap,
++                         "fallback" => Fallback,
++                         "optional" => Optional);
 +
 +#[cfg(feature = "gecko")]
 +impl Parse for FontDisplay {
@@ -95,7 +71,7 @@ diff --git a/servo/components/style/font_face.rs b/servo/components/style/font_f
      let mut rule = FontFaceRuleData::empty();
      rule.source_location = location;
      {
-@@ -327,22 +376,25 @@ font_face_descriptors! {
+@@ -327,22 +352,25 @@ font_face_descriptors! {
          "font-style" style / mStyle: font_style::T = font_style::T::normal,
  
          /// The weight of this font face
