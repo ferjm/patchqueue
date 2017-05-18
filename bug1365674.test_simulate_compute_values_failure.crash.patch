@@ -1,0 +1,5 @@
+# HG changeset patch
+# User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
+# Parent  41958333867b0f537271dbd4cb4ba9e8a67a85a8
+Bug 1365674 - stylo: Fix crash on dom/animation/test/chrome/test_simulate_compute_values_failure.html
+

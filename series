@@ -1,2 +1,3 @@
 bug1355345.font-display.patch
+bug1365674.test_simulate_compute_values_failure.crash.patch
 try-all
