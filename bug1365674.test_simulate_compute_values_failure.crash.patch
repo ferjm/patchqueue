@@ -1,7 +1,7 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  f93d8f6d44b7de7e8460a857c07a9e8d851434a3
-Bug 1365674 - stylo: Fix crash on dom/animation/test/chrome/test_simulate_compute_values_failure.html
+# Parent  8e98dab5054dd093a37ba20c62cf0523e484cfbd
+Bug 1365674 - stylo: Simulate compute values failure for tests. r?hiro
 
 diff --git a/dom/animation/KeyframeUtils.cpp b/dom/animation/KeyframeUtils.cpp
 --- a/dom/animation/KeyframeUtils.cpp
