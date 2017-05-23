@@ -1,0 +1,150 @@
+# HG changeset patch
+# User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
+# Parent  8f4d2d35cb317235f30f4e3738ad3df16d2f9f3f
+
+diff --git a/dom/animation/Keyframe.h b/dom/animation/Keyframe.h
+--- a/dom/animation/Keyframe.h
++++ b/dom/animation/Keyframe.h
+@@ -30,16 +30,19 @@ struct PropertyValuePair
+   // property values, we store the specified property value as a token stream
+   // (string).
+   nsCSSValue mValue;
+ 
+   // The specified value when using the Servo backend.
+   RefPtr<RawServoDeclarationBlock> mServoDeclarationBlock;
+ 
+   bool operator==(const PropertyValuePair&) const;
++
++  nsString mStringValue;
++  bool mSimulateComputeValuesFailure;
+ };
+ 
+ /**
+  * A single keyframe.
+  *
+  * This is the canonical form in which keyframe effects are stored and
+  * corresponds closely to the type of objects returned via the getKeyframes()
+  * API.
+diff --git a/dom/animation/KeyframeEffectReadOnly.cpp b/dom/animation/KeyframeEffectReadOnly.cpp
+--- a/dom/animation/KeyframeEffectReadOnly.cpp
++++ b/dom/animation/KeyframeEffectReadOnly.cpp
+@@ -1260,17 +1260,20 @@ KeyframeEffectReadOnly::GetKeyframes(JSC
+     if (!ToJSValue(aCx, keyframeDict, &keyframeJSValue)) {
+       aRv.Throw(NS_ERROR_FAILURE);
+       return;
+     }
+ 
+     JS::Rooted<JSObject*> keyframeObject(aCx, &keyframeJSValue.toObject());
+     for (const PropertyValuePair& propertyValue : keyframe.mPropertyValues) {
+       nsAutoString stringValue;
+-      if (isServo) {
++
++      if (propertyValue.mSimulateComputeValuesFailure) {
++        stringValue = propertyValue.mStringValue;
++      } else if (isServo) {
+         if (propertyValue.mServoDeclarationBlock) {
+           Servo_DeclarationBlock_SerializeOneValue(
+             propertyValue.mServoDeclarationBlock,
+             propertyValue.mProperty, &stringValue);
+         } else {
+           RawServoAnimationValue* value =
+             mBaseStyleValuesForServo.GetWeak(propertyValue.mProperty);
+ 
+diff --git a/dom/animation/KeyframeUtils.cpp b/dom/animation/KeyframeUtils.cpp
+--- a/dom/animation/KeyframeUtils.cpp
++++ b/dom/animation/KeyframeUtils.cpp
+@@ -385,17 +385,19 @@ AppendValueAsString(JSContext* aCx,
+ static PropertyValuePair
+ MakePropertyValuePair(nsCSSPropertyID aProperty, const nsAString& aStringValue,
+                       nsCSSParser& aParser, nsIDocument* aDocument);
+ 
+ static bool
+ HasValidOffsets(const nsTArray<Keyframe>& aKeyframes);
+ 
+ static void
+-MarkAsComputeValuesFailureKey(PropertyValuePair& aPair);
++MarkAsComputeValuesFailureKey(PropertyValuePair& aPair,
++                              nsAString& aStringValue,
++                              StyleBackendType aStyleBackendType);
+ 
+ static bool
+ IsComputeValuesFailureKey(const PropertyValuePair& aPair);
+ 
+ static void
+ BuildSegmentsFromValueEntries(nsTArray<KeyframeValueEntry>& aEntries,
+                               nsTArray<AnimationProperty>& aResult);
+ 
+@@ -876,17 +878,19 @@ ConvertKeyframeSequence(JSContext* aCx,
+       // When we go to convert keyframes into arrays of property values we
+       // call StyleAnimation::ComputeValues. This should normally return true
+       // but in order to test the case where it does not, BaseKeyframeDict
+       // includes a chrome-only member that can be set to indicate that
+       // ComputeValues should fail for shorthand property values on that
+       // keyframe.
+       if (nsCSSProps::IsShorthand(pair.mProperty) &&
+           keyframeDict.mSimulateComputeValuesFailure) {
+-        MarkAsComputeValuesFailureKey(keyframe->mPropertyValues.LastElement());
++        MarkAsComputeValuesFailureKey(keyframe->mPropertyValues.LastElement(),
++                                      pair.mValues[0],
++                                      aDocument->GetStyleBackendType());
+       }
+     }
+   }
+ 
+   return true;
+ }
+ 
+ /**
+@@ -1109,21 +1113,30 @@ HasValidOffsets(const nsTArray<Keyframe>
+  * Takes a property-value pair for a shorthand property and modifies the
+  * value to indicate that when we call StyleAnimationValue::ComputeValues on
+  * that value we should behave as if that function had failed.
+  *
+  * @param aPair The PropertyValuePair to modify. |aPair.mProperty| must be
+  *              a shorthand property.
+  */
+ static void
+-MarkAsComputeValuesFailureKey(PropertyValuePair& aPair)
++MarkAsComputeValuesFailureKey(PropertyValuePair& aPair,
++                              nsAString& aStringValue,
++                              StyleBackendType aStyleBackendType)
+ {
+   MOZ_ASSERT(nsCSSProps::IsShorthand(aPair.mProperty),
+              "Only shorthand property values can be marked as failure values");
+ 
++  aPair.mStringValue = aStringValue;
++  aPair.mSimulateComputeValuesFailure = true;
++
++  if (aStyleBackendType == StyleBackendType::Servo) {
++    return;
++  }
++
+   // We store shorthand values as nsCSSValueTokenStream objects whose mProperty
+   // and mShorthandPropertyID are eCSSProperty_UNKNOWN and whose mTokenStream
+   // member contains the shorthand property's value as a string.
+   //
+   // We need to leave mShorthandPropertyID as eCSSProperty_UNKNOWN so that
+   // nsCSSValue::AppendToString returns the mTokenStream value, but we can
+   // update mPropertyID to a special value to indicate that this is
+   // a special failure sentinel.
+@@ -1140,19 +1153,17 @@ MarkAsComputeValuesFailureKey(PropertyVa
+  * value).
+  *
+  * @param aPair The property-value pair to test.
+  * @return True if |aPair| represents a failure value.
+  */
+ static bool
+ IsComputeValuesFailureKey(const PropertyValuePair& aPair)
+ {
+-  return nsCSSProps::IsShorthand(aPair.mProperty) &&
+-         aPair.mValue.GetTokenStreamValue()->mPropertyID ==
+-           eCSSPropertyExtra_no_properties;
++  return aPair.mSimulateComputeValuesFailure;
+ }
+ 
+ static void
+ AppendInitialSegment(AnimationProperty* aAnimationProperty,
+                      const KeyframeValueEntry& aFirstEntry)
+ {
+   AnimationPropertySegment* segment =
+     aAnimationProperty->mSegments.AppendElement();
