@@ -28,7 +28,27 @@ diff --git a/dom/animation/Keyframe.h b/dom/animation/Keyframe.h
 diff --git a/dom/animation/KeyframeEffectReadOnly.cpp b/dom/animation/KeyframeEffectReadOnly.cpp
 --- a/dom/animation/KeyframeEffectReadOnly.cpp
 +++ b/dom/animation/KeyframeEffectReadOnly.cpp
-@@ -1260,17 +1260,20 @@ KeyframeEffectReadOnly::GetKeyframes(JSC
+@@ -1223,16 +1223,19 @@ KeyframeEffectReadOnly::GetProperties(
+   }
+ }
+ 
+ void
+ KeyframeEffectReadOnly::GetKeyframes(JSContext*& aCx,
+                                      nsTArray<JSObject*>& aResult,
+                                      ErrorResult& aRv)
+ {
++
++  printf_stderr("GetKeyframes\n");
++
+   MOZ_ASSERT(aResult.IsEmpty());
+   MOZ_ASSERT(!aRv.Failed());
+ 
+   if (!aResult.SetCapacity(mKeyframes.Length(), mozilla::fallible)) {
+     aRv.Throw(NS_ERROR_OUT_OF_MEMORY);
+     return;
+   }
+ 
+@@ -1260,17 +1263,21 @@ KeyframeEffectReadOnly::GetKeyframes(JSC
      if (!ToJSValue(aCx, keyframeDict, &keyframeJSValue)) {
        aRv.Throw(NS_ERROR_FAILURE);
        return;
@@ -40,6 +60,7 @@ diff --git a/dom/animation/KeyframeEffectReadOnly.cpp b/dom/animation/KeyframeEf
 -      if (isServo) {
 +
 +      if (propertyValue.mSimulateComputeValuesFailure) {
++        printf_stderr("ERROR SIMULATE\n");
 +        stringValue = propertyValue.mStringValue;
 +      } else if (isServo) {
          if (propertyValue.mServoDeclarationBlock) {
