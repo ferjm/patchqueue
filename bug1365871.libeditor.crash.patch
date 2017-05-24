@@ -1,0 +1,41 @@
+# HG changeset patch
+# User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
+# Parent  8e98dab5054dd093a37ba20c62cf0523e484cfbd
+Bug 1365871 - stylo: Remove MOZ_CRASH(stylo: not implemented) from editor/libeditor/tests. r?xidorn
+
+diff --git a/editor/libeditor/CSSEditUtils.cpp b/editor/libeditor/CSSEditUtils.cpp
+--- a/editor/libeditor/CSSEditUtils.cpp
++++ b/editor/libeditor/CSSEditUtils.cpp
+@@ -544,25 +544,27 @@ CSSEditUtils::GetCSSInlinePropertyBase(n
+     return NS_OK;
+   }
+ 
+   MOZ_ASSERT(aStyleType == eSpecified);
+   RefPtr<DeclarationBlock> decl = element->GetInlineStyleDeclaration();
+   if (!decl) {
+     return NS_OK;
+   }
+-  if (decl->IsServo()) {
+-    MOZ_CRASH("stylo: not implemented");
+-    return NS_ERROR_NOT_IMPLEMENTED;
+-  }
++
+   nsCSSPropertyID prop =
+     nsCSSProps::LookupProperty(nsDependentAtomString(aProperty),
+                                CSSEnabledState::eForAllContent);
+   MOZ_ASSERT(prop != eCSSProperty_UNKNOWN);
+-  decl->AsGecko()->GetPropertyValueByID(prop, aValue);
++
++  if (decl->IsServo()) {
++    decl->AsServo()->GetPropertyValueByID(prop, aValue);
++  } else {
++    decl->AsGecko()->GetPropertyValueByID(prop, aValue);
++  }
+ 
+   return NS_OK;
+ }
+ 
+ already_AddRefed<nsComputedDOMStyle>
+ CSSEditUtils::GetComputedStyle(Element* aElement)
+ {
+   MOZ_ASSERT(aElement);
