@@ -28,7 +28,7 @@ diff --git a/dom/animation/Keyframe.h b/dom/animation/Keyframe.h
 diff --git a/dom/animation/KeyframeEffectReadOnly.cpp b/dom/animation/KeyframeEffectReadOnly.cpp
 --- a/dom/animation/KeyframeEffectReadOnly.cpp
 +++ b/dom/animation/KeyframeEffectReadOnly.cpp
-@@ -1260,17 +1260,20 @@ KeyframeEffectReadOnly::GetKeyframes(JSC
+@@ -1260,16 +1260,17 @@ KeyframeEffectReadOnly::GetKeyframes(JSC
      if (!ToJSValue(aCx, keyframeDict, &keyframeJSValue)) {
        aRv.Throw(NS_ERROR_FAILURE);
        return;
@@ -37,11 +37,8 @@ diff --git a/dom/animation/KeyframeEffectReadOnly.cpp b/dom/animation/KeyframeEf
      JS::Rooted<JSObject*> keyframeObject(aCx, &keyframeJSValue.toObject());
      for (const PropertyValuePair& propertyValue : keyframe.mPropertyValues) {
        nsAutoString stringValue;
--      if (isServo) {
 +
-+      if (propertyValue.mSimulateComputeValuesFailure) {
-+        stringValue = propertyValue.mStringValue;
-+      } else if (isServo) {
+       if (isServo) {
          if (propertyValue.mServoDeclarationBlock) {
            Servo_DeclarationBlock_SerializeOneValue(
              propertyValue.mServoDeclarationBlock,
@@ -49,7 +46,6 @@ diff --git a/dom/animation/KeyframeEffectReadOnly.cpp b/dom/animation/KeyframeEf
          } else {
            RawServoAnimationValue* value =
              mBaseStyleValuesForServo.GetWeak(propertyValue.mProperty);
- 
 diff --git a/dom/animation/KeyframeUtils.cpp b/dom/animation/KeyframeUtils.cpp
 --- a/dom/animation/KeyframeUtils.cpp
 +++ b/dom/animation/KeyframeUtils.cpp
