@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  8f4d2d35cb317235f30f4e3738ad3df16d2f9f3f
+# Parent  8e98dab5054dd093a37ba20c62cf0523e484cfbd
 
 diff --git a/dom/animation/Keyframe.h b/dom/animation/Keyframe.h
 --- a/dom/animation/Keyframe.h
@@ -28,27 +28,7 @@ diff --git a/dom/animation/Keyframe.h b/dom/animation/Keyframe.h
 diff --git a/dom/animation/KeyframeEffectReadOnly.cpp b/dom/animation/KeyframeEffectReadOnly.cpp
 --- a/dom/animation/KeyframeEffectReadOnly.cpp
 +++ b/dom/animation/KeyframeEffectReadOnly.cpp
-@@ -1223,16 +1223,19 @@ KeyframeEffectReadOnly::GetProperties(
-   }
- }
- 
- void
- KeyframeEffectReadOnly::GetKeyframes(JSContext*& aCx,
-                                      nsTArray<JSObject*>& aResult,
-                                      ErrorResult& aRv)
- {
-+
-+  printf_stderr("GetKeyframes\n");
-+
-   MOZ_ASSERT(aResult.IsEmpty());
-   MOZ_ASSERT(!aRv.Failed());
- 
-   if (!aResult.SetCapacity(mKeyframes.Length(), mozilla::fallible)) {
-     aRv.Throw(NS_ERROR_OUT_OF_MEMORY);
-     return;
-   }
- 
-@@ -1260,17 +1263,21 @@ KeyframeEffectReadOnly::GetKeyframes(JSC
+@@ -1260,17 +1260,20 @@ KeyframeEffectReadOnly::GetKeyframes(JSC
      if (!ToJSValue(aCx, keyframeDict, &keyframeJSValue)) {
        aRv.Throw(NS_ERROR_FAILURE);
        return;
@@ -60,7 +40,6 @@ diff --git a/dom/animation/KeyframeEffectReadOnly.cpp b/dom/animation/KeyframeEf
 -      if (isServo) {
 +
 +      if (propertyValue.mSimulateComputeValuesFailure) {
-+        printf_stderr("ERROR SIMULATE\n");
 +        stringValue = propertyValue.mStringValue;
 +      } else if (isServo) {
          if (propertyValue.mServoDeclarationBlock) {
@@ -169,3 +148,26 @@ diff --git a/dom/animation/KeyframeUtils.cpp b/dom/animation/KeyframeUtils.cpp
  {
    AnimationPropertySegment* segment =
      aAnimationProperty->mSegments.AppendElement();
+diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
+--- a/servo/ports/geckolib/glue.rs
++++ b/servo/ports/geckolib/glue.rs
+@@ -2089,16 +2089,19 @@ pub extern "C" fn Servo_GetComputedKeyfr
+ 
+         let mut seen = LonghandIdSet::new();
+ 
+         // mServoDeclarationBlock is null in the case where we have an invalid css property.
+         let iter = keyframe.mPropertyValues.iter()
+                                            .filter(|&property| !property.mServoDeclarationBlock.mRawPtr.is_null());
+         let mut property_index = 0;
+         for property in iter {
++            if property.mSimulateComputeValuesFailure {
++                continue;
++            }
+             let declarations = unsafe { &*property.mServoDeclarationBlock.mRawPtr.clone() };
+             let declarations = Locked::<PropertyDeclarationBlock>::as_arc(&declarations);
+             let guard = declarations.read_with(&guard);
+ 
+             let anim_iter = guard.declarations()
+                             .iter()
+                             .filter_map(|&(ref decl, imp)| {
+                                 if imp == Importance::Normal {
