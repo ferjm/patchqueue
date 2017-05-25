@@ -1,0 +1,329 @@
+
+# HG changeset patch
+# User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
+# Date 1495191506 -7200
+# Node ID fb3224375a1ffe4ef8788a25e6b864833a46fe86
+# Parent  8f4d2d35cb317235f30f4e3738ad3df16d2f9f3f
+Bug 1365674 - stylo: Simulate compute values failure for tests. r?hiro
+
+MozReview-Commit-ID: KouduHcUrJJ
+
+diff --git a/dom/animation/KeyframeUtils.cpp b/dom/animation/KeyframeUtils.cpp
+--- a/dom/animation/KeyframeUtils.cpp
++++ b/dom/animation/KeyframeUtils.cpp
+@@ -385,17 +385,18 @@ AppendValueAsString(JSContext* aCx,
+ static PropertyValuePair
+ MakePropertyValuePair(nsCSSPropertyID aProperty, const nsAString& aStringValue,
+                       nsCSSParser& aParser, nsIDocument* aDocument);
+ 
+ static bool
+ HasValidOffsets(const nsTArray<Keyframe>& aKeyframes);
+ 
+ static void
+-MarkAsComputeValuesFailureKey(PropertyValuePair& aPair);
++MarkAsComputeValuesFailureKey(PropertyValuePair& aPair,
++                              StyleBackendType aBackend);
+ 
+ static bool
+ IsComputeValuesFailureKey(const PropertyValuePair& aPair);
+ 
+ static void
+ BuildSegmentsFromValueEntries(nsTArray<KeyframeValueEntry>& aEntries,
+                               nsTArray<AnimationProperty>& aResult);
+ 
+@@ -862,31 +863,34 @@ ConvertKeyframeSequence(JSContext* aCx,
+       JS::Rooted<JSObject*> object(aCx, &value.toObject());
+       if (!GetPropertyValuesPairs(aCx, object,
+                                   ListAllowance::eDisallow,
+                                   propertyValuePairs)) {
+         return false;
+       }
+     }
+ 
++    StyleBackendType styleBackend = aDocument->GetStyleBackendType();
++
+     for (PropertyValuesPair& pair : propertyValuePairs) {
+       MOZ_ASSERT(pair.mValues.Length() == 1);
+       keyframe->mPropertyValues.AppendElement(
+         MakePropertyValuePair(pair.mProperty, pair.mValues[0], parser,
+                               aDocument));
+ 
+       // When we go to convert keyframes into arrays of property values we
+       // call StyleAnimation::ComputeValues. This should normally return true
+       // but in order to test the case where it does not, BaseKeyframeDict
+       // includes a chrome-only member that can be set to indicate that
+       // ComputeValues should fail for shorthand property values on that
+       // keyframe.
+       if (nsCSSProps::IsShorthand(pair.mProperty) &&
+           keyframeDict.mSimulateComputeValuesFailure) {
+-        MarkAsComputeValuesFailureKey(keyframe->mPropertyValues.LastElement());
++        MarkAsComputeValuesFailureKey(keyframe->mPropertyValues.LastElement(),
++                                      styleBackend);
+       }
+     }
+   }
+ 
+   return true;
+ }
+ 
+ /**
+@@ -1109,21 +1113,27 @@ HasValidOffsets(const nsTArray<Keyframe>
+  * Takes a property-value pair for a shorthand property and modifies the
+  * value to indicate that when we call StyleAnimationValue::ComputeValues on
+  * that value we should behave as if that function had failed.
+  *
+  * @param aPair The PropertyValuePair to modify. |aPair.mProperty| must be
+  *              a shorthand property.
+  */
+ static void
+-MarkAsComputeValuesFailureKey(PropertyValuePair& aPair)
++MarkAsComputeValuesFailureKey(PropertyValuePair& aPair,
++                              StyleBackendType aBackend)
+ {
+   MOZ_ASSERT(nsCSSProps::IsShorthand(aPair.mProperty),
+              "Only shorthand property values can be marked as failure values");
+ 
++  if (aBackend == StyleBackendType::Servo) {
++    Servo_DeclarationBlock_SimulateComputeValuesFailure(aPair.mServoDeclarationBlock);
++    return;
++  }
++
+   // We store shorthand values as nsCSSValueTokenStream objects whose mProperty
+   // and mShorthandPropertyID are eCSSProperty_UNKNOWN and whose mTokenStream
+   // member contains the shorthand property's value as a string.
+   //
+   // We need to leave mShorthandPropertyID as eCSSProperty_UNKNOWN so that
+   // nsCSSValue::AppendToString returns the mTokenStream value, but we can
+   // update mPropertyID to a special value to indicate that this is
+   // a special failure sentinel.
+diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
+--- a/layout/style/ServoBindingList.h
++++ b/layout/style/ServoBindingList.h
+@@ -365,16 +365,18 @@ SERVO_BINDING_FUNC(Servo_DeclarationBloc
+                    RawServoDeclarationBlockBorrowed declarations,
+                    const nsAString& value)
+ SERVO_BINDING_FUNC(Servo_DeclarationBlock_SetTextDecorationColorOverride, void,
+                    RawServoDeclarationBlockBorrowed declarations)
+ SERVO_BINDING_FUNC(Servo_DeclarationBlock_SetBackgroundImage, void,
+                    RawServoDeclarationBlockBorrowed declarations,
+                    const nsAString& value,
+                    RawGeckoURLExtraData* extra_data)
++SERVO_BINDING_FUNC(Servo_DeclarationBlock_SimulateComputeValuesFailure, void,
++                   RawServoDeclarationBlockBorrowed declarations)
+ 
+ // MediaList
+ SERVO_BINDING_FUNC(Servo_MediaList_Create, RawServoMediaListStrong)
+ SERVO_BINDING_FUNC(Servo_MediaList_DeepClone, RawServoMediaListStrong,
+                    RawServoMediaListBorrowed list)
+ SERVO_BINDING_FUNC(Servo_MediaList_Matches, bool,
+                    RawServoMediaListBorrowed list,
+                    RawServoStyleSetBorrowed set)
+diff --git a/servo/components/style/properties/declaration_block.rs b/servo/components/style/properties/declaration_block.rs
+--- a/servo/components/style/properties/declaration_block.rs
++++ b/servo/components/style/properties/declaration_block.rs
+@@ -48,16 +48,20 @@ pub struct PropertyDeclarationBlock {
+     ///
+     /// Only deduplicated declarations appear here.
+     declarations: Vec<(PropertyDeclaration, Importance)>,
+ 
+     /// The number of entries in `self.declaration` with `Importance::Important`
+     important_count: usize,
+ 
+     longhands: LonghandIdSet,
++
++    /// Flag used by Stylo tests to simulate a compute values failure.
++    #[cfg(feature = "gecko")]
++    compute_values_failure: bool,
+ }
+ 
+ /// Iterator for PropertyDeclaration to be generated from PropertyDeclarationBlock.
+ #[derive(Clone)]
+ pub struct PropertyDeclarationIterator<'a> {
+     iter: Iter<'a, (PropertyDeclaration, Importance)>,
+ }
+ 
+@@ -81,36 +85,60 @@ impl fmt::Debug for PropertyDeclarationB
+ }
+ 
+ impl PropertyDeclarationBlock {
+     /// Returns the number of declarations in the block.
+     pub fn len(&self) -> usize {
+         self.declarations.len()
+     }
+ 
++    #[cfg(feature = "gecko")]
++    /// Create an empty block
++    pub fn new() -> Self {
++        PropertyDeclarationBlock {
++            declarations: Vec::new(),
++            important_count: 0,
++            longhands: LonghandIdSet::new(),
++            compute_values_failure: false,
++        }
++    }
++
++    #[cfg(not(feature = "gecko"))]
+     /// Create an empty block
+     pub fn new() -> Self {
+         PropertyDeclarationBlock {
+             declarations: Vec::new(),
+             important_count: 0,
+             longhands: LonghandIdSet::new(),
+         }
+     }
+ 
+     /// Create a block with a single declaration
+     pub fn with_one(declaration: PropertyDeclaration, importance: Importance) -> Self {
+         let mut longhands = LonghandIdSet::new();
+         if let PropertyDeclarationId::Longhand(id) = declaration.id() {
+             longhands.insert(id);
+         }
+-        PropertyDeclarationBlock {
+-            declarations: vec![(declaration, importance)],
+-            important_count: if importance.important() { 1 } else { 0 },
+-            longhands: longhands,
++        #[cfg(feature = "gecko")]
++        {
++            PropertyDeclarationBlock {
++                declarations: vec![(declaration, importance)],
++                important_count: if importance.important() { 1 } else { 0 },
++                longhands: longhands,
++                compute_values_failure: false,
++            }
+         }
++
++        #[cfg(not(feature = "gecko"))]
++        {
++            PropertyDeclarationBlock {
++                declarations: vec![(declaration, importance)],
++                important_count: if importance.important() { 1 } else { 0 },
++                longhands: longhands,
++            }
+     }
+ 
+     /// The declarations in this block
+     pub fn declarations(&self) -> &[(PropertyDeclaration, Importance)] {
+         &self.declarations
+     }
+ 
+     /// Iterate over only PropertyDeclaration.
+@@ -419,20 +447,33 @@ impl PropertyDeclarationBlock {
+         let mut declarations = vec![];
+         let mut longhands = LonghandIdSet::new();
+ 
+         for (property, animation_value) in animation_value_map.iter() {
+           longhands.set_transition_property_bit(property);
+           declarations.push((animation_value.uncompute(), Importance::Normal));
+         }
+ 
+-        PropertyDeclarationBlock {
+-            declarations: declarations,
+-            important_count: 0,
+-            longhands: longhands,
++        #[cfg(feature = "gecko")]
++        {
++            PropertyDeclarationBlock {
++                declarations: declarations,
++                important_count: 0,
++                longhands: longhands,
++                compute_values_failure: false,
++            }
++        }
++
++        #[cfg(not(feature = "gecko"))]
++        {
++            PropertyDeclarationBlock {
++                declarations: declarations,
++                important_count: 0,
++                longhands: longhands,
++            }
+         }
+     }
+ 
+     /// Returns true if the declaration block has a CSSWideKeyword for the given
+     /// property.
+     #[cfg(feature = "gecko")]
+     pub fn has_css_wide_keyword(&self, property: &PropertyId) -> bool {
+         if let PropertyId::Longhand(id) = *property {
+@@ -440,16 +481,32 @@ impl PropertyDeclarationBlock {
+                 return false
+             }
+         }
+         self.declarations.iter().any(|&(ref decl, _)|
+             decl.id().is_or_is_longhand_of(property) &&
+             decl.get_css_wide_keyword().is_some()
+         )
+     }
++
++    /// Equivalent to Gecko's KeyframeUtils::MarkAsComputeValuesFailureKey.
++    /// Set the flag to simulate a compute values failure.
++    /// Used for Stylo tests only.
++    #[cfg(feature = "gecko")]
++    pub fn simulate_compute_values_failure(&mut self) {
++        self.compute_values_failure = true;
++    }
++
++    /// Equivalent to Gecko's KeyframeUtils::IsComputeValuesFailureKey.
++    /// Check if we should simulate a compute values failure.
++    /// Used for Stylo tests only.
++    #[cfg(feature = "gecko")]
++    pub fn is_compute_values_failure(&self) -> bool {
++        self.compute_values_failure == true
++    }
+ }
+ 
+ impl ToCss for PropertyDeclarationBlock {
+     // https://drafts.csswg.org/cssom/#serialize-a-css-declaration-block
+     fn to_css<W>(&self, dest: &mut W) -> fmt::Result
+         where W: fmt::Write,
+     {
+         let mut is_first_serialization = true; // trailing serializations should have a prepended space
+diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
+--- a/servo/ports/geckolib/glue.rs
++++ b/servo/ports/geckolib/glue.rs
+@@ -1601,16 +1601,24 @@ pub extern "C" fn Servo_DeclarationBlock
+                                                            property: nsCSSPropertyID) -> bool {
+     let property_id = get_property_id_from_nscsspropertyid!(property, false);
+     read_locked_arc(declarations, |decls: &PropertyDeclarationBlock| {
+         decls.has_css_wide_keyword(&property_id)
+     })
+ }
+ 
+ #[no_mangle]
++pub extern "C" fn Servo_DeclarationBlock_SimulateComputeValuesFailure(
++    declarations: RawServoDeclarationBlockBorrowed) {
++    write_locked_arc(declarations, |decls: &mut PropertyDeclarationBlock| {
++        decls.simulate_compute_values_failure();
++    })
++}
++
++#[no_mangle]
+ pub extern "C" fn Servo_MediaList_GetText(list: RawServoMediaListBorrowed, result: *mut nsAString) {
+     read_locked_arc(list, |list: &MediaList| {
+         list.to_css(unsafe { result.as_mut().unwrap() }).unwrap();
+     })
+ }
+ 
+ #[no_mangle]
+ pub extern "C" fn Servo_MediaList_SetText(list: RawServoMediaListBorrowed, text: *const nsACString) {
+@@ -2299,16 +2307,20 @@ pub extern "C" fn Servo_GetComputedKeyfr
+         let iter = keyframe.mPropertyValues.iter()
+                                            .filter(|&property| !property.mServoDeclarationBlock.mRawPtr.is_null());
+         let mut property_index = 0;
+         for property in iter {
+             let declarations = unsafe { &*property.mServoDeclarationBlock.mRawPtr.clone() };
+             let declarations = Locked::<PropertyDeclarationBlock>::as_arc(&declarations);
+             let guard = declarations.read_with(&guard);
+ 
++            if guard.is_compute_values_failure() {
++                continue;
++            }
++
+             let anim_iter = guard.declarations()
+                             .iter()
+                             .filter_map(|&(ref decl, imp)| {
+                                 if imp == Importance::Normal {
+                                     let property = TransitionProperty::from_declaration(decl);
+                                     let animation = AnimationValue::from_declaration(decl, &mut context,
+                                                                                      default_values);
+                                     debug_assert!(property.is_none() == animation.is_none(),
