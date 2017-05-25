@@ -8,7 +8,7 @@ The MOZ_CRASH was added because we were lacking a implementation of ServoDeclara
 diff --git a/editor/libeditor/CSSEditUtils.cpp b/editor/libeditor/CSSEditUtils.cpp
 --- a/editor/libeditor/CSSEditUtils.cpp
 +++ b/editor/libeditor/CSSEditUtils.cpp
-@@ -544,25 +544,27 @@ CSSEditUtils::GetCSSInlinePropertyBase(n
+@@ -544,25 +544,23 @@ CSSEditUtils::GetCSSInlinePropertyBase(n
      return NS_OK;
    }
  
@@ -28,11 +28,7 @@ diff --git a/editor/libeditor/CSSEditUtils.cpp b/editor/libeditor/CSSEditUtils.c
    MOZ_ASSERT(prop != eCSSProperty_UNKNOWN);
 -  decl->AsGecko()->GetPropertyValueByID(prop, aValue);
 +
-+  if (decl->IsServo()) {
-+    decl->AsServo()->GetPropertyValueByID(prop, aValue);
-+  } else {
-+    decl->AsGecko()->GetPropertyValueByID(prop, aValue);
-+  }
++  decl->GetPropertyValueByID(prop, aValue);
  
    return NS_OK;
  }
