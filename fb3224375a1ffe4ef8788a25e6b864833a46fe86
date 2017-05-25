@@ -3,7 +3,7 @@
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
 # Date 1495191506 -7200
 # Node ID fb3224375a1ffe4ef8788a25e6b864833a46fe86
-# Parent  8f4d2d35cb317235f30f4e3738ad3df16d2f9f3f
+# Parent  e8da7192201e5786614ec49d557e64dffd114ff2
 Bug 1365674 - stylo: Simulate compute values failure for tests. r?hiro
 
 MozReview-Commit-ID: KouduHcUrJJ
@@ -99,7 +99,7 @@ diff --git a/dom/animation/KeyframeUtils.cpp b/dom/animation/KeyframeUtils.cpp
 diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
 --- a/layout/style/ServoBindingList.h
 +++ b/layout/style/ServoBindingList.h
-@@ -365,16 +365,18 @@ SERVO_BINDING_FUNC(Servo_DeclarationBloc
+@@ -367,16 +367,18 @@ SERVO_BINDING_FUNC(Servo_DeclarationBloc
                     RawServoDeclarationBlockBorrowed declarations,
                     const nsAString& value)
  SERVO_BINDING_FUNC(Servo_DeclarationBlock_SetTextDecorationColorOverride, void,
@@ -121,7 +121,7 @@ diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
 diff --git a/servo/components/style/properties/declaration_block.rs b/servo/components/style/properties/declaration_block.rs
 --- a/servo/components/style/properties/declaration_block.rs
 +++ b/servo/components/style/properties/declaration_block.rs
-@@ -48,16 +48,20 @@ pub struct PropertyDeclarationBlock {
+@@ -63,16 +63,20 @@ pub struct PropertyDeclarationBlock {
      ///
      /// Only deduplicated declarations appear here.
      declarations: Vec<(PropertyDeclaration, Importance)>,
@@ -142,7 +142,7 @@ diff --git a/servo/components/style/properties/declaration_block.rs b/servo/comp
      iter: Iter<'a, (PropertyDeclaration, Importance)>,
  }
  
-@@ -81,36 +85,60 @@ impl fmt::Debug for PropertyDeclarationB
+@@ -96,36 +100,61 @@ impl fmt::Debug for PropertyDeclarationB
  }
  
  impl PropertyDeclarationBlock {
@@ -199,6 +199,7 @@ diff --git a/servo/components/style/properties/declaration_block.rs b/servo/comp
 +                important_count: if importance.important() { 1 } else { 0 },
 +                longhands: longhands,
 +            }
++         }
      }
  
      /// The declarations in this block
@@ -207,7 +208,7 @@ diff --git a/servo/components/style/properties/declaration_block.rs b/servo/comp
      }
  
      /// Iterate over only PropertyDeclaration.
-@@ -419,20 +447,33 @@ impl PropertyDeclarationBlock {
+@@ -434,20 +463,33 @@ impl PropertyDeclarationBlock {
          let mut declarations = vec![];
          let mut longhands = LonghandIdSet::new();
  
@@ -245,7 +246,7 @@ diff --git a/servo/components/style/properties/declaration_block.rs b/servo/comp
      #[cfg(feature = "gecko")]
      pub fn has_css_wide_keyword(&self, property: &PropertyId) -> bool {
          if let PropertyId::Longhand(id) = *property {
-@@ -440,16 +481,32 @@ impl PropertyDeclarationBlock {
+@@ -455,16 +497,32 @@ impl PropertyDeclarationBlock {
                  return false
              }
          }
@@ -281,7 +282,7 @@ diff --git a/servo/components/style/properties/declaration_block.rs b/servo/comp
 diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 --- a/servo/ports/geckolib/glue.rs
 +++ b/servo/ports/geckolib/glue.rs
-@@ -1601,16 +1601,24 @@ pub extern "C" fn Servo_DeclarationBlock
+@@ -1670,16 +1670,24 @@ pub extern "C" fn Servo_DeclarationBlock
                                                             property: nsCSSPropertyID) -> bool {
      let property_id = get_property_id_from_nscsspropertyid!(property, false);
      read_locked_arc(declarations, |decls: &PropertyDeclarationBlock| {
@@ -306,7 +307,7 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
  
  #[no_mangle]
  pub extern "C" fn Servo_MediaList_SetText(list: RawServoMediaListBorrowed, text: *const nsACString) {
-@@ -2299,16 +2307,20 @@ pub extern "C" fn Servo_GetComputedKeyfr
+@@ -2378,16 +2386,20 @@ pub extern "C" fn Servo_GetComputedKeyfr
          let iter = keyframe.mPropertyValues.iter()
                                             .filter(|&property| !property.mServoDeclarationBlock.mRawPtr.is_null());
          let mut property_index = 0;
