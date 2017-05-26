@@ -11,7 +11,25 @@ MozReview-Commit-ID: KouduHcUrJJ
 diff --git a/dom/animation/KeyframeUtils.cpp b/dom/animation/KeyframeUtils.cpp
 --- a/dom/animation/KeyframeUtils.cpp
 +++ b/dom/animation/KeyframeUtils.cpp
-@@ -385,17 +385,18 @@ AppendValueAsString(JSContext* aCx,
+@@ -321,16 +321,17 @@ public:
+ //
+ // Inlined helper methods
+ //
+ // ------------------------------------------------------------------
+ 
+ inline bool
+ IsInvalidValuePair(const PropertyValuePair& aPair, StyleBackendType aBackend)
+ {
++  printf_stderr("IsInvalidValuePair\n");
+   if (aBackend == StyleBackendType::Servo) {
+     return !aPair.mServoDeclarationBlock;
+   }
+ 
+   // There are three types of values we store as token streams:
+   //
+   // * Shorthand values (where we manually extract the token stream's string
+   //   value) and pass that along to various parsing methods
+@@ -385,17 +386,18 @@ AppendValueAsString(JSContext* aCx,
  static PropertyValuePair
  MakePropertyValuePair(nsCSSPropertyID aProperty, const nsAString& aStringValue,
                        nsCSSParser& aParser, nsIDocument* aDocument);
@@ -31,7 +49,25 @@ diff --git a/dom/animation/KeyframeUtils.cpp b/dom/animation/KeyframeUtils.cpp
  BuildSegmentsFromValueEntries(nsTArray<KeyframeValueEntry>& aEntries,
                                nsTArray<AnimationProperty>& aResult);
  
-@@ -862,31 +863,34 @@ ConvertKeyframeSequence(JSContext* aCx,
+@@ -622,16 +624,17 @@ KeyframeUtils::GetComputedKeyframeValues
+     ComputedKeyframeValues* computedValues = result.AppendElement();
+     for (const PropertyValuePair& pair :
+            PropertyPriorityIterator(frame.mPropertyValues)) {
+       MOZ_ASSERT(!pair.mServoDeclarationBlock,
+                  "Animation values were parsed using Servo backend but target"
+                  " element is not using Servo backend?");
+ 
+       if (IsInvalidValuePair(pair, StyleBackendType::Gecko)) {
++        printf_stderr("YES IsInvalidValuePair\n");
+         continue;
+       }
+ 
+       // Expand each value into the set of longhands and produce
+       // a KeyframeValueEntry for each value.
+       nsTArray<PropertyStyleAnimationValuePair> values;
+ 
+       // For shorthands, we store the string as a token stream so we need to
+@@ -862,31 +865,34 @@ ConvertKeyframeSequence(JSContext* aCx,
        JS::Rooted<JSObject*> object(aCx, &value.toObject());
        if (!GetPropertyValuesPairs(aCx, object,
                                    ListAllowance::eDisallow,
@@ -67,7 +103,7 @@ diff --git a/dom/animation/KeyframeUtils.cpp b/dom/animation/KeyframeUtils.cpp
  }
  
  /**
-@@ -1109,21 +1113,27 @@ HasValidOffsets(const nsTArray<Keyframe>
+@@ -1109,21 +1115,28 @@ HasValidOffsets(const nsTArray<Keyframe>
   * Takes a property-value pair for a shorthand property and modifies the
   * value to indicate that when we call StyleAnimationValue::ComputeValues on
   * that value we should behave as if that function had failed.
@@ -84,6 +120,7 @@ diff --git a/dom/animation/KeyframeUtils.cpp b/dom/animation/KeyframeUtils.cpp
               "Only shorthand property values can be marked as failure values");
  
 +  if (aBackend == StyleBackendType::Servo) {
++    printf_stderr("MarkAsComputeValuesFailureKey\n");
 +    Servo_DeclarationBlock_SimulateComputeValuesFailure(aPair.mServoDeclarationBlock);
 +    return;
 +  }
@@ -96,6 +133,42 @@ diff --git a/dom/animation/KeyframeUtils.cpp b/dom/animation/KeyframeUtils.cpp
    // nsCSSValue::AppendToString returns the mTokenStream value, but we can
    // update mPropertyID to a special value to indicate that this is
    // a special failure sentinel.
+@@ -1140,16 +1153,17 @@ MarkAsComputeValuesFailureKey(PropertyVa
+  * value).
+  *
+  * @param aPair The property-value pair to test.
+  * @return True if |aPair| represents a failure value.
+  */
+ static bool
+ IsComputeValuesFailureKey(const PropertyValuePair& aPair)
+ {
++  printf_stderr("IsComputeValuesFailureKey\n");
+   return nsCSSProps::IsShorthand(aPair.mProperty) &&
+          aPair.mValue.GetTokenStreamValue()->mPropertyID ==
+            eCSSPropertyExtra_no_properties;
+ }
+ 
+ static void
+ AppendInitialSegment(AnimationProperty* aAnimationProperty,
+                      const KeyframeValueEntry& aFirstEntry)
+@@ -1551,16 +1565,17 @@ RequiresAdditiveAnimation(const nsTArray
+                             ? 1.0
+                             : i == 0 ? 0.0 : 0.5;
+     double offsetToUse = frame.mOffset
+                          ? frame.mOffset.value()
+                          : computedOffset;
+ 
+     for (const PropertyValuePair& pair : frame.mPropertyValues) {
+       if (IsInvalidValuePair(pair, styleBackend)) {
++        printf_stderr("YES IsInvalidValuePair\n");
+         continue;
+       }
+ 
+       if (nsCSSProps::IsShorthand(pair.mProperty)) {
+         if (styleBackend == StyleBackendType::Gecko) {
+           nsCSSValueTokenStream* tokenStream =
+             pair.mValue.GetTokenStreamValue();
+           nsCSSParser parser(aDocument->CSSLoader());
 diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
 --- a/layout/style/ServoBindingList.h
 +++ b/layout/style/ServoBindingList.h
@@ -142,7 +215,7 @@ diff --git a/servo/components/style/properties/declaration_block.rs b/servo/comp
      iter: Iter<'a, (PropertyDeclaration, Importance)>,
  }
  
-@@ -96,36 +100,61 @@ impl fmt::Debug for PropertyDeclarationB
+@@ -96,36 +100,62 @@ impl fmt::Debug for PropertyDeclarationB
  }
  
  impl PropertyDeclarationBlock {
@@ -174,6 +247,7 @@ diff --git a/servo/components/style/properties/declaration_block.rs b/servo/comp
  
      /// Create a block with a single declaration
      pub fn with_one(declaration: PropertyDeclaration, importance: Importance) -> Self {
++        println!("with_one");
          let mut longhands = LonghandIdSet::new();
          if let PropertyDeclarationId::Longhand(id) = declaration.id() {
              longhands.insert(id);
@@ -208,7 +282,16 @@ diff --git a/servo/components/style/properties/declaration_block.rs b/servo/comp
      }
  
      /// Iterate over only PropertyDeclaration.
-@@ -434,20 +463,33 @@ impl PropertyDeclarationBlock {
+@@ -426,28 +456,42 @@ impl PropertyDeclarationBlock {
+                 }
+             }
+         }
+     }
+ 
+     /// Convert AnimationValueMap to PropertyDeclarationBlock.
+     #[cfg(feature = "gecko")]
+     pub fn from_animation_value_map(animation_value_map: &AnimationValueMap) -> Self {
++        println!("from_animation_value_map");
          let mut declarations = vec![];
          let mut longhands = LonghandIdSet::new();
  
@@ -246,7 +329,7 @@ diff --git a/servo/components/style/properties/declaration_block.rs b/servo/comp
      #[cfg(feature = "gecko")]
      pub fn has_css_wide_keyword(&self, property: &PropertyId) -> bool {
          if let PropertyId::Longhand(id) = *property {
-@@ -455,16 +497,32 @@ impl PropertyDeclarationBlock {
+@@ -455,16 +499,32 @@ impl PropertyDeclarationBlock {
                  return false
              }
          }
@@ -307,7 +390,7 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
  
  #[no_mangle]
  pub extern "C" fn Servo_MediaList_SetText(list: RawServoMediaListBorrowed, text: *const nsACString) {
-@@ -2378,16 +2386,20 @@ pub extern "C" fn Servo_GetComputedKeyfr
+@@ -2378,16 +2386,23 @@ pub extern "C" fn Servo_GetComputedKeyfr
          let iter = keyframe.mPropertyValues.iter()
                                             .filter(|&property| !property.mServoDeclarationBlock.mRawPtr.is_null());
          let mut property_index = 0;
@@ -317,7 +400,10 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
              let guard = declarations.read_with(&guard);
  
 +            if guard.is_compute_values_failure() {
++                println!("SKIP {:?}", property.mProperty);
 +                continue;
++            } else {
++                println!("NOT SKIP {:?}", property.mProperty);
 +            }
 +
              let anim_iter = guard.declarations()
