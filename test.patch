@@ -1,0 +1,51 @@
+# HG changeset patch
+# User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
+# Parent  e8da7192201e5786614ec49d557e64dffd114ff2
+
+diff --git a/dom/animation/KeyframeUtils.cpp b/dom/animation/KeyframeUtils.cpp
+--- a/dom/animation/KeyframeUtils.cpp
++++ b/dom/animation/KeyframeUtils.cpp
+@@ -1114,16 +1114,19 @@ HasValidOffsets(const nsTArray<Keyframe>
+  *              a shorthand property.
+  */
+ static void
+ MarkAsComputeValuesFailureKey(PropertyValuePair& aPair)
+ {
+   MOZ_ASSERT(nsCSSProps::IsShorthand(aPair.mProperty),
+              "Only shorthand property values can be marked as failure values");
+ 
++  if (true) {
++    return;
++  }
+   // We store shorthand values as nsCSSValueTokenStream objects whose mProperty
+   // and mShorthandPropertyID are eCSSProperty_UNKNOWN and whose mTokenStream
+   // member contains the shorthand property's value as a string.
+   //
+   // We need to leave mShorthandPropertyID as eCSSProperty_UNKNOWN so that
+   // nsCSSValue::AppendToString returns the mTokenStream value, but we can
+   // update mPropertyID to a special value to indicate that this is
+   // a special failure sentinel.
+diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
+--- a/servo/ports/geckolib/glue.rs
++++ b/servo/ports/geckolib/glue.rs
+@@ -2378,16 +2378,20 @@ pub extern "C" fn Servo_GetComputedKeyfr
+         let iter = keyframe.mPropertyValues.iter()
+                                            .filter(|&property| !property.mServoDeclarationBlock.mRawPtr.is_null());
+         let mut property_index = 0;
+         for property in iter {
+             let declarations = unsafe { &*property.mServoDeclarationBlock.mRawPtr.clone() };
+             let declarations = Locked::<PropertyDeclarationBlock>::as_arc(&declarations);
+             let guard = declarations.read_with(&guard);
+ 
++            if true {
++                println!("SKIP {:?}", property.mProperty);
++                continue;
++            }
+             let anim_iter = guard.declarations()
+                             .iter()
+                             .filter_map(|&(ref decl, imp)| {
+                                 if imp == Importance::Normal {
+                                     let property = TransitionProperty::from_declaration(decl);
+                                     let animation = AnimationValue::from_declaration(decl, &mut context,
+                                                                                      default_values);
+                                     debug_assert!(property.is_none() == animation.is_none(),
