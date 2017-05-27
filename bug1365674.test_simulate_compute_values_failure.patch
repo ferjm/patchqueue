@@ -1,0 +1,126 @@
+# HG changeset patch
+# User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
+# Parent  e8da7192201e5786614ec49d557e64dffd114ff2
+Bug 1365674 - stylo: Simulate compute value failure for dom/animation mochitests. r?hiro
+
+diff --git a/dom/animation/Keyframe.h b/dom/animation/Keyframe.h
+--- a/dom/animation/Keyframe.h
++++ b/dom/animation/Keyframe.h
+@@ -29,16 +29,20 @@ struct PropertyValuePair
+   // The specified value for the property. For shorthand properties or invalid
+   // property values, we store the specified property value as a token stream
+   // (string).
+   nsCSSValue mValue;
+ 
+   // The specified value when using the Servo backend.
+   RefPtr<RawServoDeclarationBlock> mServoDeclarationBlock;
+ 
++  // Flag to indicate that when we call StyleAnimationValue::ComputeValues on
++  // this value we should behave as if that function had failed.
++  bool mSimulateComputeValuesFailure;
++
+   bool operator==(const PropertyValuePair&) const;
+ };
+ 
+ /**
+  * A single keyframe.
+  *
+  * This is the canonical form in which keyframe effects are stored and
+  * corresponds closely to the type of objects returned via the getKeyframes()
+diff --git a/dom/animation/KeyframeUtils.cpp b/dom/animation/KeyframeUtils.cpp
+--- a/dom/animation/KeyframeUtils.cpp
++++ b/dom/animation/KeyframeUtils.cpp
+@@ -1027,16 +1027,17 @@ AppendValueAsString(JSContext* aCx,
+ static PropertyValuePair
+ MakePropertyValuePair(nsCSSPropertyID aProperty, const nsAString& aStringValue,
+                       nsCSSParser& aParser, nsIDocument* aDocument)
+ {
+   MOZ_ASSERT(aDocument);
+   PropertyValuePair result;
+ 
+   result.mProperty = aProperty;
++  result.mSimulateComputeValuesFailure = false;
+ 
+   if (aDocument->GetStyleBackendType() == StyleBackendType::Servo) {
+     RefPtr<RawServoDeclarationBlock> servoDeclarationBlock =
+       KeyframeUtils::ParseProperty(aProperty, aStringValue, aDocument);
+ 
+     if (servoDeclarationBlock) {
+       result.mServoDeclarationBlock = servoDeclarationBlock.forget();
+     }
+@@ -1114,45 +1115,33 @@ HasValidOffsets(const nsTArray<Keyframe>
+  *              a shorthand property.
+  */
+ static void
+ MarkAsComputeValuesFailureKey(PropertyValuePair& aPair)
+ {
+   MOZ_ASSERT(nsCSSProps::IsShorthand(aPair.mProperty),
+              "Only shorthand property values can be marked as failure values");
+ 
+-  // We store shorthand values as nsCSSValueTokenStream objects whose mProperty
+-  // and mShorthandPropertyID are eCSSProperty_UNKNOWN and whose mTokenStream
+-  // member contains the shorthand property's value as a string.
+-  //
+-  // We need to leave mShorthandPropertyID as eCSSProperty_UNKNOWN so that
+-  // nsCSSValue::AppendToString returns the mTokenStream value, but we can
+-  // update mPropertyID to a special value to indicate that this is
+-  // a special failure sentinel.
+-  nsCSSValueTokenStream* tokenStream = aPair.mValue.GetTokenStreamValue();
+-  MOZ_ASSERT(tokenStream->mPropertyID == eCSSProperty_UNKNOWN,
+-             "Shorthand value should initially have an unknown property ID");
+-  tokenStream->mPropertyID = eCSSPropertyExtra_no_properties;
++  aPair.mSimulateComputeValuesFailure = true;
+ }
+ 
+ /**
+  * Returns true if |aPair| is a property-value pair on which we have
+  * previously called MarkAsComputeValuesFailureKey (and hence we should
+  * simulate failure when calling StyleAnimationValue::ComputeValues using its
+  * value).
+  *
+  * @param aPair The property-value pair to test.
+  * @return True if |aPair| represents a failure value.
+  */
+ static bool
+ IsComputeValuesFailureKey(const PropertyValuePair& aPair)
+ {
+   return nsCSSProps::IsShorthand(aPair.mProperty) &&
+-         aPair.mValue.GetTokenStreamValue()->mPropertyID ==
+-           eCSSPropertyExtra_no_properties;
++         aPair.mSimulateComputeValuesFailure;
+ }
+ 
+ static void
+ AppendInitialSegment(AnimationProperty* aAnimationProperty,
+                      const KeyframeValueEntry& aFirstEntry)
+ {
+   AnimationPropertySegment* segment =
+     aAnimationProperty->mSegments.AppendElement();
+diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
+--- a/servo/ports/geckolib/glue.rs
++++ b/servo/ports/geckolib/glue.rs
+@@ -2374,16 +2374,24 @@ pub extern "C" fn Servo_GetComputedKeyfr
+ 
+         let mut seen = LonghandIdSet::new();
+ 
+         // mServoDeclarationBlock is null in the case where we have an invalid css property.
+         let iter = keyframe.mPropertyValues.iter()
+                                            .filter(|&property| !property.mServoDeclarationBlock.mRawPtr.is_null());
+         let mut property_index = 0;
+         for property in iter {
++           let is_shorthand = PropertyId::from_nscsspropertyid(property.mProperty).ok().map_or(false, |p| {
++               p.as_shorthand().is_ok()
++           });
++
++           if is_shorthand && property.mSimulateComputeValuesFailure {
++               continue;
++           }
++
+             let declarations = unsafe { &*property.mServoDeclarationBlock.mRawPtr.clone() };
+             let declarations = Locked::<PropertyDeclarationBlock>::as_arc(&declarations);
+             let guard = declarations.read_with(&guard);
+ 
+             let anim_iter = guard.declarations()
+                             .iter()
+                             .filter_map(|&(ref decl, imp)| {
+                                 if imp == Importance::Normal {
