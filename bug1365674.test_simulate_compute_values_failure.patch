@@ -215,7 +215,26 @@ diff --git a/dom/animation/test/chrome.ini b/dom/animation/test/chrome.ini
 diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 --- a/servo/ports/geckolib/glue.rs
 +++ b/servo/ports/geckolib/glue.rs
-@@ -2379,16 +2379,35 @@ pub extern "C" fn Servo_ResolveStyleLazi
+@@ -62,17 +62,17 @@ use style::gecko_bindings::bindings::Ser
+ use style::gecko_bindings::bindings::nsTArrayBorrowed_uintptr_t;
+ use style::gecko_bindings::bindings::nsTimingFunctionBorrowed;
+ use style::gecko_bindings::bindings::nsTimingFunctionBorrowedMut;
+ use style::gecko_bindings::structs;
+ use style::gecko_bindings::structs::{CSSPseudoElementType, CompositeOperation};
+ use style::gecko_bindings::structs::{RawServoStyleRule, ServoStyleSheet};
+ use style::gecko_bindings::structs::{SheetParsingMode, nsIAtom, nsCSSPropertyID};
+ use style::gecko_bindings::structs::{nsCSSFontFaceRule, nsCSSCounterStyleRule};
+-use style::gecko_bindings::structs::{nsRestyleHint, nsChangeHint};
++use style::gecko_bindings::structs::{nsRestyleHint, nsChangeHint, PropertyValuePair};
+ use style::gecko_bindings::structs::IterationCompositeOperation;
+ use style::gecko_bindings::structs::Loader;
+ use style::gecko_bindings::structs::MallocSizeOf;
+ use style::gecko_bindings::structs::RawGeckoPresContextOwned;
+ use style::gecko_bindings::structs::ServoElementSnapshotTable;
+ use style::gecko_bindings::structs::StyleRuleInclusion;
+ use style::gecko_bindings::structs::URLExtraData;
+ use style::gecko_bindings::structs::nsCSSValueSharedList;
+@@ -2379,16 +2379,31 @@ pub extern "C" fn Servo_ResolveStyleLazi
              resolve_default_style(&mut context, element, &ensure, &set_data,
                                    |styles| result = Some(finish(styles)));
          }
@@ -225,21 +244,17 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
  }
  
 +#[cfg(feature = "gecko_debug")]
-+fn simulate_compute_values_failure() -> bool {
++fn simulate_compute_values_failure(property: &PropertyValuePair) -> bool {
 +    let is_shorthand =
 +        PropertyId::from_nscsspropertyid(property.mProperty).ok().map_or(false, |p| {
 +            p.as_shorthand().is_ok()
 +        });
 +
-+    if is_shorthand && property.mSimulateComputeValuesFailure {
-+        true
-+    } else {
-+        false
-+    }
++    is_shorthand && property.mSimulateComputeValuesFailure
 +}
 +
 +#[cfg(not(feature = "gecko_debug"))]
-+fn simulate_compute_values_failure() -> bool {
++fn simulate_compute_values_failure(_: &PropertyValuePair) -> bool {
 +    false
 +}
 +
@@ -251,7 +266,7 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
                                                    computed_keyframes: RawGeckoComputedKeyframeValuesListBorrowedMut)
  {
      use std::mem;
-@@ -2425,16 +2444,20 @@ pub extern "C" fn Servo_GetComputedKeyfr
+@@ -2425,16 +2440,20 @@ pub extern "C" fn Servo_GetComputedKeyfr
  
          let mut seen = LonghandIdSet::new();
  
@@ -272,45 +287,3 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
                              .iter()
                              .filter_map(|&(ref decl, imp)| {
                                  if imp == Importance::Normal {
-diff --git a/toolkit/library/gtest/rust/Cargo.lock b/toolkit/library/gtest/rust/Cargo.lock
---- a/toolkit/library/gtest/rust/Cargo.lock
-+++ b/toolkit/library/gtest/rust/Cargo.lock
-@@ -315,16 +315,17 @@ dependencies = [
-  "winapi-build 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
- ]
- 
- [[package]]
- name = "geckoservo"
- version = "0.0.1"
- dependencies = [
-  "atomic_refcell 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
-+ "cfg-if 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
-  "cssparser 0.13.5 (registry+https://github.com/rust-lang/crates.io-index)",
-  "env_logger 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
-  "libc 0.2.20 (registry+https://github.com/rust-lang/crates.io-index)",
-  "log 0.3.6 (registry+https://github.com/rust-lang/crates.io-index)",
-  "nsstring_vendor 0.1.0",
-  "parking_lot 0.3.8 (registry+https://github.com/rust-lang/crates.io-index)",
-  "selectors 0.19.0",
-  "style 0.0.1",
-diff --git a/toolkit/library/rust/Cargo.lock b/toolkit/library/rust/Cargo.lock
---- a/toolkit/library/rust/Cargo.lock
-+++ b/toolkit/library/rust/Cargo.lock
-@@ -313,16 +313,17 @@ dependencies = [
-  "winapi-build 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
- ]
- 
- [[package]]
- name = "geckoservo"
- version = "0.0.1"
- dependencies = [
-  "atomic_refcell 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
-+ "cfg-if 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
-  "cssparser 0.13.5 (registry+https://github.com/rust-lang/crates.io-index)",
-  "env_logger 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
-  "libc 0.2.20 (registry+https://github.com/rust-lang/crates.io-index)",
-  "log 0.3.6 (registry+https://github.com/rust-lang/crates.io-index)",
-  "nsstring_vendor 0.1.0",
-  "parking_lot 0.3.8 (registry+https://github.com/rust-lang/crates.io-index)",
-  "selectors 0.19.0",
-  "style 0.0.1",
