@@ -1,12 +1,12 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  e8da7192201e5786614ec49d557e64dffd114ff2
+# Parent  cce4d83d2b99ffedbd67a2f40ce26e53e9ae27ab
 Bug 1365674 - stylo: Simulate compute value failure for dom/animation mochitests. r?hiro
 
 diff --git a/dom/animation/Keyframe.h b/dom/animation/Keyframe.h
 --- a/dom/animation/Keyframe.h
 +++ b/dom/animation/Keyframe.h
-@@ -29,16 +29,20 @@ struct PropertyValuePair
+@@ -29,16 +29,22 @@ struct PropertyValuePair
    // The specified value for the property. For shorthand properties or invalid
    // property values, we store the specified property value as a token stream
    // (string).
@@ -15,9 +15,11 @@ diff --git a/dom/animation/Keyframe.h b/dom/animation/Keyframe.h
    // The specified value when using the Servo backend.
    RefPtr<RawServoDeclarationBlock> mServoDeclarationBlock;
  
++#ifdef DEBUG
 +  // Flag to indicate that when we call StyleAnimationValue::ComputeValues on
 +  // this value we should behave as if that function had failed.
 +  bool mSimulateComputeValuesFailure;
++#endif
 +
    bool operator==(const PropertyValuePair&) const;
  };
@@ -30,8 +32,88 @@ diff --git a/dom/animation/Keyframe.h b/dom/animation/Keyframe.h
 diff --git a/dom/animation/KeyframeUtils.cpp b/dom/animation/KeyframeUtils.cpp
 --- a/dom/animation/KeyframeUtils.cpp
 +++ b/dom/animation/KeyframeUtils.cpp
-@@ -1027,16 +1027,17 @@ AppendValueAsString(JSContext* aCx,
+@@ -384,21 +384,23 @@ AppendValueAsString(JSContext* aCx,
+ 
  static PropertyValuePair
+ MakePropertyValuePair(nsCSSPropertyID aProperty, const nsAString& aStringValue,
+                       nsCSSParser& aParser, nsIDocument* aDocument);
+ 
+ static bool
+ HasValidOffsets(const nsTArray<Keyframe>& aKeyframes);
+ 
++#ifdef DEBUG
+ static void
+ MarkAsComputeValuesFailureKey(PropertyValuePair& aPair);
+ 
+ static bool
+ IsComputeValuesFailureKey(const PropertyValuePair& aPair);
++#endif
+ 
+ static void
+ BuildSegmentsFromValueEntries(nsTArray<KeyframeValueEntry>& aEntries,
+                               nsTArray<AnimationProperty>& aResult);
+ 
+ static void
+ GetKeyframeListFromPropertyIndexedKeyframe(JSContext* aCx,
+                                            nsIDocument* aDocument,
+@@ -635,20 +637,25 @@ KeyframeUtils::GetComputedKeyframeValues
+       nsTArray<PropertyStyleAnimationValuePair> values;
+ 
+       // For shorthands, we store the string as a token stream so we need to
+       // extract that first.
+       if (nsCSSProps::IsShorthand(pair.mProperty)) {
+         nsCSSValueTokenStream* tokenStream = pair.mValue.GetTokenStreamValue();
+         if (!StyleAnimationValue::ComputeValues(pair.mProperty,
+               CSSEnabledState::eForAllContent, aElement, aStyleContext,
+-              tokenStream->mTokenStream, /* aUseSVGMode */ false, values) ||
+-            IsComputeValuesFailureKey(pair)) {
++              tokenStream->mTokenStream, /* aUseSVGMode */ false, values)) {
+           continue;
+         }
++
++#ifdef DEBUG
++        if (IsComputeValuesFailureKey(pair)) {
++          continue;
++        }
++#endif
+       } else if (pair.mValue.GetUnit() == eCSSUnit_Null) {
+         // An uninitialized nsCSSValue represents the underlying value which
+         // we represent as an uninitialized AnimationValue so we just leave
+         // neutralPair->mValue as-is.
+         PropertyStyleAnimationValuePair* neutralPair = values.AppendElement();
+         neutralPair->mProperty = pair.mProperty;
+       } else {
+         if (!StyleAnimationValue::ComputeValues(pair.mProperty,
+@@ -868,26 +875,28 @@ ConvertKeyframeSequence(JSContext* aCx,
+     }
+ 
+     for (PropertyValuesPair& pair : propertyValuePairs) {
+       MOZ_ASSERT(pair.mValues.Length() == 1);
+       keyframe->mPropertyValues.AppendElement(
+         MakePropertyValuePair(pair.mProperty, pair.mValues[0], parser,
+                               aDocument));
+ 
++#ifdef DEBUG
+       // When we go to convert keyframes into arrays of property values we
+       // call StyleAnimation::ComputeValues. This should normally return true
+       // but in order to test the case where it does not, BaseKeyframeDict
+       // includes a chrome-only member that can be set to indicate that
+       // ComputeValues should fail for shorthand property values on that
+       // keyframe.
+       if (nsCSSProps::IsShorthand(pair.mProperty) &&
+           keyframeDict.mSimulateComputeValuesFailure) {
+         MarkAsComputeValuesFailureKey(keyframe->mPropertyValues.LastElement());
+       }
++#endif
+     }
+   }
+ 
+   return true;
+ }
+ 
+ /**
+  * Reads the property-values pairs from the specified JS object.
+@@ -1028,16 +1037,20 @@ static PropertyValuePair
  MakePropertyValuePair(nsCSSPropertyID aProperty, const nsAString& aStringValue,
                        nsCSSParser& aParser, nsIDocument* aDocument)
  {
@@ -39,8 +121,11 @@ diff --git a/dom/animation/KeyframeUtils.cpp b/dom/animation/KeyframeUtils.cpp
    PropertyValuePair result;
  
    result.mProperty = aProperty;
-+  result.mSimulateComputeValuesFailure = false;
  
++#ifdef DEBUG
++  result.mSimulateComputeValuesFailure = false;
++#endif
++
    if (aDocument->GetStyleBackendType() == StyleBackendType::Servo) {
      RefPtr<RawServoDeclarationBlock> servoDeclarationBlock =
        KeyframeUtils::ParseProperty(aProperty, aStringValue, aDocument);
@@ -48,7 +133,23 @@ diff --git a/dom/animation/KeyframeUtils.cpp b/dom/animation/KeyframeUtils.cpp
      if (servoDeclarationBlock) {
        result.mServoDeclarationBlock = servoDeclarationBlock.forget();
      }
-@@ -1114,45 +1115,33 @@ HasValidOffsets(const nsTArray<Keyframe>
+     return result;
+@@ -1100,60 +1113,50 @@ HasValidOffsets(const nsTArray<Keyframe>
+         return false;
+       }
+       offset = thisOffset;
+     }
+   }
+   return true;
+ }
+ 
++#ifdef DEBUG
+ /**
+  * Takes a property-value pair for a shorthand property and modifies the
+  * value to indicate that when we call StyleAnimationValue::ComputeValues on
+  * that value we should behave as if that function had failed.
+  *
+  * @param aPair The PropertyValuePair to modify. |aPair.mProperty| must be
   *              a shorthand property.
   */
  static void
@@ -89,6 +190,7 @@ diff --git a/dom/animation/KeyframeUtils.cpp b/dom/animation/KeyframeUtils.cpp
 -           eCSSPropertyExtra_no_properties;
 +         aPair.mSimulateComputeValuesFailure;
  }
++#endif
  
  static void
  AppendInitialSegment(AnimationProperty* aAnimationProperty,
@@ -96,10 +198,24 @@ diff --git a/dom/animation/KeyframeUtils.cpp b/dom/animation/KeyframeUtils.cpp
  {
    AnimationPropertySegment* segment =
      aAnimationProperty->mSegments.AppendElement();
+   segment->mFromKey        = 0.0f;
+diff --git a/dom/animation/test/chrome.ini b/dom/animation/test/chrome.ini
+--- a/dom/animation/test/chrome.ini
++++ b/dom/animation/test/chrome.ini
+@@ -13,8 +13,9 @@ support-files =
+ [chrome/test_animation_performance_warning.html]
+ [chrome/test_animation_properties.html]
+ [chrome/test_cssanimation_missing_keyframes.html]
+ [chrome/test_generated_content_getAnimations.html]
+ [chrome/test_restyles.html]
+ skip-if = os == 'android' && processor == 'x86' # bug 1335986
+ [chrome/test_running_on_compositor.html]
+ [chrome/test_simulate_compute_values_failure.html]
++skip-if = !debug
 diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 --- a/servo/ports/geckolib/glue.rs
 +++ b/servo/ports/geckolib/glue.rs
-@@ -2374,16 +2374,24 @@ pub extern "C" fn Servo_GetComputedKeyfr
+@@ -2425,16 +2425,26 @@ pub extern "C" fn Servo_GetComputedKeyfr
  
          let mut seen = LonghandIdSet::new();
  
@@ -108,13 +224,15 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
                                             .filter(|&property| !property.mServoDeclarationBlock.mRawPtr.is_null());
          let mut property_index = 0;
          for property in iter {
-+           let is_shorthand = PropertyId::from_nscsspropertyid(property.mProperty).ok().map_or(false, |p| {
-+               p.as_shorthand().is_ok()
-+           });
++            if cfg!(feature = "gecko_debug") {
++                let is_shorthand = PropertyId::from_nscsspropertyid(property.mProperty).ok().map_or(false, |p| {
++                    p.as_shorthand().is_ok()
++                });
 +
-+           if is_shorthand && property.mSimulateComputeValuesFailure {
-+               continue;
-+           }
++                if is_shorthand && property.mSimulateComputeValuesFailure {
++                    continue;
++                }
++            }
 +
              let declarations = unsafe { &*property.mServoDeclarationBlock.mRawPtr.clone() };
              let declarations = Locked::<PropertyDeclarationBlock>::as_arc(&declarations);
