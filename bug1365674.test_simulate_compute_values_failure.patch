@@ -234,7 +234,7 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
  use style::gecko_bindings::structs::StyleRuleInclusion;
  use style::gecko_bindings::structs::URLExtraData;
  use style::gecko_bindings::structs::nsCSSValueSharedList;
-@@ -2379,16 +2379,31 @@ pub extern "C" fn Servo_ResolveStyleLazi
+@@ -2379,16 +2379,28 @@ pub extern "C" fn Servo_ResolveStyleLazi
              resolve_default_style(&mut context, element, &ensure, &set_data,
                                    |styles| result = Some(finish(styles)));
          }
@@ -245,12 +245,9 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
  
 +#[cfg(feature = "gecko_debug")]
 +fn simulate_compute_values_failure(property: &PropertyValuePair) -> bool {
-+    let is_shorthand =
-+        PropertyId::from_nscsspropertyid(property.mProperty).ok().map_or(false, |p| {
-+            p.as_shorthand().is_ok()
-+        });
-+
-+    is_shorthand && property.mSimulateComputeValuesFailure
++    let p = property.mProperty;
++    let id = get_property_id_from_nscsspropertyid!(p, false);
++    id.as_shorthand().is_ok() && property.mSimulateComputeValuesFailure
 +}
 +
 +#[cfg(not(feature = "gecko_debug"))]
@@ -266,7 +263,7 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
                                                    computed_keyframes: RawGeckoComputedKeyframeValuesListBorrowedMut)
  {
      use std::mem;
-@@ -2425,16 +2440,20 @@ pub extern "C" fn Servo_GetComputedKeyfr
+@@ -2425,16 +2437,20 @@ pub extern "C" fn Servo_GetComputedKeyfr
  
          let mut seen = LonghandIdSet::new();
  
