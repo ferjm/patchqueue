@@ -1,0 +1,75 @@
+# HG changeset patch
+# User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
+# Parent  286f71223256cbb3a769432fd860f563c4886e81
+Bug 1367615 - Stylo: Make ServoStyleRule implement nsICSSStyleRuleDOMWrapper. r?xidorn"
+
+diff --git a/layout/style/ServoStyleRule.cpp b/layout/style/ServoStyleRule.cpp
+--- a/layout/style/ServoStyleRule.cpp
++++ b/layout/style/ServoStyleRule.cpp
+@@ -102,16 +102,26 @@ ServoStyleRuleDeclaration::GetCSSParsing
+ }
+ 
+ nsDOMCSSDeclaration::ServoCSSParsingEnvironment
+ ServoStyleRuleDeclaration::GetServoCSSParsingEnvironment() const
+ {
+   return GetServoCSSParsingEnvironmentForRule(Rule());
+ }
+ 
++// -- nsICSSStyleRuleDOMWrapper --------------------------------------
++
++NS_IMETHODIMP
++ServoStyleRule::GetCSSStyleRule(ServoStyleRule **aResult)
++{
++  *aResult = this;
++  NS_ADDREF(*aResult);
++  return NS_OK;
++}
++
+ // -- ServoStyleRule --------------------------------------------------
+ 
+ ServoStyleRule::ServoStyleRule(already_AddRefed<RawServoStyleRule> aRawRule,
+                                uint32_t aLine, uint32_t aColumn)
+   : BindingStyleRule(aLine, aColumn)
+   , mRawRule(aRawRule)
+   , mDecls(Servo_StyleRule_GetStyle(mRawRule).Consume())
+ {
+diff --git a/layout/style/ServoStyleRule.h b/layout/style/ServoStyleRule.h
+--- a/layout/style/ServoStyleRule.h
++++ b/layout/style/ServoStyleRule.h
+@@ -46,32 +46,36 @@ private:
+   inline ServoStyleRule* Rule();
+   inline const ServoStyleRule* Rule() const;
+ 
+   RefPtr<ServoDeclarationBlock> mDecls;
+ };
+ 
+ class ServoStyleRule final : public BindingStyleRule
+                            , public nsIDOMCSSStyleRule
++                           , public nsICSSStyleRuleDOMWrapper
+ {
+ public:
+   ServoStyleRule(already_AddRefed<RawServoStyleRule> aRawRule,
+                  uint32_t aLine, uint32_t aColumn);
+ 
+   NS_DECL_ISUPPORTS_INHERITED
+   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_INHERITED(ServoStyleRule,
+                                                          css::Rule)
+   virtual bool IsCCLeaf() const final MOZ_MUST_OVERRIDE;
+   NS_DECL_NSIDOMCSSSTYLERULE
+ 
+   // WebIDL interface
+   uint16_t Type() const final;
+   void GetCssTextImpl(nsAString& aCssText) const final;
+   virtual nsICSSDeclaration* Style() final;
+ 
++  // nsICSSStyleRuleDOMWrapper
++  NS_IMETHOD GetCSSStyleRule(ServoStyleRule **aResult) override;
++
+   RawServoStyleRule* Raw() const { return mRawRule; }
+ 
+   // Methods of mozilla::css::Rule
+   int32_t GetType() const final { return css::Rule::STYLE_RULE; }
+   using Rule::GetType;
+   already_AddRefed<Rule> Clone() const final;
+   size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const final;
+ #ifdef DEBUG
