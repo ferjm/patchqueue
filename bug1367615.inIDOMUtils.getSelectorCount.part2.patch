@@ -1,0 +1,89 @@
+# HG changeset patch
+# User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
+# Parent  4ffe7d17709f5236dcdce4b5b097d8c25db710a5
+Bug 1367615 - Part 2: Make ServoStyleRule implement nsICSSStyleRuleDOMWrapper. r?emilio
+
+diff --git a/layout/style/ServoStyleRule.cpp b/layout/style/ServoStyleRule.cpp
+--- a/layout/style/ServoStyleRule.cpp
++++ b/layout/style/ServoStyleRule.cpp
+@@ -114,16 +114,17 @@ ServoStyleRule::ServoStyleRule(already_A
+   : BindingStyleRule(aLine, aColumn)
+   , mRawRule(aRawRule)
+   , mDecls(Servo_StyleRule_GetStyle(mRawRule).Consume())
+ {
+ }
+ 
+ // QueryInterface implementation for ServoStyleRule
+ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(ServoStyleRule)
++  NS_INTERFACE_MAP_ENTRY(nsICSSStyleRuleDOMWrapper)
+   NS_INTERFACE_MAP_ENTRY(nsIDOMCSSStyleRule)
+ NS_INTERFACE_MAP_END_INHERITING(css::Rule)
+ 
+ NS_IMPL_ADDREF_INHERITED(ServoStyleRule, css::Rule)
+ NS_IMPL_RELEASE_INHERITED(ServoStyleRule, css::Rule)
+ 
+ NS_IMPL_CYCLE_COLLECTION_CLASS(ServoStyleRule)
+ 
+@@ -190,16 +191,26 @@ ServoStyleRule::List(FILE* out, int32_t 
+   for (int32_t i = 0; i < aIndent; i++) {
+     str.AppendLiteral("  ");
+   }
+   Servo_StyleRule_Debug(mRawRule, &str);
+   fprintf_stderr(out, "%s\n", str.get());
+ }
+ #endif
+ 
++/* nsICSSStyleRuleDOMWrapper implementation */
++
++NS_IMETHODIMP
++ServoStyleRule::GetCSSStyleRule(BindingStyleRule **aResult)
++{
++  *aResult = this;
++  NS_ADDREF(*aResult);
++  return NS_OK;
++}
++
+ /* CSSRule implementation */
+ 
+ uint16_t
+ ServoStyleRule::Type() const
+ {
+   return nsIDOMCSSRule::STYLE_RULE;
+ }
+ 
+diff --git a/layout/style/ServoStyleRule.h b/layout/style/ServoStyleRule.h
+--- a/layout/style/ServoStyleRule.h
++++ b/layout/style/ServoStyleRule.h
+@@ -45,28 +45,31 @@ private:
+ 
+   inline ServoStyleRule* Rule();
+   inline const ServoStyleRule* Rule() const;
+ 
+   RefPtr<ServoDeclarationBlock> mDecls;
+ };
+ 
+ class ServoStyleRule final : public BindingStyleRule
+-                           , public nsIDOMCSSStyleRule
++                           , public nsICSSStyleRuleDOMWrapper
+ {
+ public:
+   ServoStyleRule(already_AddRefed<RawServoStyleRule> aRawRule,
+                  uint32_t aLine, uint32_t aColumn);
+ 
+   NS_DECL_ISUPPORTS_INHERITED
+   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_INHERITED(ServoStyleRule,
+                                                          css::Rule)
+   virtual bool IsCCLeaf() const final MOZ_MUST_OVERRIDE;
+   NS_DECL_NSIDOMCSSSTYLERULE
+ 
++  // nsICSSStyleRuleDOMWrapper
++  NS_IMETHOD GetCSSStyleRule(BindingStyleRule **aResult) override;
++
+   virtual nsresult GetSelectorCount(uint32_t *aCount) override;
+   virtual nsresult GetSelectorText(uint32_t aSelectorIndex,
+                                    nsAString& aText) override;
+   virtual nsresult GetSpecificity(uint32_t aSelectorIndex,
+                                   uint64_t* aSpecificity) override;
+   virtual nsresult SelectorMatchesElement(dom::Element* aElement,
+                                           uint32_t aSelectorIndex,
+                                           const nsAString& aPseudo,
