@@ -24,7 +24,7 @@ diff --git a/layout/style/ServoStyleRule.cpp b/layout/style/ServoStyleRule.cpp
  
  NS_IMPL_CYCLE_COLLECTION_CLASS(ServoStyleRule)
  
-@@ -190,16 +191,26 @@ ServoStyleRule::List(FILE* out, int32_t 
+@@ -190,16 +191,25 @@ ServoStyleRule::List(FILE* out, int32_t 
    for (int32_t i = 0; i < aIndent; i++) {
      str.AppendLiteral("  ");
    }
@@ -38,8 +38,7 @@ diff --git a/layout/style/ServoStyleRule.cpp b/layout/style/ServoStyleRule.cpp
 +NS_IMETHODIMP
 +ServoStyleRule::GetCSSStyleRule(BindingStyleRule **aResult)
 +{
-+  *aResult = this;
-+  NS_ADDREF(*aResult);
++  NS_ADDREF(*aResult = this);
 +  return NS_OK;
 +}
 +
