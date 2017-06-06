@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  dd2a2f81e9ad4204308b55ed87f20e2970df8d7e
+# Parent  d1bdbfa7f0702c05d9144cc05275655f5933351f
 Bug 1367615 - Part 3: Implement ServoStyleRule::GetSelectorCount and GetSelectorText. r?emilio
 
 diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
@@ -54,7 +54,7 @@ diff --git a/layout/style/ServoStyleRule.cpp b/layout/style/ServoStyleRule.cpp
  nsresult
  ServoStyleRule::GetSpecificity(uint32_t aSelectorIndex, uint64_t* aSpecificity)
  {
-+  // TODO
++  // TODO 1370501
    return NS_OK;
  }
  
@@ -64,7 +64,7 @@ diff --git a/layout/style/ServoStyleRule.cpp b/layout/style/ServoStyleRule.cpp
                                         const nsAString& aPseudo,
                                         bool* aMatches)
  {
-+  // TODO
++  // TODO Bug 1370502
    return NS_OK;
  }
  
@@ -72,7 +72,7 @@ diff --git a/layout/style/ServoStyleRule.cpp b/layout/style/ServoStyleRule.cpp
 diff --git a/servo/components/selectors/parser.rs b/servo/components/selectors/parser.rs
 --- a/servo/components/selectors/parser.rs
 +++ b/servo/components/selectors/parser.rs
-@@ -137,16 +137,32 @@ impl<Impl: SelectorImpl> SelectorList<Im
+@@ -137,16 +137,29 @@ impl<Impl: SelectorImpl> SelectorList<Im
      /// https://drafts.csswg.org/selectors/#grouping
      ///
      /// Return the Selectors or Err if there is an invalid selector.
@@ -82,7 +82,9 @@ diff --git a/servo/components/selectors/parser.rs b/servo/components/selectors/p
               .map(SelectorList)
      }
 +
-+    fn to_css<I, W>(iter: I, dest: &mut W) where I: Iterator, W: fmt::Write {
++    pub fn to_css_from_index<W>(&self, index: usize, dest: &mut W)
++        -> fmt::Result where W: fmt::Write {
++        let mut iter = self.0[index..].iter();
 +        let first = iter.next()
 +            .expect("Empty SelectorList, should contain at least one selector");
 +        first.to_css(dest)?;
@@ -91,11 +93,6 @@ diff --git a/servo/components/selectors/parser.rs b/servo/components/selectors/p
 +            selector.to_css(dest)?;
 +        }
 +        Ok(())
-+    }
-+
-+    pub fn to_css_from_index<W>(&self, index: usize, dest: &mut W)
-+        -> fmt::Result where W: fmt::Write {
-+        SelectorList::to_css(self.0[index..].iter())
 +    }
  }
  
