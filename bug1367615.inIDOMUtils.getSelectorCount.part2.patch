@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  4ffe7d17709f5236dcdce4b5b097d8c25db710a5
+# Parent  7074d262f64a9dea04851509fea40ed8f008f3b0
 Bug 1367615 - Part 2: Make ServoStyleRule implement nsICSSStyleRuleDOMWrapper. r?emilio
 
 diff --git a/layout/style/ServoStyleRule.cpp b/layout/style/ServoStyleRule.cpp
@@ -73,17 +73,17 @@ diff --git a/layout/style/ServoStyleRule.h b/layout/style/ServoStyleRule.h
    NS_DECL_ISUPPORTS_INHERITED
    NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_INHERITED(ServoStyleRule,
                                                           css::Rule)
-   virtual bool IsCCLeaf() const final MOZ_MUST_OVERRIDE;
+   bool IsCCLeaf() const final MOZ_MUST_OVERRIDE;
    NS_DECL_NSIDOMCSSSTYLERULE
  
 +  // nsICSSStyleRuleDOMWrapper
 +  NS_IMETHOD GetCSSStyleRule(BindingStyleRule **aResult) override;
 +
-   virtual nsresult GetSelectorCount(uint32_t *aCount) override;
-   virtual nsresult GetSelectorText(uint32_t aSelectorIndex,
-                                    nsAString& aText) override;
-   virtual nsresult GetSpecificity(uint32_t aSelectorIndex,
-                                   uint64_t* aSpecificity) override;
-   virtual nsresult SelectorMatchesElement(dom::Element* aElement,
-                                           uint32_t aSelectorIndex,
-                                           const nsAString& aPseudo,
+   uint32_t GetSelectorCount() override;
+   nsresult GetSelectorText(uint32_t aSelectorIndex,
+                            nsAString& aText) override;
+   nsresult GetSpecificity(uint32_t aSelectorIndex,
+                           uint64_t* aSpecificity) override;
+   nsresult SelectorMatchesElement(dom::Element* aElement,
+                                   uint32_t aSelectorIndex,
+                                   const nsAString& aPseudo,
