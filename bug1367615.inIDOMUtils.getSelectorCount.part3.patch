@@ -1,0 +1,146 @@
+# HG changeset patch
+# User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
+# Parent  dd2a2f81e9ad4204308b55ed87f20e2970df8d7e
+Bug 1367615 - Part 3: Implement ServoStyleRule::GetSelectorCount and GetSelectorText. r?emilio
+
+diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
+--- a/layout/style/ServoBindingList.h
++++ b/layout/style/ServoBindingList.h
+@@ -139,16 +139,21 @@ SERVO_BINDING_FUNC(Servo_CssRules_GetCou
+                    ServoCssRulesBorrowed rules, uint32_t index)
+ SERVO_BINDING_FUNC(Servo_StyleRule_GetStyle, RawServoDeclarationBlockStrong,
+                    RawServoStyleRuleBorrowed rule)
+ SERVO_BINDING_FUNC(Servo_StyleRule_SetStyle, void,
+                    RawServoStyleRuleBorrowed rule,
+                    RawServoDeclarationBlockBorrowed declarations)
+ SERVO_BINDING_FUNC(Servo_StyleRule_GetSelectorText, void,
+                    RawServoStyleRuleBorrowed rule, nsAString* result)
++SERVO_BINDING_FUNC(Servo_StyleRule_GetSelectorTextFromIndex, void,
++                   RawServoStyleRuleBorrowed rule, uint32_t index,
++                   nsAString* result)
++SERVO_BINDING_FUNC(Servo_StyleRule_GetSelectorCount, void,
++                   RawServoStyleRuleBorrowed rule, uint32_t* count)
+ SERVO_BINDING_FUNC(Servo_ImportRule_GetHref, void,
+                    RawServoImportRuleBorrowed rule, nsAString* result)
+ SERVO_BINDING_FUNC(Servo_ImportRule_GetSheet, const RawServoStyleSheet*,
+                    RawServoImportRuleBorrowed rule)
+ SERVO_BINDING_FUNC(Servo_Keyframe_GetKeyText, void,
+                    RawServoKeyframeBorrowed keyframe, nsAString* result)
+ // Returns whether it successfully changes the key text.
+ SERVO_BINDING_FUNC(Servo_Keyframe_SetKeyText, bool,
+diff --git a/layout/style/ServoStyleRule.cpp b/layout/style/ServoStyleRule.cpp
+--- a/layout/style/ServoStyleRule.cpp
++++ b/layout/style/ServoStyleRule.cpp
+@@ -249,33 +249,37 @@ ServoStyleRule::GetStyle(nsIDOMCSSStyleD
+ {
+   *aStyle = do_AddRef(&mDecls).take();
+   return NS_OK;
+ }
+ 
+ nsresult
+ ServoStyleRule::GetSelectorCount(uint32_t *aCount)
+ {
++  Servo_StyleRule_GetSelectorCount(mRawRule, aCount);
+   return NS_OK;
+ }
+ 
+ nsresult
+ ServoStyleRule::GetSelectorText(uint32_t aSelectorIndex, nsAString& aText)
+ {
++  Servo_StyleRule_GetSelectorTextFromIndex(mRawRule, aSelectorIndex, &aText);
+   return NS_OK;
+ }
+ 
+ nsresult
+ ServoStyleRule::GetSpecificity(uint32_t aSelectorIndex, uint64_t* aSpecificity)
+ {
++  // TODO
+   return NS_OK;
+ }
+ 
+ nsresult
+ ServoStyleRule::SelectorMatchesElement(Element* aElement,
+                                        uint32_t aSelectorIndex,
+                                        const nsAString& aPseudo,
+                                        bool* aMatches)
+ {
++  // TODO
+   return NS_OK;
+ }
+ 
+ } // namespace mozilla
+diff --git a/servo/components/selectors/parser.rs b/servo/components/selectors/parser.rs
+--- a/servo/components/selectors/parser.rs
++++ b/servo/components/selectors/parser.rs
+@@ -137,16 +137,32 @@ impl<Impl: SelectorImpl> SelectorList<Im
+     /// https://drafts.csswg.org/selectors/#grouping
+     ///
+     /// Return the Selectors or Err if there is an invalid selector.
+     pub fn parse<P>(parser: &P, input: &mut CssParser) -> Result<Self, ()>
+     where P: Parser<Impl=Impl> {
+         input.parse_comma_separated(|input| parse_selector(parser, input))
+              .map(SelectorList)
+     }
++
++    fn to_css<I, W>(iter: I, dest: &mut W) where I: Iterator, W: fmt::Write {
++        let first = iter.next()
++            .expect("Empty SelectorList, should contain at least one selector");
++        first.to_css(dest)?;
++        for selector in iter {
++            dest.write_str(", ")?;
++            selector.to_css(dest)?;
++        }
++        Ok(())
++    }
++
++    pub fn to_css_from_index<W>(&self, index: usize, dest: &mut W)
++        -> fmt::Result where W: fmt::Write {
++        SelectorList::to_css(self.0[index..].iter())
++    }
+ }
+ 
+ /// Copied from Gecko, where it was noted to be unmeasured.
+ const NUM_ANCESTOR_HASHES: usize = 4;
+ 
+ /// The cores parts of a selector used for matching. This exists to make that
+ /// information accessibly separately from the specificity and pseudo-element
+ /// information that lives on |Selector| proper. We may want to refactor things
+diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
+--- a/servo/ports/geckolib/glue.rs
++++ b/servo/ports/geckolib/glue.rs
+@@ -1080,16 +1080,35 @@ pub extern "C" fn Servo_StyleRule_SetSty
+ #[no_mangle]
+ pub extern "C" fn Servo_StyleRule_GetSelectorText(rule: RawServoStyleRuleBorrowed, result: *mut nsAString) {
+     read_locked_arc(rule, |rule: &StyleRule| {
+         rule.selectors.to_css(unsafe { result.as_mut().unwrap() }).unwrap();
+     })
+ }
+ 
+ #[no_mangle]
++pub extern "C" fn Servo_StyleRule_GetSelectorTextFromIndex(rule: RawServoStyleRuleBorrowed,
++                                                           aSelectorIndex: u32,
++                                                           result: *mut nsAString) {
++    read_locked_arc(rule, |rule: &StyleRule| {
++        rule.selectors.to_css_from_index(
++            aSelectorIndex as usize,
++            unsafe { result.as_mut().unwrap() }
++        ).unwrap();
++    })
++}
++
++#[no_mangle]
++pub extern "C" fn Servo_StyleRule_GetSelectorCount(rule: RawServoStyleRuleBorrowed, count: *mut u32) {
++    read_locked_arc(rule, |rule: &StyleRule| {
++        *unsafe { count.as_mut().unwrap() } = rule.selectors.0.len() as u32;
++    })
++}
++
++#[no_mangle]
+ pub extern "C" fn Servo_ImportRule_GetHref(rule: RawServoImportRuleBorrowed, result: *mut nsAString) {
+     read_locked_arc(rule, |rule: &ImportRule| {
+         write!(unsafe { &mut *result }, "{}", rule.url.as_str()).unwrap();
+     })
+ }
+ 
+ #[no_mangle]
+ pub extern "C" fn Servo_ImportRule_GetSheet(rule: RawServoImportRuleBorrowed) -> *const RawServoStyleSheet {
