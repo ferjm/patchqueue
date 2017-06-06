@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  aeb3d0ca558f034cbef1c5a68bd07dd738611494
+# Parent  7b8937970f9ca85db88cb2496f2112175fd847c8
 Bug 1367615 - Part 1: Move inDOMUtils style rules related functionality to BindingStyleRule. r?emilio
 
 diff --git a/layout/inspector/inDOMUtils.cpp b/layout/inspector/inDOMUtils.cpp
@@ -63,7 +63,7 @@ diff --git a/layout/inspector/inDOMUtils.cpp b/layout/inspector/inDOMUtils.cpp
    if (!cssrule) {
      rv.Throw(NS_ERROR_FAILURE);
    }
-@@ -404,133 +402,68 @@ inDOMUtils::GetCSSLexer(const nsAString&
+@@ -404,133 +402,70 @@ inDOMUtils::GetCSSLexer(const nsAString&
    }
    return NS_OK;
  }
@@ -85,7 +85,8 @@ diff --git a/layout/inspector/inDOMUtils.cpp b/layout/inspector/inDOMUtils.cpp
 -  *aCount = count;
 -  return NS_OK;
 -}
--
++  *aCount = rule->GetSelectorCount();
+ 
 -static nsCSSSelectorList*
 -GetSelectorAtIndex(nsIDOMCSSStyleRule* aRule, uint32_t aIndex, ErrorResult& rv)
 -{
@@ -104,7 +105,7 @@ diff --git a/layout/inspector/inDOMUtils.cpp b/layout/inspector/inDOMUtils.cpp
 -  // Ran out of selectors
 -  rv.Throw(NS_ERROR_INVALID_ARG);
 -  return nullptr;
-+  return rule->GetSelectorCount(aCount);
++  return NS_OK;
  }
  
  NS_IMETHODIMP
@@ -228,7 +229,7 @@ diff --git a/layout/style/BindingStyleRule.h b/layout/style/BindingStyleRule.h
    // really need to do anything in this method.
    virtual bool IsCCLeaf() const override MOZ_MUST_OVERRIDE = 0;
  
-+  virtual nsresult GetSelectorCount(uint32_t *aCount) = 0;
++  virtual uint32_t GetSelectorCount() = 0;
 +  virtual nsresult GetSelectorText(uint32_t aSelectorIndex, nsAString& aText) = 0;
 +  virtual nsresult GetSpecificity(uint32_t aSelectorIndex,
 +                                  uint64_t* aSpecificity) = 0;
@@ -257,10 +258,10 @@ diff --git a/layout/style/ServoStyleRule.cpp b/layout/style/ServoStyleRule.cpp
    return NS_OK;
  }
  
-+nsresult
-+ServoStyleRule::GetSelectorCount(uint32_t *aCount)
++uint32_t
++ServoStyleRule::GetSelectorCount()
 +{
-+  return NS_OK;
++  return 0;
 +}
 +
 +nsresult
@@ -288,33 +289,42 @@ diff --git a/layout/style/ServoStyleRule.cpp b/layout/style/ServoStyleRule.cpp
 diff --git a/layout/style/ServoStyleRule.h b/layout/style/ServoStyleRule.h
 --- a/layout/style/ServoStyleRule.h
 +++ b/layout/style/ServoStyleRule.h
-@@ -57,16 +57,26 @@ public:
+@@ -54,23 +54,33 @@ class ServoStyleRule final : public Bind
+ {
+ public:
+   ServoStyleRule(already_AddRefed<RawServoStyleRule> aRawRule,
                   uint32_t aLine, uint32_t aColumn);
  
    NS_DECL_ISUPPORTS_INHERITED
    NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_INHERITED(ServoStyleRule,
                                                           css::Rule)
-   virtual bool IsCCLeaf() const final MOZ_MUST_OVERRIDE;
+-  virtual bool IsCCLeaf() const final MOZ_MUST_OVERRIDE;
++  bool IsCCLeaf() const final MOZ_MUST_OVERRIDE;
    NS_DECL_NSIDOMCSSSTYLERULE
  
-+  virtual nsresult GetSelectorCount(uint32_t *aCount) override;
-+  virtual nsresult GetSelectorText(uint32_t aSelectorIndex,
-+                                   nsAString& aText) override;
-+  virtual nsresult GetSpecificity(uint32_t aSelectorIndex,
-+                                  uint64_t* aSpecificity) override;
-+  virtual nsresult SelectorMatchesElement(dom::Element* aElement,
-+                                          uint32_t aSelectorIndex,
-+                                          const nsAString& aPseudo,
-+                                          bool* aMatches) override;
++  uint32_t GetSelectorCount() override;
++  nsresult GetSelectorText(uint32_t aSelectorIndex,
++                           nsAString& aText) override;
++  nsresult GetSpecificity(uint32_t aSelectorIndex,
++                          uint64_t* aSpecificity) override;
++  nsresult SelectorMatchesElement(dom::Element* aElement,
++                                  uint32_t aSelectorIndex,
++                                  const nsAString& aPseudo,
++                                  bool* aMatches) override;
 +
    // WebIDL interface
    uint16_t Type() const final;
    void GetCssTextImpl(nsAString& aCssText) const final;
-   virtual nsICSSDeclaration* Style() final;
+-  virtual nsICSSDeclaration* Style() final;
++  nsICSSDeclaration* Style() final;
  
    RawServoStyleRule* Raw() const { return mRawRule; }
  
    // Methods of mozilla::css::Rule
+   int32_t GetType() const final { return css::Rule::STYLE_RULE; }
+   using Rule::GetType;
+   already_AddRefed<Rule> Clone() const final;
+   size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const final;
 diff --git a/layout/style/StyleRule.cpp b/layout/style/StyleRule.cpp
 --- a/layout/style/StyleRule.cpp
 +++ b/layout/style/StyleRule.cpp
@@ -548,7 +558,7 @@ diff --git a/layout/style/StyleRule.cpp b/layout/style/StyleRule.cpp
  
  StyleRule::StyleRule(nsCSSSelectorList* aSelector,
                       Declaration* aDeclaration,
-@@ -1402,10 +1403,114 @@ StyleRule::SizeOfIncludingThis(mozilla::
+@@ -1402,10 +1403,112 @@ StyleRule::SizeOfIncludingThis(mozilla::
  
    // Measurement of the following members may be added later if DMD finds it is
    // worthwhile:
@@ -573,16 +583,14 @@ diff --git a/layout/style/StyleRule.cpp b/layout/style/StyleRule.cpp
 +  return nullptr;
 +}
 +
-+nsresult
-+StyleRule::GetSelectorCount(uint32_t* aCount)
++uint32_t
++StyleRule::GetSelectorCount()
 +{
 +  uint32_t count = 0;
 +  for (nsCSSSelectorList* sel = mSelector; sel; sel = sel->mNext) {
 +    ++count;
 +  }
-+  *aCount = count;
-+
-+  return NS_OK;
++  return count;
 +}
 +
 +nsresult
@@ -755,11 +763,17 @@ diff --git a/layout/style/StyleRule.h b/layout/style/StyleRule.h
  };
  
  // 464bab7a-2fce-4f30-ab44-b7a5f3aae57d
-@@ -326,17 +331,27 @@ public:
+@@ -321,59 +326,72 @@ class StyleRule final : public BindingSt
+ private:
+   // for |Clone|
+   StyleRule(const StyleRule& aCopy);
+ public:
+   NS_DECLARE_STATIC_IID_ACCESSOR(NS_CSS_STYLE_RULE_IMPL_CID)
  
    NS_DECL_ISUPPORTS_INHERITED
    NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_INHERITED(StyleRule, Rule)
-   virtual bool IsCCLeaf() const override;
+-  virtual bool IsCCLeaf() const override;
++  bool IsCCLeaf() const override;
  
    NS_DECL_NSIDOMCSSSTYLERULE
  
@@ -767,24 +781,49 @@ diff --git a/layout/style/StyleRule.h b/layout/style/StyleRule.h
 -  NS_IMETHOD GetCSSStyleRule(StyleRule **aResult) override;
 +  NS_IMETHOD GetCSSStyleRule(BindingStyleRule **aResult) override;
 +
-+  virtual nsresult GetSelectorCount(uint32_t* aCount) override;
-+  virtual nsresult GetSelectorText(uint32_t aSelectorIndex,
++  uint32_t GetSelectorCount() override;
++  nsresult GetSelectorText(uint32_t aSelectorIndex,
 +                                   nsAString& aText) override;
-+  virtual nsresult GetSpecificity(uint32_t aSelectorIndex,
-+                                  uint64_t* aSpecificity) override;
-+  virtual nsresult SelectorMatchesElement(dom::Element* aElement,
-+                                          uint32_t aSelectorIndex,
-+                                          const nsAString& aPseudo,
-+                                          bool* aMatches) override;
++  nsresult GetSpecificity(uint32_t aSelectorIndex,
++                          uint64_t* aSpecificity) override;
++  nsresult SelectorMatchesElement(dom::Element* aElement,
++                                  uint32_t aSelectorIndex,
++                                  const nsAString& aPseudo,
++                                  bool* aMatches) override;
  
    // WebIDL interface
    uint16_t Type() const override;
    void GetCssTextImpl(nsAString& aCssText) const override;
-   virtual nsICSSDeclaration* Style() override;
+-  virtual nsICSSDeclaration* Style() override;
++  nsICSSDeclaration* Style() override;
  
    // null for style attribute
    nsCSSSelectorList* Selector() { return mSelector; }
-@@ -364,16 +379,19 @@ public:
+ 
+   Declaration* GetDeclaration() const { return mDeclaration; }
+ 
+   void SetDeclaration(Declaration* aDecl);
+ 
+-  virtual int32_t GetType() const override;
++  int32_t GetType() const override;
+   using Rule::GetType;
+ 
+   CSSStyleSheet* GetStyleSheet() const
+   {
+     StyleSheet* sheet = Rule::GetStyleSheet();
+     return sheet ? sheet->AsGecko() : nullptr;
+   }
+ 
+-  virtual already_AddRefed<Rule> Clone() const override;
++  already_AddRefed<Rule> Clone() const override;
+ 
+ #ifdef DEBUG
+-  virtual void List(FILE* out = stdout, int32_t aIndent = 0) const override;
++  void List(FILE* out = stdout, int32_t aIndent = 0) const override;
+ #endif
+ 
+-  virtual size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const override;
++  size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const override;
  
  private:
    ~StyleRule();
