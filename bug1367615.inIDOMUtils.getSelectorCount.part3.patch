@@ -87,7 +87,7 @@ diff --git a/servo/components/selectors/parser.rs b/servo/components/selectors/p
 +
 +    pub fn to_css_from_index<W>(&self, index: usize, dest: &mut W)
 +        -> fmt::Result where W: fmt::Write {
-+        let mut iter = self.0[index..].iter();
++        let mut iter = self.0.iter().skip(index);
 +        let first = iter.next()
 +            .expect("Empty SelectorList, should contain at least one selector");
 +        first.to_css(dest)?;
@@ -105,6 +105,33 @@ diff --git a/servo/components/selectors/parser.rs b/servo/components/selectors/p
  /// The cores parts of a selector used for matching. This exists to make that
  /// information accessibly separately from the specificity and pseudo-element
  /// information that lives on |Selector| proper. We may want to refactor things
+@@ -657,25 +670,17 @@ impl<Impl: SelectorImpl> Debug for AttrS
+     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result { self.to_css(f) }
+ }
+ impl<Impl: SelectorImpl> Debug for LocalName<Impl> {
+     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result { self.to_css(f) }
+ }
+ 
+ impl<Impl: SelectorImpl> ToCss for SelectorList<Impl> {
+     fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
+-        let mut iter = self.0.iter();
+-        let first = iter.next()
+-            .expect("Empty SelectorList, should contain at least one selector");
+-        first.to_css(dest)?;
+-        for selector in iter {
+-            dest.write_str(", ")?;
+-            selector.to_css(dest)?;
+-        }
+-        Ok(())
++        self.to_css_from_index(0 /* index */, dest)
+     }
+ }
+ 
+ impl<Impl: SelectorImpl> ToCss for Selector<Impl> {
+     fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
+         self.inner.complex.to_css(dest)
+     }
+ }
 diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 --- a/servo/ports/geckolib/glue.rs
 +++ b/servo/ports/geckolib/glue.rs
