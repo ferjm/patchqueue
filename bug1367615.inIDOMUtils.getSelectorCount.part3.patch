@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  d1bdbfa7f0702c05d9144cc05275655f5933351f
+# Parent  c86a402b8dd0ec63176e905bc73804957adbdd6d
 Bug 1367615 - Part 3: Implement ServoStyleRule::GetSelectorCount and GetSelectorText. r?emilio
 
 diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
@@ -31,17 +31,20 @@ diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
 diff --git a/layout/style/ServoStyleRule.cpp b/layout/style/ServoStyleRule.cpp
 --- a/layout/style/ServoStyleRule.cpp
 +++ b/layout/style/ServoStyleRule.cpp
-@@ -249,33 +249,37 @@ ServoStyleRule::GetStyle(nsIDOMCSSStyleD
+@@ -248,33 +248,39 @@ ServoStyleRule::GetStyle(nsIDOMCSSStyleD
  {
    *aStyle = do_AddRef(&mDecls).take();
    return NS_OK;
  }
  
- nsresult
- ServoStyleRule::GetSelectorCount(uint32_t *aCount)
+ uint32_t
+ ServoStyleRule::GetSelectorCount()
  {
-+  Servo_StyleRule_GetSelectorCount(mRawRule, aCount);
-   return NS_OK;
+-  return 0;
++  uint32_t aCount;
++  Servo_StyleRule_GetSelectorCount(mRawRule, &aCount);
++
++  return aCount;
  }
  
  nsresult
@@ -54,7 +57,7 @@ diff --git a/layout/style/ServoStyleRule.cpp b/layout/style/ServoStyleRule.cpp
  nsresult
  ServoStyleRule::GetSpecificity(uint32_t aSelectorIndex, uint64_t* aSpecificity)
  {
-+  // TODO 1370501
++  // TODO Bug 1370501
    return NS_OK;
  }
  
