@@ -75,7 +75,7 @@ diff --git a/layout/style/ServoStyleRule.cpp b/layout/style/ServoStyleRule.cpp
 diff --git a/servo/components/selectors/parser.rs b/servo/components/selectors/parser.rs
 --- a/servo/components/selectors/parser.rs
 +++ b/servo/components/selectors/parser.rs
-@@ -162,16 +162,29 @@ impl<Impl: SelectorImpl> SelectorList<Im
+@@ -162,16 +162,33 @@ impl<Impl: SelectorImpl> SelectorList<Im
          input.parse_comma_separated(|input| parse_selector(parser, input).map(SelectorAndHashes::new))
               .map(SelectorList)
      }
@@ -85,15 +85,19 @@ diff --git a/servo/components/selectors/parser.rs b/servo/components/selectors/p
          SelectorList(v.into_iter().map(SelectorAndHashes::new).collect())
      }
 +
-+    pub fn to_css_from_index<W>(&self, index: usize, dest: &mut W)
++    pub fn to_css_from_index<W>(&self, from_index: usize, dest: &mut W)
 +        -> fmt::Result where W: fmt::Write {
-+        let mut iter = self.0.iter().skip(index);
-+        let first = iter.next()
-+            .expect("Empty SelectorList, should contain at least one selector");
-+        first.to_css(dest)?;
-+        for selector in iter {
++        let mut iter = self.0.iter().skip(from_index);
++
++        let first = match iter.next() {
++            Some(f) => f,
++            None => return Ok(()),
++        };
++
++        first.selector.to_css(dest)?;
++        for selector_and_hashes in iter {
 +            dest.write_str(", ")?;
-+            selector.to_css(dest)?;
++            selector_and_hashes.selector.to_css(dest)?;
 +        }
 +        Ok(())
 +    }
@@ -105,7 +109,7 @@ diff --git a/servo/components/selectors/parser.rs b/servo/components/selectors/p
  const NUM_ANCESTOR_HASHES: usize = 4;
  
  /// Ancestor hashes for the bloom filter. We precompute these and store them
-@@ -633,25 +646,18 @@ impl<Impl: SelectorImpl> Debug for AttrS
+@@ -633,25 +650,17 @@ impl<Impl: SelectorImpl> Debug for AttrS
      fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result { self.to_css(f) }
  }
  impl<Impl: SelectorImpl> Debug for LocalName<Impl> {
@@ -123,8 +127,7 @@ diff --git a/servo/components/selectors/parser.rs b/servo/components/selectors/p
 -            selector_and_hashes.selector.to_css(dest)?;
 -        }
 -        Ok(())
-+
-+        self.to_css_from_index(0 /* index */, dest)
++        self.to_css_from_index(/* from_index = */ 0, dest)
      }
  }
  
