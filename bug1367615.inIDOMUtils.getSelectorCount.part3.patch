@@ -1,12 +1,12 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  c86a402b8dd0ec63176e905bc73804957adbdd6d
+# Parent  7ee970d97c68f66cfe6643125a1fc74a60b66b4e
 Bug 1367615 - Part 3: Implement ServoStyleRule::GetSelectorCount and GetSelectorText. r?emilio
 
 diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
 --- a/layout/style/ServoBindingList.h
 +++ b/layout/style/ServoBindingList.h
-@@ -139,16 +139,21 @@ SERVO_BINDING_FUNC(Servo_CssRules_GetCou
+@@ -142,16 +142,21 @@ SERVO_BINDING_FUNC(Servo_CssRules_GetCou
                     ServoCssRulesBorrowed rules, uint32_t index)
  SERVO_BINDING_FUNC(Servo_StyleRule_GetStyle, RawServoDeclarationBlockStrong,
                     RawServoStyleRuleBorrowed rule)
@@ -75,14 +75,14 @@ diff --git a/layout/style/ServoStyleRule.cpp b/layout/style/ServoStyleRule.cpp
 diff --git a/servo/components/selectors/parser.rs b/servo/components/selectors/parser.rs
 --- a/servo/components/selectors/parser.rs
 +++ b/servo/components/selectors/parser.rs
-@@ -137,16 +137,29 @@ impl<Impl: SelectorImpl> SelectorList<Im
-     /// https://drafts.csswg.org/selectors/#grouping
-     ///
-     /// Return the Selectors or Err if there is an invalid selector.
-     pub fn parse<P>(parser: &P, input: &mut CssParser) -> Result<Self, ()>
-     where P: Parser<Impl=Impl> {
-         input.parse_comma_separated(|input| parse_selector(parser, input))
+@@ -162,16 +162,29 @@ impl<Impl: SelectorImpl> SelectorList<Im
+         input.parse_comma_separated(|input| parse_selector(parser, input).map(SelectorAndHashes::new))
               .map(SelectorList)
+     }
+ 
+     /// Creates a SelectorList from a Vec of selectors. Used in tests.
+     pub fn from_vec(v: Vec<Selector<Impl>>) -> Self {
+         SelectorList(v.into_iter().map(SelectorAndHashes::new).collect())
      }
 +
 +    pub fn to_css_from_index<W>(&self, index: usize, dest: &mut W)
@@ -99,13 +99,13 @@ diff --git a/servo/components/selectors/parser.rs b/servo/components/selectors/p
 +    }
  }
  
- /// Copied from Gecko, where it was noted to be unmeasured.
+ /// Copied from Gecko, who copied it from WebKit. Note that increasing the
+ /// number of hashes here will adversely affect the cache hit when fast-
+ /// rejecting long lists of Rules with inline hashes.
  const NUM_ANCESTOR_HASHES: usize = 4;
  
- /// The cores parts of a selector used for matching. This exists to make that
- /// information accessibly separately from the specificity and pseudo-element
- /// information that lives on |Selector| proper. We may want to refactor things
-@@ -657,25 +670,17 @@ impl<Impl: SelectorImpl> Debug for AttrS
+ /// Ancestor hashes for the bloom filter. We precompute these and store them
+@@ -633,25 +646,18 @@ impl<Impl: SelectorImpl> Debug for AttrS
      fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result { self.to_css(f) }
  }
  impl<Impl: SelectorImpl> Debug for LocalName<Impl> {
@@ -117,25 +117,26 @@ diff --git a/servo/components/selectors/parser.rs b/servo/components/selectors/p
 -        let mut iter = self.0.iter();
 -        let first = iter.next()
 -            .expect("Empty SelectorList, should contain at least one selector");
--        first.to_css(dest)?;
--        for selector in iter {
+-        first.selector.to_css(dest)?;
+-        for selector_and_hashes in iter {
 -            dest.write_str(", ")?;
--            selector.to_css(dest)?;
+-            selector_and_hashes.selector.to_css(dest)?;
 -        }
 -        Ok(())
++
 +        self.to_css_from_index(0 /* index */, dest)
      }
  }
  
  impl<Impl: SelectorImpl> ToCss for Selector<Impl> {
      fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
-         self.inner.complex.to_css(dest)
-     }
- }
+        for item in self.iter_raw_rev() {
+            item.to_css(dest)?;
+        }
 diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 --- a/servo/ports/geckolib/glue.rs
 +++ b/servo/ports/geckolib/glue.rs
-@@ -1080,16 +1080,35 @@ pub extern "C" fn Servo_StyleRule_SetSty
+@@ -1150,16 +1150,35 @@ pub extern "C" fn Servo_StyleRule_SetSty
  #[no_mangle]
  pub extern "C" fn Servo_StyleRule_GetSelectorText(rule: RawServoStyleRuleBorrowed, result: *mut nsAString) {
      read_locked_arc(rule, |rule: &StyleRule| {
