@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  6491fb29e7fcc9e02cc179ae2856f426a3552385
+# Parent  9e6aefa3bddbaca66d8768e25e2d7b2349f4ec26
 Bug 1370501 - stylo: Implement ServoStyleRule::GetSpecificity. r?emilio
 
 diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
@@ -12,10 +12,10 @@ diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
                     RawServoDeclarationBlockBorrowed declarations)
  SERVO_BINDING_FUNC(Servo_StyleRule_GetSelectorText, void,
                     RawServoStyleRuleBorrowed rule, nsAString* result)
- SERVO_BINDING_FUNC(Servo_StyleRule_GetSelectorTextFromIndex, void,
+ SERVO_BINDING_FUNC(Servo_StyleRule_GetSelectorTextAtIndex, void,
                     RawServoStyleRuleBorrowed rule, uint32_t index,
                     nsAString* result)
-+SERVO_BINDING_FUNC(Servo_StyleRule_GetSpecificityFromIndex, void,
++SERVO_BINDING_FUNC(Servo_StyleRule_GetSpecificityAtIndex, void,
 +                   RawServoStyleRuleBorrowed rule, uint32_t index,
 +                   uint64_t* specificity)
  SERVO_BINDING_FUNC(Servo_StyleRule_GetSelectorCount, void,
@@ -31,7 +31,7 @@ diff --git a/layout/style/ServoStyleRule.cpp b/layout/style/ServoStyleRule.cpp
 +++ b/layout/style/ServoStyleRule.cpp
 @@ -264,17 +264,17 @@ ServoStyleRule::GetSelectorText(uint32_t
  {
-   Servo_StyleRule_GetSelectorTextFromIndex(mRawRule, aSelectorIndex, &aText);
+   Servo_StyleRule_GetSelectorTextAtIndex(mRawRule, aSelectorIndex, &aText);
    return NS_OK;
  }
  
@@ -39,7 +39,7 @@ diff --git a/layout/style/ServoStyleRule.cpp b/layout/style/ServoStyleRule.cpp
  ServoStyleRule::GetSpecificity(uint32_t aSelectorIndex, uint64_t* aSpecificity)
  {
 -  // TODO Bug 1370501
-+  Servo_StyleRule_GetSpecificityFromIndex(mRawRule, aSelectorIndex, aSpecificity);
++  Servo_StyleRule_GetSpecificityAtIndex(mRawRule, aSelectorIndex, aSpecificity);
    return NS_OK;
  }
  
@@ -51,24 +51,25 @@ diff --git a/layout/style/ServoStyleRule.cpp b/layout/style/ServoStyleRule.cpp
 diff --git a/servo/components/selectors/parser.rs b/servo/components/selectors/parser.rs
 --- a/servo/components/selectors/parser.rs
 +++ b/servo/components/selectors/parser.rs
-@@ -179,16 +179,25 @@ impl<Impl: SelectorImpl> SelectorList<Im
- 
-         first.selector.to_css(dest)?;
-         for selector_and_hashes in iter {
-             dest.write_str(", ")?;
-             selector_and_hashes.selector.to_css(dest)?;
-         }
-         Ok(())
+@@ -168,17 +168,24 @@ impl<Impl: SelectorImpl> SelectorList<Im
+         SelectorList(v.into_iter().map(SelectorAndHashes::new).collect())
      }
-+
-+    pub fn specificity(&self, from_index: usize) -> u32 {
-+        let mut result = 0;
-+        let iter = self.0.iter().skip(from_index);
-+        for selector_and_hashes in iter {
-+            result += selector_and_hashes.selector.specificity();
-+        }
-+        result
+ 
+     pub fn to_css_at_index<W>(&self, index: usize, dest: &mut W)
+         -> fmt::Result where W: fmt::Write {
+         if index >= self.0.len() {
+             return Ok(());
+         }
+-        self.0[index].to_css()
++        self.0[index].selector.to_css(dest)
 +    }
++
++    pub fn specificity(&self, index: usize) -> u32 {
++        if index >= self.0.len() {
++            return 0;
++        }
++        self.0[index].selector.specificity()
+     }
  }
  
  /// Copied from Gecko, who copied it from WebKit. Note that increasing the
@@ -76,31 +77,10 @@ diff --git a/servo/components/selectors/parser.rs b/servo/components/selectors/p
  /// rejecting long lists of Rules with inline hashes.
  const NUM_ANCESTOR_HASHES: usize = 4;
  
- /// Ancestor hashes for the bloom filter. We precompute these and store them
 diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 --- a/servo/ports/geckolib/glue.rs
 +++ b/servo/ports/geckolib/glue.rs
-@@ -1153,34 +1153,43 @@ pub extern "C" fn Servo_StyleRule_SetSty
- pub extern "C" fn Servo_StyleRule_GetSelectorText(rule: RawServoStyleRuleBorrowed, result: *mut nsAString) {
-     read_locked_arc(rule, |rule: &StyleRule| {
-         rule.selectors.to_css(unsafe { result.as_mut().unwrap() }).unwrap();
-     })
- }
- 
- #[no_mangle]
- pub extern "C" fn Servo_StyleRule_GetSelectorTextFromIndex(rule: RawServoStyleRuleBorrowed,
--                                                           aSelectorIndex: u32,
-+                                                           from_index: u32,
-                                                            result: *mut nsAString) {
-     read_locked_arc(rule, |rule: &StyleRule| {
-         rule.selectors.to_css_from_index(
--            aSelectorIndex as usize,
-+            from_index as usize,
-             unsafe { result.as_mut().unwrap() }
-         ).unwrap();
-     })
- }
- 
+@@ -1171,16 +1171,25 @@ pub extern "C" fn Servo_StyleRule_GetSel
  #[no_mangle]
  pub extern "C" fn Servo_StyleRule_GetSelectorCount(rule: RawServoStyleRuleBorrowed, count: *mut u32) {
      read_locked_arc(rule, |rule: &StyleRule| {
@@ -109,11 +89,11 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
  }
  
  #[no_mangle]
-+pub extern "C" fn Servo_StyleRule_GetSpecificityFromIndex(rule: RawServoStyleRuleBorrowed,
-+                                                 from_index: u32,
-+                                                 specificity: *mut u64) {
++pub extern "C" fn Servo_StyleRule_GetSpecificityAtIndex(rule: RawServoStyleRuleBorrowed,
++                                                        index: u32,
++                                                        specificity: *mut u64) {
 +    read_locked_arc(rule, |rule: &StyleRule| {
-+        *unsafe { specificity.as_mut().unwrap() } = rule.selectors.specificity(from_index as usize) as u64;
++        *unsafe { specificity.as_mut().unwrap() } = rule.selectors.specificity(index as usize) as u64;
 +    })
 +}
 +
