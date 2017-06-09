@@ -77,25 +77,6 @@ diff --git a/servo/components/selectors/parser.rs b/servo/components/selectors/p
  const NUM_ANCESTOR_HASHES: usize = 4;
  
  /// Ancestor hashes for the bloom filter. We precompute these and store them
-@@ -873,17 +882,17 @@ impl From<u32> for Specificity {
- impl From<Specificity> for u32 {
-     fn from(specificity: Specificity) -> u32 {
-         cmp::min(specificity.id_selectors, MAX_10BIT) << 20
-         | cmp::min(specificity.class_like_selectors, MAX_10BIT) << 10
-         | cmp::min(specificity.element_selectors, MAX_10BIT)
-     }
- }
- 
--fn specificity<Impl>(iter: SelectorIter<Impl>) -> u32
-+pub fn specificity<Impl>(iter: SelectorIter<Impl>) -> u32
-     where Impl: SelectorImpl
- {
-     complex_selector_specificity(iter).into()
- }
- 
- fn complex_selector_specificity<Impl>(mut iter: SelectorIter<Impl>)
-                                       -> Specificity
-     where Impl: SelectorImpl
 diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 --- a/servo/ports/geckolib/glue.rs
 +++ b/servo/ports/geckolib/glue.rs
