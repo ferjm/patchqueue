@@ -50,7 +50,8 @@ diff --git a/layout/style/ServoStyleRule.cpp b/layout/style/ServoStyleRule.cpp
 diff --git a/servo/components/selectors/parser.rs b/servo/components/selectors/parser.rs
 --- a/servo/components/selectors/parser.rs
 +++ b/servo/components/selectors/parser.rs
-@@ -163,31 +163,22 @@ impl<Impl: SelectorImpl> SelectorList<Im
+@@ -162,33 +162,16 @@ impl<Impl: SelectorImpl> SelectorList<Im
+         input.parse_comma_separated(|input| parse_selector(parser, input).map(SelectorAndHashes::new))
               .map(SelectorList)
      }
  
@@ -58,10 +59,9 @@ diff --git a/servo/components/selectors/parser.rs b/servo/components/selectors/p
      pub fn from_vec(v: Vec<Selector<Impl>>) -> Self {
          SelectorList(v.into_iter().map(SelectorAndHashes::new).collect())
      }
- 
+-
 -    pub fn to_css_from_index<W>(&self, from_index: usize, dest: &mut W)
-+    pub fn to_css_at_index<W>(&self, index: usize, dest: &mut W)
-         -> fmt::Result where W: fmt::Write {
+-        -> fmt::Result where W: fmt::Write {
 -        let mut iter = self.0.iter().skip(from_index);
 -
 -        let first = match iter.next() {
@@ -73,12 +73,9 @@ diff --git a/servo/components/selectors/parser.rs b/servo/components/selectors/p
 -        for selector_and_hashes in iter {
 -            dest.write_str(", ")?;
 -            selector_and_hashes.selector.to_css(dest)?;
-+        if index >= self.0.len() {
-+            return Ok(());
-         }
+-        }
 -        Ok(())
-+        self.0[index].to_css()
-     }
+-    }
  }
  
  /// Copied from Gecko, who copied it from WebKit. Note that increasing the
@@ -86,7 +83,8 @@ diff --git a/servo/components/selectors/parser.rs b/servo/components/selectors/p
  /// rejecting long lists of Rules with inline hashes.
  const NUM_ANCESTOR_HASHES: usize = 4;
  
-@@ -660,17 +651,25 @@ impl<Impl: SelectorImpl> Debug for AttrS
+ /// Ancestor hashes for the bloom filter. We precompute these and store them
+@@ -660,17 +643,25 @@ impl<Impl: SelectorImpl> Debug for AttrS
      fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result { self.to_css(f) }
  }
  impl<Impl: SelectorImpl> Debug for LocalName<Impl> {
@@ -116,7 +114,7 @@ diff --git a/servo/components/selectors/parser.rs b/servo/components/selectors/p
 diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 --- a/servo/ports/geckolib/glue.rs
 +++ b/servo/ports/geckolib/glue.rs
-@@ -1152,22 +1152,22 @@ pub extern "C" fn Servo_StyleRule_SetSty
+@@ -1152,24 +1152,25 @@ pub extern "C" fn Servo_StyleRule_SetSty
  #[no_mangle]
  pub extern "C" fn Servo_StyleRule_GetSelectorText(rule: RawServoStyleRuleBorrowed, result: *mut nsAString) {
      read_locked_arc(rule, |rule: &StyleRule| {
@@ -134,13 +132,18 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
      read_locked_arc(rule, |rule: &StyleRule| {
 -        rule.selectors.to_css_from_index(
 -            aSelectorIndex as usize,
-+        rule.selectors.to_css_at_index(
-+            index as usize,
-             unsafe { result.as_mut().unwrap() }
-         ).unwrap();
+-            unsafe { result.as_mut().unwrap() }
+-        ).unwrap();
++        let index = index as usize;
++        if index >= rule.selectors.0.len() {
++            return;
++        }
++        rule.selectors.0[index].selector.to_css(unsafe { result.as_mut().unwrap() }).unwrap();
      })
  }
  
  #[no_mangle]
  pub extern "C" fn Servo_StyleRule_GetSelectorCount(rule: RawServoStyleRuleBorrowed, count: *mut u32) {
      read_locked_arc(rule, |rule: &StyleRule| {
+         *unsafe { count.as_mut().unwrap() } = rule.selectors.0.len() as u32;
+     })
