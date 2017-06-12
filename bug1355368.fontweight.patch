@@ -1,0 +1,5 @@
+# HG changeset patch
+# User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
+# Parent  27cad9749cddf68e11fdd4e5d73dad84a8f8cf23
+Bug 1355368 - stylo: font-weight descriptor in @font-face rule should preserve keyword values. r?xidorn
+

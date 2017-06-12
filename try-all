@@ -1,5 +1,0 @@
-# HG changeset patch
-# User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  85f20acc0761e7e99f65f967c8788fd5dd5d477d
-try: -b do -p all -u all -t none
-
