@@ -1,8 +1,5 @@
 bug1370501.servostylerule.getspecificity.0.patch
 bug1370501.servostylerule.getspecificity.patch
-bug1367615.inIDOMUtils.getSelectorCount.part1.patch
-bug1367615.inIDOMUtils.getSelectorCount.part2.patch
-bug1367615.inIDOMUtils.getSelectorCount.part3.patch
 devtools.debug.patch
 bug1365674.test_simulate_compute_values_failure.patch
 #fb3224375a1ffe4ef8788a25e6b864833a46fe86
