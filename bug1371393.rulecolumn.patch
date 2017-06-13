@@ -1,7 +1,7 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
 # Parent  a8f8e440d627d686fa8898483aa9c5da928a8fa4
-Bug 1371393 - Stylo: inDOMUtils::GetRuleColumn reports differently than Gecko
+Bug 1371393 - Stylo: set location for NestedRuleParser during prelude parsing. r?SimonSapin
 
 diff --git a/servo/components/selectors/matching.rs b/servo/components/selectors/matching.rs
 --- a/servo/components/selectors/matching.rs
