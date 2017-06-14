@@ -3,6 +3,76 @@
 # Parent  b266a8d8fd595b84a7d6218d7b8c6b7af0b5027c
 Bug 1355368 - stylo: font-weight descriptor in @font-face rule should preserve keyword values. r?xidorn
 
+diff --git a/layout/style/Declaration.cpp b/layout/style/Declaration.cpp
+--- a/layout/style/Declaration.cpp
++++ b/layout/style/Declaration.cpp
+@@ -169,25 +169,27 @@ DispatchPropertyOperation(const nsAStrin
+     }
+   }
+ }
+ 
+ void
+ Declaration::GetPropertyValue(const nsAString& aProperty,
+                               nsAString& aValue) const
+ {
++  printf_stderr("Declaration::GetPropertyValue %s\n", NS_ConvertUTF16toUTF8(aProperty).get());
+   DispatchPropertyOperation(aProperty,
+     [&](nsCSSPropertyID propID) { GetPropertyValueByID(propID, aValue); },
+     [&](const nsAString& name) { GetVariableValue(name, aValue); });
+ }
+ 
+ void
+ Declaration::GetPropertyValueByID(nsCSSPropertyID aPropID,
+                                   nsAString& aValue) const
+ {
++  printf_stderr("Declaration::GetPropertyValueByID %d %d\n", aPropID, eCSSProperty_font_weight);
+   GetPropertyValueInternal(aPropID, aValue, nsCSSValue::eNormalized);
+ }
+ 
+ void
+ Declaration::GetAuthoredPropertyValue(const nsAString& aProperty,
+                                       nsAString& aValue) const
+ {
+   DispatchPropertyOperation(aProperty,
+@@ -539,16 +541,17 @@ Declaration::GetImageLayerPositionValue(
+   }
+ }
+ 
+ void
+ Declaration::GetPropertyValueInternal(
+     nsCSSPropertyID aProperty, nsAString& aValue,
+     nsCSSValue::Serialization aSerialization, bool* aIsTokenStream) const
+ {
++  printf_stderr("Declaration::GetPropertyValueInternal %d %d\n", aProperty, eCSSProperty_font_weight);
+   aValue.Truncate(0);
+   if (aIsTokenStream) {
+     *aIsTokenStream = false;
+   }
+ 
+   // simple properties are easy.
+   if (!nsCSSProps::IsShorthand(aProperty)) {
+     AppendValueToString(aProperty, aValue, aSerialization, aIsTokenStream);
+diff --git a/layout/style/ServoDeclarationBlock.cpp b/layout/style/ServoDeclarationBlock.cpp
+--- a/layout/style/ServoDeclarationBlock.cpp
++++ b/layout/style/ServoDeclarationBlock.cpp
+@@ -23,16 +23,17 @@ ServoDeclarationBlock::FromCssText(const
+   RefPtr<ServoDeclarationBlock> decl = new ServoDeclarationBlock(raw.forget());
+   return decl.forget();
+ }
+ 
+ void
+ ServoDeclarationBlock::GetPropertyValue(const nsAString& aProperty,
+                                         nsAString& aValue) const
+ {
++  printf_stderr("ServoDeclarationBlock::GetPropertyValue %s\n", NS_ConvertUTF16toUTF8(aProperty).get());
+   NS_ConvertUTF16toUTF8 property(aProperty);
+   Servo_DeclarationBlock_GetPropertyValue(mRaw, &property, &aValue);
+ }
+ 
+ void
+ ServoDeclarationBlock::GetPropertyValueByID(nsCSSPropertyID aPropID,
+                                             nsAString& aValue) const
+ {
 diff --git a/layout/style/nsComputedDOMStyle.cpp b/layout/style/nsComputedDOMStyle.cpp
 --- a/layout/style/nsComputedDOMStyle.cpp
 +++ b/layout/style/nsComputedDOMStyle.cpp
