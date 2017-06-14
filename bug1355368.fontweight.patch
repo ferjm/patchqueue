@@ -1,5 +1,381 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  27cad9749cddf68e11fdd4e5d73dad84a8f8cf23
+# Parent  b266a8d8fd595b84a7d6218d7b8c6b7af0b5027c
 Bug 1355368 - stylo: font-weight descriptor in @font-face rule should preserve keyword values. r?xidorn
 
+diff --git a/layout/style/nsComputedDOMStyle.cpp b/layout/style/nsComputedDOMStyle.cpp
+--- a/layout/style/nsComputedDOMStyle.cpp
++++ b/layout/style/nsComputedDOMStyle.cpp
+@@ -369,16 +369,17 @@ nsComputedDOMStyle::GetParentRule(nsIDOM
+ 
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsComputedDOMStyle::GetPropertyValue(const nsAString& aPropertyName,
+                                      nsAString& aReturn)
+ {
++  printf_stderr("nsComputedDOMStyle::GetPropertyValue %s\n", NS_ConvertUTF16toUTF8(aPropertyName).get());
+   aReturn.Truncate();
+ 
+   ErrorResult error;
+   RefPtr<CSSValue> val = GetPropertyCSSValue(aPropertyName, error);
+   if (error.Failed()) {
+     return error.StealNSResult();
+   }
+ 
+@@ -951,16 +952,17 @@ nsComputedDOMStyle::ClearCurrentStyleSou
+   if (!mResolvedStyleContext) {
+     mStyleContext = nullptr;
+   }
+ }
+ 
+ already_AddRefed<CSSValue>
+ nsComputedDOMStyle::GetPropertyCSSValue(const nsAString& aPropertyName, ErrorResult& aRv)
+ {
++  printf_stderr("nsComputedDOMStyle::GetPropertyCSSValue\n");
+   nsCSSPropertyID prop =
+     nsCSSProps::LookupProperty(aPropertyName, CSSEnabledState::eForAllContent);
+ 
+   bool needsLayoutFlush;
+   nsComputedStyleMap::Entry::ComputeMethod getter;
+ 
+   if (prop == eCSSPropertyExtra_variable) {
+     needsLayoutFlush = false;
+@@ -999,16 +1001,17 @@ nsComputedDOMStyle::GetPropertyCSSValue(
+   UpdateCurrentStyleSources(needsLayoutFlush);
+   if (!mStyleContext) {
+     aRv.Throw(NS_ERROR_NOT_AVAILABLE);
+     return nullptr;
+   }
+ 
+   RefPtr<CSSValue> val;
+   if (prop == eCSSPropertyExtra_variable) {
++    printf_stderr("DoGetCustomProperty\n");
+     val = DoGetCustomProperty(aPropertyName);
+   } else {
+     // Call our pointer-to-member-function.
+     val = (this->*getter)();
+   }
+ 
+   ClearCurrentStyleSources();
+ 
+@@ -1787,16 +1790,17 @@ nsComputedDOMStyle::DoGetFontStyle()
+   val->SetIdent(nsCSSProps::ValueToKeywordEnum(StyleFont()->mFont.style,
+                                                nsCSSProps::kFontStyleKTable));
+   return val.forget();
+ }
+ 
+ already_AddRefed<CSSValue>
+ nsComputedDOMStyle::DoGetFontWeight()
+ {
++  printf_stderr("nsComputedDOMStyle::DoGetFontWeight\n");
+   RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
+ 
+   const nsStyleFont* font = StyleFont();
+ 
+   uint16_t weight = font->mFont.weight;
+   NS_ASSERTION(weight % 100 == 0, "unexpected value of font-weight");
+   val->SetNumber(weight);
+ 
+diff --git a/layout/style/nsDOMCSSDeclaration.cpp b/layout/style/nsDOMCSSDeclaration.cpp
+--- a/layout/style/nsDOMCSSDeclaration.cpp
++++ b/layout/style/nsDOMCSSDeclaration.cpp
+@@ -39,16 +39,17 @@ NS_INTERFACE_TABLE_HEAD(nsDOMCSSDeclarat
+                      nsIDOMCSSStyleDeclaration)
+   NS_INTERFACE_TABLE_TO_MAP_SEGUE
+ NS_INTERFACE_MAP_END
+ 
+ NS_IMETHODIMP
+ nsDOMCSSDeclaration::GetPropertyValue(const nsCSSPropertyID aPropID,
+                                       nsAString& aValue)
+ {
++  printf_stderr("nsDOMCSSDeclaration::GetPropertyValue\n");
+   NS_PRECONDITION(aPropID != eCSSProperty_UNKNOWN,
+                   "Should never pass eCSSProperty_UNKNOWN around");
+ 
+   aValue.Truncate();
+   if (DeclarationBlock* decl = GetCSSDeclaration(eOperation_Read)) {
+     decl->GetPropertyValueByID(aPropID, aValue);
+   }
+   return NS_OK;
+@@ -182,16 +183,17 @@ nsDOMCSSDeclaration::IndexedGetter(uint3
+   DeclarationBlock* decl = GetCSSDeclaration(eOperation_Read);
+   aFound = decl && decl->GetNthProperty(aIndex, aPropName);
+ }
+ 
+ NS_IMETHODIMP
+ nsDOMCSSDeclaration::GetPropertyValue(const nsAString& aPropertyName,
+                                       nsAString& aReturn)
+ {
++  printf_stderr("nsDOMCSSDeclaration::GetPropertyValue %s\n", NS_ConvertUTF16toUTF8(aPropertyName).get());
+   aReturn.Truncate();
+   if (DeclarationBlock* decl = GetCSSDeclaration(eOperation_Read)) {
+     decl->GetPropertyValue(aPropertyName, aReturn);
+   }
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+diff --git a/layout/style/nsICSSDeclaration.h b/layout/style/nsICSSDeclaration.h
+--- a/layout/style/nsICSSDeclaration.h
++++ b/layout/style/nsICSSDeclaration.h
+@@ -121,16 +121,17 @@ public:
+     Item(aIndex, static_cast<nsAString&>(aPropName));
+   }
+ 
+   // The actual implementation of the Item method and the WebIDL indexed getter
+   virtual void IndexedGetter(uint32_t aIndex, bool& aFound, nsAString& aPropName) = 0;
+ 
+   void GetPropertyValue(const nsAString& aPropName, nsString& aValue,
+                         mozilla::ErrorResult& rv) {
++    printf_stderr("nsICSSDeclaration::GetPropertyValue %s\n", NS_ConvertUTF16toUTF8(aPropName).get());
+     rv = GetPropertyValue(aPropName, aValue);
+   }
+   void GetAuthoredPropertyValue(const nsAString& aPropName, nsString& aValue,
+                                 mozilla::ErrorResult& rv) {
+     rv = GetAuthoredPropertyValue(aPropName, aValue);
+   }
+   void GetPropertyPriority(const nsAString& aPropName, nsString& aPriority) {
+     GetPropertyPriority(aPropName, static_cast<nsAString&>(aPriority));
+diff --git a/servo/components/style/font_face.rs b/servo/components/style/font_face.rs
+--- a/servo/components/style/font_face.rs
++++ b/servo/components/style/font_face.rs
+@@ -235,16 +235,17 @@ macro_rules! font_face_descriptors_commo
+                 // to initial values.
+             }
+         }
+ 
+         impl ToCssWithGuard for FontFaceRuleData {
+             // Serialization of FontFaceRule is not specced.
+             fn to_css<W>(&self, _guard: &SharedRwLockReadGuard, dest: &mut W) -> fmt::Result
+             where W: fmt::Write {
++                println!("FontFaceRuleData to_css");
+                 dest.write_str("@font-face {\n")?;
+                 $(
+                     if let Some(ref value) = self.$ident {
+                         dest.write_str(concat!("  ", $name, ": "))?;
+                         ToCss::to_css(value, dest)?;
+                         dest.write_str(";\n")?;
+                     }
+                 )*
+diff --git a/servo/components/style/properties/declaration_block.rs b/servo/components/style/properties/declaration_block.rs
+--- a/servo/components/style/properties/declaration_block.rs
++++ b/servo/components/style/properties/declaration_block.rs
+@@ -234,21 +234,23 @@ impl PropertyDeclarationBlock {
+     }
+ 
+     /// Find the value of the given property in this block and serialize it
+     ///
+     /// https://dev.w3.org/csswg/cssom/#dom-cssstyledeclaration-getpropertyvalue
+     pub fn property_value_to_css<W>(&self, property: &PropertyId, dest: &mut W) -> fmt::Result
+         where W: fmt::Write,
+     {
++        println!("property_value_to_css");
+         // Step 1.1: done when parsing a string to PropertyId
+ 
+         // Step 1.2
+-        match property.as_shorthand() {
++        match property.as_shorthand() {            
+             Ok(shorthand) => {
++                println!("as_shorthand");
+                 // Step 1.2.1
+                 let mut list = Vec::new();
+                 let mut important_count = 0;
+ 
+                 // Step 1.2.2
+                 for &longhand in shorthand.longhands() {
+                     // Step 1.2.2.1
+                     let declaration = self.get(PropertyDeclarationId::Longhand(longhand));
+@@ -276,17 +278,19 @@ impl PropertyDeclarationBlock {
+                 // so we treat this as a normal-importance property
+                 match shorthand.get_shorthand_appendable_value(list) {
+                     Some(appendable_value) =>
+                         append_declaration_value(dest, appendable_value),
+                     None => return Ok(()),
+                 }
+             }
+             Err(longhand_or_custom) => {
++                println!("longhand_or_custom");
+                 if let Some(&(ref value, _importance)) = self.get(longhand_or_custom) {
++                    println!("value {:?}", value);
+                     // Step 2
+                     value.to_css(dest)
+                 } else {
+                     // Step 3
+                     Ok(())
+                 }
+             }
+         }
+diff --git a/servo/components/style/properties/longhand/font.mako.rs b/servo/components/style/properties/longhand/font.mako.rs
+--- a/servo/components/style/properties/longhand/font.mako.rs
++++ b/servo/components/style/properties/longhand/font.mako.rs
+@@ -425,32 +425,34 @@ macro_rules! impl_gecko_keyword_from_tra
+         % for weight in range(100, 901, 100):
+             Weight${weight},
+         % endfor
+         System(SystemFont),
+     }
+ 
+     impl ToCss for SpecifiedValue {
+         fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
++            println!("FONT_WEIGHT SpecifiedValue to_css");
+             match *self {
+                 SpecifiedValue::Normal => dest.write_str("normal"),
+                 SpecifiedValue::Bold => dest.write_str("bold"),
+                 SpecifiedValue::Bolder => dest.write_str("bolder"),
+                 SpecifiedValue::Lighter => dest.write_str("lighter"),
+                 % for weight in range(100, 901, 100):
+                     SpecifiedValue::Weight${weight} => dest.write_str("${weight}"),
+                 % endfor
+                 SpecifiedValue::System(_) => Ok(())
+             }
+         }
+     }
+ 
+     /// normal | bold | bolder | lighter | 100 | 200 | 300 | 400 | 500 | 600 | 700 | 800 | 900
+     pub fn parse<'i, 't>(_context: &ParserContext, input: &mut Parser<'i, 't>)
+                          -> Result<SpecifiedValue, ParseError<'i>> {
++        println!("FONT_WEIGHT parse");
+         let result = input.try(|input| {
+             let ident = input.expect_ident().map_err(|_| ())?;
+             match_ignore_ascii_case! { &ident,
+                 "normal" => Ok(SpecifiedValue::Normal),
+                 "bold" => Ok(SpecifiedValue::Bold),
+                 "bolder" => Ok(SpecifiedValue::Bolder),
+                 "lighter" => Ok(SpecifiedValue::Lighter),
+                 _ => Err(())
+@@ -489,16 +491,17 @@ macro_rules! impl_gecko_keyword_from_tra
+                 None
+             }
+         }
+     }
+ 
+     /// Used in @font-face, where relative keywords are not allowed.
+     impl Parse for computed_value::T {
+         fn parse<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>) -> Result<Self, ParseError<'i>> {
++            println!("FONT_WEIGHT ComputedValue Parse");
+             match parse(context, input)? {
+                 % for weight in range(100, 901, 100):
+                     SpecifiedValue::Weight${weight} => Ok(computed_value::T::Weight${weight}),
+                 % endfor
+                 SpecifiedValue::Normal => Ok(computed_value::T::Weight400),
+                 SpecifiedValue::Bold => Ok(computed_value::T::Weight700),
+                 SpecifiedValue::Bolder |
+                 SpecifiedValue::Lighter => Err(StyleParseError::UnspecifiedError.into()),
+@@ -534,16 +537,17 @@ macro_rules! impl_gecko_keyword_from_tra
+                     % endfor
+                     _ => panic!("from_gecko_weight: called with invalid weight")
+                 }
+             }
+         }
+     }
+     impl ToCss for computed_value::T {
+         fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
++            println!("FONT_WEIGHT ComputedValue to_css");
+             match *self {
+                 % for weight in range(100, 901, 100):
+                     computed_value::T::Weight${weight} => dest.write_str("${weight}"),
+                 % endfor
+             }
+         }
+     }
+     #[inline]
+@@ -556,16 +560,17 @@ macro_rules! impl_gecko_keyword_from_tra
+         SpecifiedValue::Normal
+     }
+ 
+     impl ToComputedValue for SpecifiedValue {
+         type ComputedValue = computed_value::T;
+ 
+         #[inline]
+         fn to_computed_value(&self, context: &Context) -> computed_value::T {
++            println!("FONT_WEIGHT SpecifiedValue to_computed_value");
+             match *self {
+                 % for weight in range(100, 901, 100):
+                     SpecifiedValue::Weight${weight} => computed_value::T::Weight${weight},
+                 % endfor
+                 SpecifiedValue::Normal => computed_value::T::Weight400,
+                 SpecifiedValue::Bold => computed_value::T::Weight700,
+                 SpecifiedValue::Bolder => match context.inherited_style().get_font().clone_font_weight() {
+                     computed_value::T::Weight100 => computed_value::T::Weight400,
+@@ -593,17 +598,18 @@ macro_rules! impl_gecko_keyword_from_tra
+                     <%self:nongecko_unreachable>
+                         context.cached_system_font.as_ref().unwrap().font_weight.clone()
+                     </%self:nongecko_unreachable>
+                 }
+             }
+         }
+ 
+         #[inline]
+-        fn from_computed_value(computed: &computed_value::T) -> Self {
++        fn from_computed_value(computed: &computed_value::T) -> Self { 
++            println!("FONT_WEIGHT from_computed_value");
+             match *computed {
+                 % for weight in range(100, 901, 100):
+                     computed_value::T::Weight${weight} => SpecifiedValue::Weight${weight},
+                 % endfor
+             }
+         }
+     }
+ </%helpers:longhand>
+diff --git a/servo/components/style/properties/shorthand/font.mako.rs b/servo/components/style/properties/shorthand/font.mako.rs
+--- a/servo/components/style/properties/shorthand/font.mako.rs
++++ b/servo/components/style/properties/shorthand/font.mako.rs
+@@ -133,16 +133,17 @@
+         Canvas,
+     % endif
+     }
+ 
+     impl<'a> LonghandsToSerialize<'a> {
+         fn to_css_for<W>(&self,
+                          serialize_for: SerializeFor,
+                          dest: &mut W) -> fmt::Result where W: fmt::Write {
++            println!("LonghandsToSerialize to_css_for");
+             % if product == "gecko":
+                 match self.check_system() {
+                     CheckSystemResult::AllSystem(sys) => return sys.to_css(dest),
+                     CheckSystemResult::SomeSystem => return Ok(()),
+                     CheckSystemResult::None => ()
+                 }
+             % endif
+ 
+@@ -214,16 +215,17 @@
+                 self.to_css_for(SerializeFor::Canvas, dest)
+             }
+         % endif
+     }
+ 
+     // This may be a bit off, unsure, possibly needs changes
+     impl<'a> ToCss for LonghandsToSerialize<'a>  {
+         fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
++            println!("LonghandsToSerialize ToCss");
+             self.to_css_for(SerializeFor::Normal, dest)
+         }
+     }
+ </%helpers:shorthand>
+ 
+ <%helpers:shorthand name="font-variant"
+                     sub_properties="font-variant-caps
+                                     ${'font-variant-alternates' if product == 'gecko' or data.testing else ''}
+diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
+--- a/servo/ports/geckolib/glue.rs
++++ b/servo/ports/geckolib/glue.rs
+@@ -1826,16 +1826,17 @@ macro_rules! get_property_id_from_proper
+             Err(_) => { return $ret; }
+         }
+     }}
+ }
+ 
+ fn get_property_value(declarations: RawServoDeclarationBlockBorrowed,
+                       property_id: PropertyId, value: *mut nsAString) {
+     read_locked_arc(declarations, |decls: &PropertyDeclarationBlock| {
++        println!("get_property_value {:?}", property_id);
+         decls.property_value_to_css(&property_id, unsafe { value.as_mut().unwrap() }).unwrap();
+     })
+ }
+ 
+ #[no_mangle]
+ pub extern "C" fn Servo_DeclarationBlock_GetPropertyValue(declarations: RawServoDeclarationBlockBorrowed,
+                                                           property: *const nsACString, value: *mut nsAString) {
+     get_property_value(declarations, get_property_id_from_property!(property, ()), value)
