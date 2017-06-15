@@ -3,6 +3,127 @@
 # Parent  b266a8d8fd595b84a7d6218d7b8c6b7af0b5027c
 Bug 1355368 - stylo: make font-weight descriptor in @font-face rule preserve keyword values. r?xidorn
 
+diff --git a/servo/components/gfx/font.rs b/servo/components/gfx/font.rs
+--- a/servo/components/gfx/font.rs
++++ b/servo/components/gfx/font.rs
+@@ -45,17 +45,17 @@ static TEXT_SHAPING_PERFORMANCE_COUNTER:
+ 
+ pub trait FontHandleMethods: Sized {
+     fn new_from_template(fctx: &FontContextHandle, template: Arc<FontTemplateData>, pt_size: Option<Au>)
+                     -> Result<Self, ()>;
+     fn template(&self) -> Arc<FontTemplateData>;
+     fn family_name(&self) -> String;
+     fn face_name(&self) -> Option<String>;
+     fn is_italic(&self) -> bool;
+-    fn boldness(&self) -> font_weight::T;
++    fn boldness(&self) -> font_weight::Weight;
+     fn stretchiness(&self) -> font_stretch::T;
+ 
+     fn glyph_index(&self, codepoint: char) -> Option<GlyphId>;
+     fn glyph_h_advance(&self, GlyphId) -> Option<FractionalPixel>;
+     fn glyph_h_kerning(&self, glyph0: GlyphId, glyph1: GlyphId) -> FractionalPixel;
+     /// Can this font do basic horizontal LTR shaping without Harfbuzz?
+     fn can_do_fast_shaping(&self) -> bool;
+     fn metrics(&self) -> FontMetrics;
+diff --git a/servo/components/gfx/font_context.rs b/servo/components/gfx/font_context.rs
+--- a/servo/components/gfx/font_context.rs
++++ b/servo/components/gfx/font_context.rs
+@@ -121,17 +121,17 @@ impl FontContext {
+         if let Some(ref cached_font_group) = self.layout_font_group_cache.get(
+                 &layout_font_group_cache_key) {
+             return (*cached_font_group).clone()
+         }
+ 
+         // TODO: The font context holds a strong ref to the cached fonts
+         // so they will never be released. Find out a good time to drop them.
+ 
+-        let desc = FontTemplateDescriptor::new(style.font_weight,
++        let desc = FontTemplateDescriptor::new(style.font_weight.value,
+                                                style.font_stretch,
+                                                style.font_style == font_style::T::italic ||
+                                                 style.font_style == font_style::T::oblique);
+ 
+         let mut fonts: SmallVec<[Rc<RefCell<Font>>; 8]> = SmallVec::new();
+ 
+         for family in &style.font_family.0 {
+             // GWTODO: Check on real pages if this is faster as Vec() or HashMap().
+diff --git a/servo/components/gfx/font_template.rs b/servo/components/gfx/font_template.rs
+--- a/servo/components/gfx/font_template.rs
++++ b/servo/components/gfx/font_template.rs
+@@ -14,24 +14,24 @@ use std::u32;
+ use style::computed_values::{font_stretch, font_weight};
+ 
+ /// Describes how to select a font from a given family. This is very basic at the moment and needs
+ /// to be expanded or refactored when we support more of the font styling parameters.
+ ///
+ /// NB: If you change this, you will need to update `style::properties::compute_font_hash()`.
+ #[derive(Clone, Copy, Eq, Hash, Deserialize, Serialize, Debug)]
+ pub struct FontTemplateDescriptor {
+-    pub weight: font_weight::T,
++    pub weight: font_weight::Weight,
+     pub stretch: font_stretch::T,
+     pub italic: bool,
+ }
+ 
+ impl FontTemplateDescriptor {
+     #[inline]
+-    pub fn new(weight: font_weight::T, stretch: font_stretch::T, italic: bool)
++    pub fn new(weight: font_weight::Weight, stretch: font_stretch::T, italic: bool)
+                -> FontTemplateDescriptor {
+         FontTemplateDescriptor {
+             weight: weight,
+             stretch: stretch,
+             italic: italic,
+         }
+     }
+ 
+diff --git a/servo/components/gfx/platform/macos/font.rs b/servo/components/gfx/platform/macos/font.rs
+--- a/servo/components/gfx/platform/macos/font.rs
++++ b/servo/components/gfx/platform/macos/font.rs
+@@ -205,33 +205,33 @@ impl FontHandleMethods for FontHandle {
+     fn face_name(&self) -> Option<String> {
+         Some(self.ctfont.face_name())
+     }
+ 
+     fn is_italic(&self) -> bool {
+         self.ctfont.symbolic_traits().is_italic()
+     }
+ 
+-    fn boldness(&self) -> font_weight::T {
++    fn boldness(&self) -> font_weight::Weight {
+         let normalized = self.ctfont.all_traits().normalized_weight();  // [-1.0, 1.0]
+         let normalized = if normalized <= 0.0 {
+             4.0 + normalized * 3.0  // [1.0, 4.0]
+         } else {
+             4.0 + normalized * 5.0  // [4.0, 9.0]
+         }; // [1.0, 9.0], centered on 4.0
+         match normalized.round() as u32 {
+-            1 => font_weight::T::Weight100,
+-            2 => font_weight::T::Weight200,
+-            3 => font_weight::T::Weight300,
+-            4 => font_weight::T::Weight400,
+-            5 => font_weight::T::Weight500,
+-            6 => font_weight::T::Weight600,
+-            7 => font_weight::T::Weight700,
+-            8 => font_weight::T::Weight800,
+-            _ => font_weight::T::Weight900,
++            1 => font_weight::Weight::Weight100,
++            2 => font_weight::Weight::Weight200,
++            3 => font_weight::Weight::Weight300,
++            4 => font_weight::Weight::Weight400,
++            5 => font_weight::Weight::Weight500,
++            6 => font_weight::Weight::Weight600,
++            7 => font_weight::Weight::Weight700,
++            8 => font_weight::Weight::Weight800,
++            _ => font_weight::Weight::Weight900,
+         }
+     }
+ 
+     fn stretchiness(&self) -> font_stretch::T {
+         let normalized = self.ctfont.all_traits().normalized_width();  // [-1.0, 1.0]
+         let normalized = (normalized + 1.0) / 2.0 * 9.0;  // [0.0, 9.0]
+         match normalized {
+             v if v < 1.0 => font_stretch::T::ultra_condensed,
 diff --git a/servo/components/style/gecko/rules.rs b/servo/components/style/gecko/rules.rs
 --- a/servo/components/style/gecko/rules.rs
 +++ b/servo/components/style/gecko/rules.rs
@@ -245,7 +366,7 @@ diff --git a/servo/components/style/properties/longhand/font.mako.rs b/servo/com
          }
 +
 +        #[derive(PartialEq, Eq, Copy, Clone, Debug)]
-+        #[cfg_attr(feature = "servo", derive(HeapSizeOf, Deserialize, Serialize))]
++        #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
 +        pub struct T {
 +            pub keyword: super::SpecifiedValue,
 +            pub value: Weight,
@@ -414,6 +535,28 @@ diff --git a/servo/components/style/properties/longhand/font.mako.rs b/servo/com
  
  <%helpers:longhand name="font-size" need_clone="True" animation_value_type="ComputedValue"
                     allow_quirks="True" spec="https://drafts.csswg.org/css-fonts/#propdef-font-size">
+diff --git a/servo/components/style/properties/properties.mako.rs b/servo/components/style/properties/properties.mako.rs
+--- a/servo/components/style/properties/properties.mako.rs
++++ b/servo/components/style/properties/properties.mako.rs
+@@ -1658,17 +1658,17 @@ pub mod style_structs {
+                 % endfor
+             % elif style_struct.name == "Font":
+                 /// Computes a font hash in order to be able to cache fonts
+                 /// effectively in GFX and layout.
+                 pub fn compute_font_hash(&mut self) {
+                     // Corresponds to the fields in
+                     // `gfx::font_template::FontTemplateDescriptor`.
+                     let mut hasher: FnvHasher = Default::default();
+-                    hasher.write_u16(self.font_weight as u16);
++                    hasher.write_u16(self.font_weight.value as u16);
+                     self.font_stretch.hash(&mut hasher);
+                     self.font_family.hash(&mut hasher);
+                     self.hash = hasher.finish()
+                 }
+ 
+                 /// (Servo does not handle MathML, so this just calls copy_font_size_from)
+                 pub fn inherit_font_size_from(&mut self, parent: &Self,
+                                               _: Option<Au>, _: &Device) -> bool {
 diff --git a/servo/components/style/style_adjuster.rs b/servo/components/style/style_adjuster.rs
 --- a/servo/components/style/style_adjuster.rs
 +++ b/servo/components/style/style_adjuster.rs
