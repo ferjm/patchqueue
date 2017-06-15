@@ -86,8 +86,7 @@ diff --git a/servo/components/style/properties/gecko.mako.rs b/servo/components/
 diff --git a/servo/components/style/properties/helpers/animated_properties.mako.rs b/servo/components/style/properties/helpers/animated_properties.mako.rs
 --- a/servo/components/style/properties/helpers/animated_properties.mako.rs
 +++ b/servo/components/style/properties/helpers/animated_properties.mako.rs
-@@ -12,17 +12,17 @@ use euclid::{Point2D, Size2D};
- #[cfg(feature = "gecko")] use gecko_bindings::bindings::RawServoAnimationValueMap;
+@@ -13,16 +13,18 @@ use euclid::{Point2D, Size2D};
  #[cfg(feature = "gecko")] use gecko_bindings::structs::RawGeckoGfxMatrix4x4;
  #[cfg(feature = "gecko")] use gecko_bindings::structs::nsCSSPropertyID;
  #[cfg(feature = "gecko")] use gecko_bindings::sugar::ownership::{HasFFI, HasSimpleFFI};
@@ -95,8 +94,9 @@ diff --git a/servo/components/style/properties/helpers/animated_properties.mako.
  use properties::{CSSWideKeyword, PropertyDeclaration};
  use properties::longhands;
  use properties::longhands::background_size::computed_value::T as BackgroundSizeList;
--use properties::longhands::font_weight::computed_value::T as FontWeight;
-+use properties::longhands::font_weight::computed_value::Weight as FontWeight;
+ use properties::longhands::font_weight::computed_value::T as FontWeight;
++use properties::longhands::font_weight::computed_value::Weight as FontWeightEnum;
++use properties::longhands::font_weight::SpecifiedValue as FontWeightKeyword;
  use properties::longhands::font_stretch::computed_value::T as FontStretch;
  use properties::longhands::text_shadow::computed_value::T as TextShadowList;
  use properties::longhands::box_shadow::computed_value::T as BoxShadowList;
@@ -105,28 +105,102 @@ diff --git a/servo/components/style/properties/helpers/animated_properties.mako.
  use properties::longhands::transform::computed_value::T as TransformList;
  use properties::longhands::vertical_align::computed_value::T as VerticalAlign;
  use properties::longhands::visibility::computed_value::T as Visibility;
+@@ -1341,48 +1343,78 @@ impl Animatable for MaxLength {
+         }
+     }
+ }
+ 
+ /// http://dev.w3.org/csswg/css-transitions/#animtype-font-weight
+ impl Animatable for FontWeight {
+     #[inline]
+     fn add_weighted(&self, other: &Self, self_portion: f64, other_portion: f64) -> Result<Self, ()> {
+-        let a = (*self as u32) as f64;
+-        let b = (*other as u32) as f64;
++        let a = ((*self).value as u32) as f64;
++        let b = ((*other).value as u32) as f64;
+         const NORMAL: f64 = 400.;
+         let weight = (a - NORMAL) * self_portion + (b - NORMAL) * other_portion + NORMAL;
+         Ok(if weight < 150. {
+-            FontWeight::Weight100
++            FontWeight {
++                keyword: FontWeightKeyword::Weight100,
++                value: FontWeightEnum::Weight100,
++            }
+         } else if weight < 250. {
+-            FontWeight::Weight200
++            FontWeight {
++                keyword: FontWeightKeyword::Weight200,
++                value: FontWeightEnum::Weight200,
++            }
+         } else if weight < 350. {
+-            FontWeight::Weight300
++            FontWeight {
++                keyword: FontWeightKeyword::Weight300,
++                value: FontWeightEnum::Weight300,
++            }
+         } else if weight < 450. {
+-            FontWeight::Weight400
++            FontWeight {
++                keyword: FontWeightKeyword::Weight400,
++                value: FontWeightEnum::Weight400,
++            }
+         } else if weight < 550. {
+-            FontWeight::Weight500
++            FontWeight {
++                keyword: FontWeightKeyword::Weight500,
++                value: FontWeightEnum::Weight500,
++            }
+         } else if weight < 650. {
+-            FontWeight::Weight600
++            FontWeight {
++                keyword: FontWeightKeyword::Weight600,
++                value: FontWeightEnum::Weight600,
++            }
+         } else if weight < 750. {
+-            FontWeight::Weight700
++            FontWeight {
++                keyword: FontWeightKeyword::Weight700,
++                value: FontWeightEnum::Weight700,
++            }
+         } else if weight < 850. {
+-            FontWeight::Weight800
++            FontWeight {
++                keyword: FontWeightKeyword::Weight800,
++                value: FontWeightEnum::Weight800,
++            }
+         } else {
+-            FontWeight::Weight900
++            FontWeight {
++                keyword: FontWeightKeyword::Weight900,
++                value: FontWeightEnum::Weight900,
++            }
+         })
+     }
+ 
+     #[inline]
+-    fn get_zero_value(&self) -> Option<Self> { Some(FontWeight::Weight400) }
++    fn get_zero_value(&self) -> Option<Self> { Some(FontWeight {
++        keyword: FontWeightKeyword::Normal,
++        value: FontWeightEnum::Weight400,
++    }) }
+ 
+     #[inline]
+     fn compute_distance(&self, other: &Self) -> Result<f64, ()> {
+-        let a = (*self as u32) as f64;
+-        let b = (*other as u32) as f64;
++        let a = ((*self).value as u32) as f64;
++        let b = ((*other).value as u32) as f64;
+         a.compute_distance(&b)
+     }
+ }
+ 
+ /// https://drafts.csswg.org/css-fonts/#font-stretch-prop
+ impl Animatable for FontStretch {
+     #[inline]
+     fn add_weighted(&self, other: &Self, self_portion: f64, other_portion: f64)
 diff --git a/servo/components/style/properties/longhand/font.mako.rs b/servo/components/style/properties/longhand/font.mako.rs
 --- a/servo/components/style/properties/longhand/font.mako.rs
 +++ b/servo/components/style/properties/longhand/font.mako.rs
-@@ -402,17 +402,17 @@ macro_rules! impl_gecko_keyword_from_tra
-                                "normal small-caps",
-                                extra_gecko_values="all-small-caps petite-caps all-petite-caps unicase titling-caps",
-                                gecko_constant_prefix="NS_FONT_VARIANT_CAPS",
-                                gecko_ffi_name="mFont.variantCaps",
-                                spec="https://drafts.csswg.org/css-fonts/#propdef-font-variant-caps",
-                                custom_consts=font_variant_caps_custom_consts,
-                                animation_value_type="discrete")}
- 
--<%helpers:longhand name="font-weight" need_clone="True" animation_value_type="ComputedValue"
-+<%helpers:longhand name="font-weight" need_clone="True" animation_value_type="none" // XXX
-                    spec="https://drafts.csswg.org/css-fonts/#propdef-font-weight">
-     use std::fmt;
-     use style_traits::ToCss;
-     use properties::longhands::system_font::SystemFont;
- 
-     no_viewport_percentage!(SpecifiedValue);
- 
-     #[derive(Debug, Clone, PartialEq, Eq, Copy)]
 @@ -491,122 +491,172 @@ macro_rules! impl_gecko_keyword_from_tra
          }
      }
