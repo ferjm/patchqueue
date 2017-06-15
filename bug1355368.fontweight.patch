@@ -52,6 +52,48 @@ diff --git a/layout/style/Declaration.cpp b/layout/style/Declaration.cpp
    // simple properties are easy.
    if (!nsCSSProps::IsShorthand(aProperty)) {
      AppendValueToString(aProperty, aValue, aSerialization, aIsTokenStream);
+diff --git a/layout/style/FontFace.cpp b/layout/style/FontFace.cpp
+--- a/layout/style/FontFace.cpp
++++ b/layout/style/FontFace.cpp
+@@ -260,16 +260,17 @@ FontFace::SetStyle(const nsAString& aVal
+ {
+   mFontFaceSet->FlushUserFontSet();
+   SetDescriptor(eCSSFontDesc_Style, aValue, aRv);
+ }
+ 
+ void
+ FontFace::GetWeight(nsString& aResult)
+ {
++  printf_stderr("FontFace::GetWeight\n");
+   mFontFaceSet->FlushUserFontSet();
+   GetDesc(eCSSFontDesc_Weight, eCSSProperty_font_weight, aResult);
+ }
+ 
+ void
+ FontFace::SetWeight(const nsAString& aValue, ErrorResult& aRv)
+ {
+   mFontFaceSet->FlushUserFontSet();
+diff --git a/layout/style/ServoCSSRuleList.cpp b/layout/style/ServoCSSRuleList.cpp
+--- a/layout/style/ServoCSSRuleList.cpp
++++ b/layout/style/ServoCSSRuleList.cpp
+@@ -134,16 +134,17 @@ ServoCSSRuleList::GetRule(uint32_t aInde
+       CASE_RULE(SUPPORTS, Supports)
+       CASE_RULE(DOCUMENT, Document)
+ #undef CASE_RULE
+       // For @font-face and @counter-style rules, the function returns
+       // a borrowed Gecko rule object directly, so we don't need to
+       // create anything here. But we still need to have the style sheet
+       // and parent rule set properly.
+       case nsIDOMCSSRule::FONT_FACE_RULE: {
++        printf_stderr("Servo_CssRules_GetFontFaceRuleAt\n");
+         ruleObj = Servo_CssRules_GetFontFaceRuleAt(mRawRules, aIndex);
+         break;
+       }
+       case nsIDOMCSSRule::COUNTER_STYLE_RULE: {
+         ruleObj = Servo_CssRules_GetCounterStyleRuleAt(mRawRules, aIndex);
+         break;
+       }
+       case nsIDOMCSSRule::IMPORT_RULE:
 diff --git a/layout/style/ServoDeclarationBlock.cpp b/layout/style/ServoDeclarationBlock.cpp
 --- a/layout/style/ServoDeclarationBlock.cpp
 +++ b/layout/style/ServoDeclarationBlock.cpp
@@ -229,6 +271,24 @@ diff --git a/servo/components/style/font_face.rs b/servo/components/style/font_f
                          dest.write_str(";\n")?;
                      }
                  )*
+@@ -308,16 +309,17 @@ macro_rules! font_face_descriptors {
+             }
+         }
+ 
+         #[cfg(feature = "servo")]
+         impl<'a> FontFace<'a> {
+             $(
+                 #[$m_doc]
+                 pub fn $m_ident(&self) -> &$m_ty {
++                    println!($m_ident);
+                     self.0 .$m_ident.as_ref().unwrap()
+                 }
+             )*
+             $(
+                 #[$o_doc]
+                 pub fn $o_ident(&self) -> $o_ty {
+                     if let Some(ref value) = self.0 .$o_ident {
+                         value.clone()
 diff --git a/servo/components/style/properties/declaration_block.rs b/servo/components/style/properties/declaration_block.rs
 --- a/servo/components/style/properties/declaration_block.rs
 +++ b/servo/components/style/properties/declaration_block.rs
@@ -315,7 +375,25 @@ diff --git a/servo/components/style/properties/longhand/font.mako.rs b/servo/com
                  "bolder" => Ok(SpecifiedValue::Bolder),
                  "lighter" => Ok(SpecifiedValue::Lighter),
                  _ => Err(())
-@@ -489,16 +491,17 @@ macro_rules! impl_gecko_keyword_from_tra
+@@ -459,16 +461,17 @@ macro_rules! impl_gecko_keyword_from_tra
+         result.or_else(|_| {
+             SpecifiedValue::from_int(input.expect_integer()?)
+                 .map_err(|()| StyleParseError::UnspecifiedError.into())
+         })
+     }
+ 
+     impl SpecifiedValue {
+         pub fn from_int(kw: i32) -> Result<Self, ()> {
++            println!("SpecifiedValue from_int");
+             match kw {
+                 % for weight in range(100, 901, 100):
+                     ${weight} => Ok(SpecifiedValue::Weight${weight}),
+                 % endfor
+                 _ => Err(())
+             }
+         }
+ 
+@@ -489,16 +492,17 @@ macro_rules! impl_gecko_keyword_from_tra
                  None
              }
          }
@@ -333,7 +411,19 @@ diff --git a/servo/components/style/properties/longhand/font.mako.rs b/servo/com
                  SpecifiedValue::Bold => Ok(computed_value::T::Weight700),
                  SpecifiedValue::Bolder |
                  SpecifiedValue::Lighter => Err(StyleParseError::UnspecifiedError.into()),
-@@ -534,16 +537,17 @@ macro_rules! impl_gecko_keyword_from_tra
+@@ -523,49 +527,53 @@ macro_rules! impl_gecko_keyword_from_tra
+                     T::Weight900 | T::Weight800 |
+                     T::Weight700 | T::Weight600 => true,
+                     _ => false
+                 }
+             }
+ 
+             /// Obtain a Servo computed value from a Gecko computed font-weight
+             pub fn from_gecko_weight(weight: u16) -> Self {
++                println!("from_gecko_weight");
+                 match weight {
+                     % for weight in range(100, 901, 100):
+                         ${weight} => T::Weight${weight},
                      % endfor
                      _ => panic!("from_gecko_weight: called with invalid weight")
                  }
@@ -351,7 +441,13 @@ diff --git a/servo/components/style/properties/longhand/font.mako.rs b/servo/com
          }
      }
      #[inline]
-@@ -556,16 +560,17 @@ macro_rules! impl_gecko_keyword_from_tra
+     pub fn get_initial_value() -> computed_value::T {
++        println!("get_initial_value");
+         computed_value::T::Weight400  // normal
+     }
+ 
+     #[inline]
+     pub fn get_initial_specified_value() -> SpecifiedValue {
          SpecifiedValue::Normal
      }
  
@@ -369,7 +465,7 @@ diff --git a/servo/components/style/properties/longhand/font.mako.rs b/servo/com
                  SpecifiedValue::Bold => computed_value::T::Weight700,
                  SpecifiedValue::Bolder => match context.inherited_style().get_font().clone_font_weight() {
                      computed_value::T::Weight100 => computed_value::T::Weight400,
-@@ -593,17 +598,18 @@ macro_rules! impl_gecko_keyword_from_tra
+@@ -593,17 +601,18 @@ macro_rules! impl_gecko_keyword_from_tra
                      <%self:nongecko_unreachable>
                          context.cached_system_font.as_ref().unwrap().font_weight.clone()
                      </%self:nongecko_unreachable>
@@ -449,3 +545,21 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
  pub extern "C" fn Servo_DeclarationBlock_GetPropertyValue(declarations: RawServoDeclarationBlockBorrowed,
                                                            property: *const nsACString, value: *mut nsAString) {
      get_property_value(declarations, get_property_id_from_property!(property, ()), value)
+@@ -2978,16 +2979,17 @@ pub extern "C" fn Servo_StyleSet_GetKeyf
+                                         &global_style_data.shared_lock);
+     }
+     true
+ }
+ 
+ #[no_mangle]
+ pub extern "C" fn Servo_StyleSet_GetFontFaceRules(raw_data: RawServoStyleSetBorrowed,
+                                                   rules: RawGeckoFontFaceRuleListBorrowedMut) {
++    println!("Servo_StyleSet_GetFontFaceRules");
+     let data = PerDocumentStyleData::from_ffi(raw_data).borrow();
+     debug_assert!(rules.len() == 0);
+ 
+     let global_style_data = &*GLOBAL_STYLE_DATA;
+     let guard = global_style_data.shared_lock.read();
+ 
+     unsafe { rules.set_len(data.font_faces.len() as u32) };
+     for (src, dest) in data.font_faces.iter().zip(rules.iter_mut()) {
