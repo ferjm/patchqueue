@@ -46,10 +46,10 @@ diff --git a/layout/style/nsComputedDOMStyle.cpp b/layout/style/nsComputedDOMSty
    const nsAString& name = Substring(aPropertyName,
                                      CSS_CUSTOM_NAME_PREFIX_LENGTH);
 -  if (!variables->mVariables.Get(name, variableValue)) {
-+  bool present = mStyleContext->IsServo() ?
-+      Servo_GetCustomProperty(mStyleContext->ComputedValues(),
-+                              &name, &variableValue) :
-+      StyleVariables()->mVariables.Get(name, variableValue);
++  bool present = mStyleContext->IsServo()
++    ? Servo_GetCustomProperty(mStyleContext->ComputedValues(),
++                              &name, &variableValue)
++    : StyleVariables()->mVariables.Get(name, variableValue);
 +  if (!present) {
      return nullptr;
    }
@@ -62,7 +62,7 @@ diff --git a/layout/style/nsComputedDOMStyle.cpp b/layout/style/nsComputedDOMSty
 diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 --- a/servo/ports/geckolib/glue.rs
 +++ b/servo/ports/geckolib/glue.rs
-@@ -3067,8 +3067,25 @@ pub extern "C" fn Servo_StyleSet_MightHa
+@@ -3067,8 +3067,26 @@ pub extern "C" fn Servo_StyleSet_MightHa
  }
  
  #[no_mangle]
@@ -75,16 +75,17 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 +#[no_mangle]
 +pub extern "C" fn Servo_GetCustomProperty(computed_values: ServoComputedValuesBorrowed,
 +                                          name: *const nsAString, value: *mut nsAString) -> bool {
-+    match ComputedValues::as_arc(&computed_values).custom_properties() {
-+        Some(custom_properties) => {
-+            let name = unsafe { Atom::from((*name).to_string()) };
-+            if let Some(computed_value) = custom_properties.get(&name) {
-+                computed_value.to_css(unsafe { value.as_mut().unwrap() }).unwrap();
-+                true
-+            } else {
-+                false
-+            }
-+        },
-+        None => false,
-+    }
++    let custom_properties = match ComputedValues::as_arc(&computed_values).custom_properties() {
++        Some(p) => p,
++        None => return false,
++    };
++
++    let name = unsafe { Atom::from((&*name)) };
++    let computed_value = match custom_properties.get(&name) {
++        Some(v) => v,
++        None => return false,
++    };
++
++    computed_value.to_css(unsafe { value.as_mut().unwrap() }).unwrap();
++    true
 +}
