@@ -1,0 +1,238 @@
+# HG changeset patch
+# User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
+# Parent  464b2a3c25aa1065760d9ecbb0870bca4a66c62e
+Bug 1336891 - stylo: Implement custom property value getter. r=emilio
+
+diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
+--- a/layout/style/ServoBindingList.h
++++ b/layout/style/ServoBindingList.h
+@@ -536,16 +536,21 @@ SERVO_BINDING_FUNC(Servo_StyleSet_GetBas
+                    const mozilla::ServoElementSnapshotTable* snapshots,
+                    mozilla::CSSPseudoElementType pseudo_type)
+ 
+ // For canvas font.
+ SERVO_BINDING_FUNC(Servo_SerializeFontValueForCanvas, void,
+                    RawServoDeclarationBlockBorrowed declarations,
+                    nsAString* buffer)
+ 
++// Get custom property value.
++SERVO_BINDING_FUNC(Servo_GetCustomProperty, bool,
++                   ServoComputedValuesBorrowed computed_values,
++                   const nsAString* name, nsAString* value)
++
+ // Style-struct management.
+ #define STYLE_STRUCT(name, checkdata_cb)                            \
+   struct nsStyle##name;                                             \
+   SERVO_BINDING_FUNC(Servo_GetStyle##name, const nsStyle##name*,  \
+                      ServoComputedValuesBorrowedOrNull computed_values)
+ #include "nsStyleStructList.h"
+ #undef STYLE_STRUCT
+ 
+diff --git a/layout/style/nsComputedDOMStyle.cpp b/layout/style/nsComputedDOMStyle.cpp
+--- a/layout/style/nsComputedDOMStyle.cpp
++++ b/layout/style/nsComputedDOMStyle.cpp
+@@ -6908,22 +6908,24 @@ MarkComputedStyleMapDirty(const char* aP
+   static_cast<nsComputedStyleMap*>(aData)->MarkDirty();
+ }
+ 
+ already_AddRefed<CSSValue>
+ nsComputedDOMStyle::DoGetCustomProperty(const nsAString& aPropertyName)
+ {
+   MOZ_ASSERT(nsCSSProps::IsCustomPropertyName(aPropertyName));
+ 
+-  const nsStyleVariables* variables = StyleVariables();
+-
+   nsString variableValue;
+   const nsAString& name = Substring(aPropertyName,
+                                     CSS_CUSTOM_NAME_PREFIX_LENGTH);
+-  if (!variables->mVariables.Get(name, variableValue)) {
++  bool present = mStyleContext->IsServo() ?
++      Servo_GetCustomProperty(mStyleContext->ComputedValues(),
++                              &name, &variableValue) :
++      StyleVariables()->mVariables.Get(name, variableValue);
++  if (!present) {
+     return nullptr;
+   }
+ 
+   RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
+   val->SetString(variableValue);
+ 
+   return val.forget();
+ }
+diff --git a/servo/components/style/font_face.rs b/servo/components/style/font_face.rs
+--- a/servo/components/style/font_face.rs
++++ b/servo/components/style/font_face.rs
+@@ -63,16 +63,74 @@ impl ToCss for UrlSource {
+ define_css_keyword_enum!(FontDisplay:
+                          "auto" => Auto,
+                          "block" => Block,
+                          "swap" => Swap,
+                          "fallback" => Fallback,
+                          "optional" => Optional);
+ add_impls_for_keyword_enum!(FontDisplay);
+ 
++/// A font-weight value for a @font-face rule.
++/// The font-weight CSS property specifies the weight or boldness of the font.
++#[cfg(feature = "gecko")]
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub enum FontWeight {
++    /// Numeric font weights for fonts that provide more than just normal and bold.
++    Weight(font_weight::T),
++    /// Normal font weight. Same as 400.
++    Normal,
++    /// Bold font weight. Same as 700.
++    Bold,
++}
++
++#[cfg(feature = "gecko")]
++impl ToCss for FontWeight {
++    fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
++        match *self {
++            FontWeight::Normal => dest.write_str("normal"),
++            FontWeight::Bold => dest.write_str("bold"),
++            FontWeight::Weight(ref weight) => font_weight::T::to_css(weight, dest),
++        }
++    }
++}
++
++impl Parse for FontWeight {
++    fn parse<'i, 't>(_: &ParserContext, input: &mut Parser<'i, 't>)
++                         -> Result<FontWeight, ParseError<'i>> {
++        let result = input.try(|input| {
++            let ident = input.expect_ident().map_err(|_| ())?;
++            match_ignore_ascii_case! { &ident,
++                "normal" => Ok(FontWeight::Normal),
++                "bold" => Ok(FontWeight::Bold),
++                _ => Err(())
++            }
++        });
++        result.or_else(|_| {
++            FontWeight::from_int(input.expect_integer()?)
++                .map_err(|()| StyleParseError::UnspecifiedError.into())
++        })
++    }
++}
++
++impl FontWeight {
++    fn from_int(kw: i32) -> Result<Self, ()> {
++        match kw {
++            100 => Ok(FontWeight::Weight(font_weight::T::Weight100)),
++            200 => Ok(FontWeight::Weight(font_weight::T::Weight200)),
++            300 => Ok(FontWeight::Weight(font_weight::T::Weight300)),
++            400 => Ok(FontWeight::Weight(font_weight::T::Weight400)),
++            500 => Ok(FontWeight::Weight(font_weight::T::Weight500)),
++            600 => Ok(FontWeight::Weight(font_weight::T::Weight600)),
++            700 => Ok(FontWeight::Weight(font_weight::T::Weight700)),
++            800 => Ok(FontWeight::Weight(font_weight::T::Weight800)),
++            900 => Ok(FontWeight::Weight(font_weight::T::Weight900)),
++            _ => Err(())
++        }
++    }
++}
+ /// Parse the block inside a `@font-face` rule.
+ ///
+ /// Note that the prelude parsing code lives in the `stylesheets` module.
+ pub fn parse_font_face_block(context: &ParserContext, input: &mut Parser, location: SourceLocation)
+     -> FontFaceRuleData {
+     let mut rule = FontFaceRuleData::empty();
+     rule.source_location = location;
+     {
+@@ -322,17 +380,17 @@ font_face_descriptors! {
+         /// The alternative sources for this font face.
+         "src" sources / mSrc: Vec<Source>,
+     ]
+     optional descriptors = [
+         /// The style of this font face
+         "font-style" style / mStyle: font_style::T = font_style::T::normal,
+ 
+         /// The weight of this font face
+-        "font-weight" weight / mWeight: font_weight::T = font_weight::T::Weight400 /* normal */,
++        "font-weight" weight / mWeight: FontWeight = FontWeight::Weight(font_weight::T::Weight400) /* normal */,
+ 
+         /// The stretch of this font face
+         "font-stretch" stretch / mStretch: font_stretch::T = font_stretch::T::normal,
+ 
+         /// The display of this font face
+         "font-display" display / mDisplay: FontDisplay = FontDisplay::Auto,
+ 
+         /// The ranges of code points outside of which this font face should not be used.
+diff --git a/servo/components/style/gecko/rules.rs b/servo/components/style/gecko/rules.rs
+--- a/servo/components/style/gecko/rules.rs
++++ b/servo/components/style/gecko/rules.rs
+@@ -4,17 +4,17 @@
+ 
+ //! Bindings for CSS Rule objects
+ 
+ use byteorder::{BigEndian, WriteBytesExt};
+ use computed_values::{font_feature_settings, font_stretch, font_style, font_weight};
+ use computed_values::font_family::FamilyName;
+ use counter_style;
+ use cssparser::UnicodeRange;
+-use font_face::{FontFaceRuleData, Source, FontDisplay};
++use font_face::{FontFaceRuleData, Source, FontDisplay, FontWeight};
+ use gecko_bindings::bindings;
+ use gecko_bindings::structs::{self, nsCSSFontFaceRule, nsCSSValue};
+ use gecko_bindings::structs::{nsCSSCounterDesc, nsCSSCounterStyleRule};
+ use gecko_bindings::sugar::ns_css_value::ToNsCssValue;
+ use gecko_bindings::sugar::refptr::{RefPtr, UniqueRefPtr};
+ use shared_lock::{ToCssWithGuard, SharedRwLockReadGuard};
+ use std::{fmt, str};
+ use values::generics::FontSettings;
+@@ -29,16 +29,28 @@ impl ToNsCssValue for FamilyName {
+ }
+ 
+ impl ToNsCssValue for font_weight::T {
+     fn convert(self, nscssvalue: &mut nsCSSValue) {
+         nscssvalue.set_integer(self as i32)
+     }
+ }
+ 
++impl ToNsCssValue for FontWeight {
++    fn convert(self, nscssvalue: &mut nsCSSValue) {
++        match self {
++            FontWeight::Normal =>
++                nscssvalue.set_enum(structs::NS_STYLE_FONT_WEIGHT_NORMAL as i32),
++            FontWeight::Bold =>
++                nscssvalue.set_enum(structs::NS_STYLE_FONT_WEIGHT_BOLD as i32),
++            FontWeight::Weight(weight) => nscssvalue.set_integer(weight as i32),
++        }
++    }
++}
++
+ impl ToNsCssValue for font_feature_settings::T {
+     fn convert(self, nscssvalue: &mut nsCSSValue) {
+         match self {
+             FontSettings::Normal => nscssvalue.set_normal(),
+             FontSettings::Tag(tags) => {
+                 nscssvalue.set_pair_list(tags.into_iter().map(|entry| {
+                     let mut feature = nsCSSValue::null();
+                     let mut raw = [0u8; 4];
+diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
+--- a/servo/ports/geckolib/glue.rs
++++ b/servo/ports/geckolib/glue.rs
+@@ -3067,8 +3067,25 @@ pub extern "C" fn Servo_StyleSet_MightHa
+ }
+ 
+ #[no_mangle]
+ pub extern "C" fn Servo_StyleSet_HasStateDependency(raw_data: RawServoStyleSetBorrowed,
+                                                     state: u64) -> bool {
+     let data = PerDocumentStyleData::from_ffi(raw_data).borrow();
+     data.stylist.might_have_state_dependency(ElementState::from_bits_truncate(state))
+ }
++
++#[no_mangle]
++pub extern "C" fn Servo_GetCustomProperty(computed_values: ServoComputedValuesBorrowed,
++                                          name: *const nsAString, value: *mut nsAString) -> bool {
++    let name = unsafe { Atom::from((*name).to_string()) };
++    match ComputedValues::as_arc(&computed_values).custom_properties() {
++        Some(custom_properties) => {
++            if let Some(computed_value) = custom_properties.get(&name) {
++                computed_value.to_css(unsafe { value.as_mut().unwrap() }).unwrap();
++                true
++            } else {
++                false
++            }
++        },
++        None => false,
++    }
++}
