@@ -1,0 +1,46 @@
+# HG changeset patch
+# User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
+# Parent  078389f28ad3c318a9720a8b35170afa2fc8081d
+
+diff --git a/layout/style/nsComputedDOMStyle.cpp b/layout/style/nsComputedDOMStyle.cpp
+--- a/layout/style/nsComputedDOMStyle.cpp
++++ b/layout/style/nsComputedDOMStyle.cpp
+@@ -1067,21 +1067,35 @@ nsComputedDOMStyle::IndexedGetter(uint32
+   // Custom properties are exposed with indexed properties just after all
+   // of the built-in properties.
+   UpdateCurrentStyleSources(false);
+   if (!mStyleContext) {
+     aFound = false;
+     return;
+   }
+ 
+-  const nsStyleVariables* variables = StyleVariables();
+-  if (aIndex - length < variables->mVariables.Count()) {
++  bool isServo = mStyleContext->IsServo();
++
++  const nsStyleVariables* variables = isServo
++    ? StyleVariables()
++    : nullptr;
++
++  const count = isServo
++    ? Servo_GetCustomPropertiesCount()
++    : variables->mVariables.Count();
++
++  if (aIndex - length < count) {
+     aFound = true;
+     nsString varName;
+-    variables->mVariables.GetVariableAt(aIndex - length, varName);
++    if (isServo) {
++      Servo_GetCustomPropertyAt(mStyleContext->ComputedValues(),
++                                aIndex, varName);
++    } else {
++      variables->mVariables.GetVariableAt(aIndex - length, varName);
++    }
+     aPropName.AssignLiteral("--");
+     aPropName.Append(varName);
+   } else {
+     aFound = false;
+   }
+ 
+   ClearCurrentStyleSources();
+ }
