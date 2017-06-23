@@ -1,8 +1,4 @@
-bug1336891.custom.props.patch
-bug1336891.custom.props.1.patch
-bug1355368.fontweight.1.patch
-bug1355368.fontweight.patch
-bug1371393.rulecolumn.1.patch
+bug1375555.stylevariables.patch
 #fb3224375a1ffe4ef8788a25e6b864833a46fe86
 #bug1365674.test_simulate_compute_values_failure.crash.3.patch
 #test.patch
