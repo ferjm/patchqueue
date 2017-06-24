@@ -1,7 +1,7 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
 # Parent  594cc32b632396a867ef1f98428968b224d82151
-Bug 1375555 - Part 1 - Add name index to keep custom properties ordered. r=emilio
+Bug 1375555 - Part 1: Add name index to keep custom properties ordered. r=emilio
 
 diff --git a/servo/components/style/custom_properties.rs b/servo/components/style/custom_properties.rs
 --- a/servo/components/style/custom_properties.rs
