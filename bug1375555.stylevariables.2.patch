@@ -222,3 +222,24 @@ diff --git a/servo/components/style/custom_properties.rs b/servo/components/styl
          }
      )?;
      substituted.push_from(position, &input, last_token_type);
+diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
+--- a/servo/ports/geckolib/glue.rs
++++ b/servo/ports/geckolib/glue.rs
+@@ -3096,16 +3096,16 @@ pub extern "C" fn Servo_StyleSet_HasStat
+ pub extern "C" fn Servo_GetCustomProperty(computed_values: ServoComputedValuesBorrowed,
+                                           name: *const nsAString, value: *mut nsAString) -> bool {
+     let custom_properties = match ComputedValues::as_arc(&computed_values).custom_properties() {
+         Some(p) => p,
+         None => return false,
+     };
+ 
+     let name = unsafe { Atom::from((&*name)) };
+-    let computed_value = match custom_properties.get(&name) {
++    let computed_value = match custom_properties.values.get(&name) {
+         Some(v) => v,
+         None => return false,
+     };
+ 
+     computed_value.to_css(unsafe { value.as_mut().unwrap() }).unwrap();
+     true
+ }
