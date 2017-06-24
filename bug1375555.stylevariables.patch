@@ -1,7 +1,7 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  594cc32b632396a867ef1f98428968b224d82151
-Bug 1375555 - stylo: get custom props count from Servo side for nsComputedDOMStyle::GetLength. r=emilio
+# Parent  6cbe3d8b507d58c9474b60a9850c87b06f8b6d23
+Bug 1375555 - Part 2: Get custom props count from Servo side for nsComputedDOMStyle::GetLength. r=emilio
 
 diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
 --- a/layout/style/ServoBindingList.h
@@ -98,7 +98,7 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
      };
  
      let name = unsafe { Atom::from((&*name)) };
-     let computed_value = match custom_properties.get(&name) {
+     let computed_value = match custom_properties.values.get(&name) {
          Some(v) => v,
          None => return false,
      };
@@ -110,7 +110,7 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 +#[no_mangle]
 +pub extern "C" fn Servo_GetCustomPropertiesCount(computed_values: ServoComputedValuesBorrowed) -> u32 {
 +    match ComputedValues::as_arc(&computed_values).custom_properties() {
-+        Some(p) => p.len() as u32,
++        Some(p) => p.values.len() as u32,
 +        None => 0,
 +    }
 +}
