@@ -1,7 +1,32 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  078389f28ad3c318a9720a8b35170afa2fc8081d
+# Parent  1f549256239f949ce33223e481522ba1bca91fc2
+Bug 1375555 - Part 3: Implement indexed getter for custom properties. r=emilio
 
+diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
+--- a/layout/style/ServoBindingList.h
++++ b/layout/style/ServoBindingList.h
+@@ -548,16 +548,20 @@ SERVO_BINDING_FUNC(Servo_SerializeFontVa
+ // Get custom property value.
+ SERVO_BINDING_FUNC(Servo_GetCustomPropertyValue, bool,
+                    ServoComputedValuesBorrowed computed_values,
+                    const nsAString* name, nsAString* value)
+ 
+ SERVO_BINDING_FUNC(Servo_GetCustomPropertiesCount, uint32_t,
+                    ServoComputedValuesBorrowed computed_values)
+ 
++SERVO_BINDING_FUNC(Servo_GetCustomPropertyAt, bool,
++                   ServoComputedValuesBorrowed, uint32_t index,
++                   nsAString* value)
++
+ // Style-struct management.
+ #define STYLE_STRUCT(name, checkdata_cb)                            \
+   struct nsStyle##name;                                             \
+   SERVO_BINDING_FUNC(Servo_GetStyle##name, const nsStyle##name*,  \
+                      ServoComputedValuesBorrowedOrNull computed_values)
+ #include "nsStyleStructList.h"
+ #undef STYLE_STRUCT
+ 
 diff --git a/layout/style/nsComputedDOMStyle.cpp b/layout/style/nsComputedDOMStyle.cpp
 --- a/layout/style/nsComputedDOMStyle.cpp
 +++ b/layout/style/nsComputedDOMStyle.cpp
@@ -22,8 +47,8 @@ diff --git a/layout/style/nsComputedDOMStyle.cpp b/layout/style/nsComputedDOMSty
 +    ? StyleVariables()
 +    : nullptr;
 +
-+  const count = isServo
-+    ? Servo_GetCustomPropertiesCount()
++  const uint32_t count = isServo
++    ? Servo_GetCustomPropertiesCount(mStyleContext->ComputedValues())
 +    : variables->mVariables.Count();
 +
 +  if (aIndex - length < count) {
@@ -32,7 +57,7 @@ diff --git a/layout/style/nsComputedDOMStyle.cpp b/layout/style/nsComputedDOMSty
 -    variables->mVariables.GetVariableAt(aIndex - length, varName);
 +    if (isServo) {
 +      Servo_GetCustomPropertyAt(mStyleContext->ComputedValues(),
-+                                aIndex, varName);
++                                aIndex, &varName);
 +    } else {
 +      variables->mVariables.GetVariableAt(aIndex - length, varName);
 +    }
@@ -44,3 +69,39 @@ diff --git a/layout/style/nsComputedDOMStyle.cpp b/layout/style/nsComputedDOMSty
  
    ClearCurrentStyleSources();
  }
+diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
+--- a/servo/ports/geckolib/glue.rs
++++ b/servo/ports/geckolib/glue.rs
+@@ -3112,8 +3112,32 @@ pub extern "C" fn Servo_GetCustomPropert
+ 
+ #[no_mangle]
+ pub extern "C" fn Servo_GetCustomPropertiesCount(computed_values: ServoComputedValuesBorrowed) -> u32 {
+     match ComputedValues::as_arc(&computed_values).custom_properties() {
+         Some(p) => p.values.len() as u32,
+         None => 0,
+     }
+ }
++
++#[no_mangle]
++pub extern "C" fn Servo_GetCustomPropertyAt(computed_values: ServoComputedValuesBorrowed,
++                                            index: u32, value: *mut nsAString) -> bool {
++    let custom_properties = match ComputedValues::as_arc(&computed_values).custom_properties() {
++        Some(p) => p,
++        None => return false,
++    };
++
++    let index = index as usize;
++
++    if index >= custom_properties.index.len() {
++        return false;
++    }
++
++    let ref name = custom_properties.index[index];
++    let computed_value = match custom_properties.values.get(name) {
++        Some(v) => v,
++        None => return false,
++    };
++
++    computed_value.to_css(unsafe { value.as_mut().unwrap() }).unwrap();
++    true
++}
