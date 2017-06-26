@@ -90,7 +90,7 @@ diff --git a/servo/components/style/custom_properties.rs b/servo/components/styl
      }
  }
  
-@@ -440,40 +451,47 @@ fn remove_cycles(map: &mut HashMap<&Name
+@@ -440,40 +451,46 @@ fn remove_cycles(map: &mut HashMap<&Name
      }
      for name in &to_remove {
          map.remove(name);
@@ -105,7 +105,6 @@ diff --git a/servo/components/style/custom_properties.rs b/servo/components/styl
 +                  inherited: &Option<Arc<ComputedValuesMap>>)
 +                  -> ComputedValuesMap {
 +    let mut computed_values = HashMap::new();
-+    // XXX
 +    let mut index = Vec::new();
      let mut invalid = HashSet::new();
      for (&name, value) in &specified_values_map {
@@ -144,7 +143,7 @@ diff --git a/servo/components/style/custom_properties.rs b/servo/components/styl
          }
          return Ok(computed_value.last_token_type)
      }
-@@ -486,28 +504,29 @@ fn substitute_one(name: &Name,
+@@ -486,28 +503,29 @@ fn substitute_one(name: &Name,
          let mut input = ParserInput::new(&specified_value.css);
          let mut input = Parser::new(&mut input);
          let mut position = (input.position(), specified_value.first_token_type);
@@ -176,7 +175,7 @@ diff --git a/servo/components/style/custom_properties.rs b/servo/components/styl
          }
      } else {
          // The specified value contains no var() reference
-@@ -517,16 +536,17 @@ fn substitute_one(name: &Name,
+@@ -517,16 +535,17 @@ fn substitute_one(name: &Name,
              last_token_type: specified_value.last_token_type,
          }
      };
@@ -194,7 +193,7 @@ diff --git a/servo/components/style/custom_properties.rs b/servo/components/styl
  /// The `substitute_one` callback is called for each `var()` function in `input`.
  /// If the variable has its initial value,
  /// the callback should return `Err(())` and leave `partial_computed_value` unchanged.
-@@ -611,25 +631,25 @@ fn substitute_block<'i, 't, F>(input: &m
+@@ -611,25 +630,25 @@ fn substitute_block<'i, 't, F>(input: &m
      // </div>
      // ```
      Ok(last_token_type)
