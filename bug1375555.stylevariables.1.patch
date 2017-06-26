@@ -1,7 +1,7 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
 # Parent  1f549256239f949ce33223e481522ba1bca91fc2
-Bug 1375555 - Part 3: Implement indexed getter for custom properties. r=emilio
+Bug 1375555 - Part 3: Implement indexed getter for custom property names. r=emilio
 
 diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
 --- a/layout/style/ServoBindingList.h
@@ -15,9 +15,9 @@ diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
  SERVO_BINDING_FUNC(Servo_GetCustomPropertiesCount, uint32_t,
                     ServoComputedValuesBorrowed computed_values)
  
-+SERVO_BINDING_FUNC(Servo_GetCustomPropertyAt, bool,
++SERVO_BINDING_FUNC(Servo_GetCustomPropertyNameAt, bool,
 +                   ServoComputedValuesBorrowed, uint32_t index,
-+                   nsAString* value)
++                   nsAString* name)
 +
  // Style-struct management.
  #define STYLE_STRUCT(name, checkdata_cb)                            \
@@ -30,7 +30,7 @@ diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
 diff --git a/layout/style/nsComputedDOMStyle.cpp b/layout/style/nsComputedDOMStyle.cpp
 --- a/layout/style/nsComputedDOMStyle.cpp
 +++ b/layout/style/nsComputedDOMStyle.cpp
-@@ -1067,21 +1067,35 @@ nsComputedDOMStyle::IndexedGetter(uint32
+@@ -1067,21 +1067,36 @@ nsComputedDOMStyle::IndexedGetter(uint32
    // Custom properties are exposed with indexed properties just after all
    // of the built-in properties.
    UpdateCurrentStyleSources(false);
@@ -51,15 +51,16 @@ diff --git a/layout/style/nsComputedDOMStyle.cpp b/layout/style/nsComputedDOMSty
 +    ? Servo_GetCustomPropertiesCount(mStyleContext->ComputedValues())
 +    : variables->mVariables.Count();
 +
-+  if (aIndex - length < count) {
++  const uint32_t index = aIndex - length;
++  if (index < count) {
      aFound = true;
      nsString varName;
 -    variables->mVariables.GetVariableAt(aIndex - length, varName);
 +    if (isServo) {
-+      Servo_GetCustomPropertyAt(mStyleContext->ComputedValues(),
-+                                aIndex, &varName);
++      Servo_GetCustomPropertyNameAt(mStyleContext->ComputedValues(),
++                                    index, &varName);
 +    } else {
-+      variables->mVariables.GetVariableAt(aIndex - length, varName);
++      variables->mVariables.GetVariableAt(index, varName);
 +    }
      aPropName.AssignLiteral("--");
      aPropName.Append(varName);
@@ -72,7 +73,7 @@ diff --git a/layout/style/nsComputedDOMStyle.cpp b/layout/style/nsComputedDOMSty
 diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 --- a/servo/ports/geckolib/glue.rs
 +++ b/servo/ports/geckolib/glue.rs
-@@ -3112,8 +3112,32 @@ pub extern "C" fn Servo_GetCustomPropert
+@@ -3112,8 +3112,28 @@ pub extern "C" fn Servo_GetCustomPropert
  
  #[no_mangle]
  pub extern "C" fn Servo_GetCustomPropertiesCount(computed_values: ServoComputedValuesBorrowed) -> u32 {
@@ -83,8 +84,8 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
  }
 +
 +#[no_mangle]
-+pub extern "C" fn Servo_GetCustomPropertyAt(computed_values: ServoComputedValuesBorrowed,
-+                                            index: u32, value: *mut nsAString) -> bool {
++pub extern "C" fn Servo_GetCustomPropertyNameAt(computed_values: ServoComputedValuesBorrowed,
++                                                index: u32, name: *mut nsAString) -> bool {
 +    let custom_properties = match ComputedValues::as_arc(&computed_values).custom_properties() {
 +        Some(p) => p,
 +        None => return false,
@@ -96,12 +97,8 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 +        return false;
 +    }
 +
-+    let ref name = custom_properties.index[index];
-+    let computed_value = match custom_properties.values.get(name) {
-+        Some(v) => v,
-+        None => return false,
-+    };
++    let name = unsafe { name.as_mut().unwrap() };
++    name.assign_utf8(&custom_properties.index[index].to_string());
 +
-+    computed_value.to_css(unsafe { value.as_mut().unwrap() }).unwrap();
 +    true
 +}
