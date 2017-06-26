@@ -1,7 +1,7 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
 # Parent  6cbe3d8b507d58c9474b60a9850c87b06f8b6d23
-Bug 1375555 - Part 2: Get custom props count from Servo side for nsComputedDOMStyle::GetLength. r=emilio
+Bug 1375555 - Part 2: Get custom props count from Servo side for nsComputedDOMStyle::GetLength. r?emilio
 
 diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
 --- a/layout/style/ServoBindingList.h
