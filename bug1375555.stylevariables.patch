@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  4707661b7d4a5afb002170c2e18c29c7e20ea00f
+# Parent  0bac1b74537b90d374aaa741fefbaedd07235a32
 Bug 1375555 - Part 2: Get custom props count from Servo side for nsComputedDOMStyle::GetLength. r?emilio
 
 diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
@@ -79,13 +79,13 @@ diff --git a/layout/style/nsComputedDOMStyle.cpp b/layout/style/nsComputedDOMSty
 diff --git a/servo/components/style/custom_properties.rs b/servo/components/style/custom_properties.rs
 --- a/servo/components/style/custom_properties.rs
 +++ b/servo/components/style/custom_properties.rs
-@@ -105,16 +105,22 @@ pub struct CustomPropertiesMap {
-     values: HashMap<Name, ComputedValue>,
+@@ -106,16 +106,22 @@ pub struct CustomPropertiesMap {
  }
  
  impl CustomPropertiesMap {
      /// Custom property computed value getter by name.
      pub fn get(&self, name: Atom) -> Option<&ComputedValue> {
+         debug_assert!(self.index.contains(name));
          self.values.get(&(name as Name))
      }
 +
