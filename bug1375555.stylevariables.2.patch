@@ -50,9 +50,9 @@ diff --git a/servo/components/style/custom_properties.rs b/servo/components/styl
 +
 +impl CustomPropertiesMap {
 +    /// Custom property computed value getter by name.
-+    pub fn get(&self, name: Atom) -> Option<&ComputedValue> {
-+        debug_assert!(self.index.contains(&name));
-+        self.values.get(&(name as Name))
++    pub fn get_computed_value(&self, name: &Atom) -> Option<&ComputedValue> {
++        debug_assert!(self.index.contains(name));
++        self.values.get(name as &Name)
 +    }
 +
 +    /// Get an iterator for custom properties computed values.
@@ -68,7 +68,7 @@ diff --git a/servo/components/style/custom_properties.rs b/servo/components/styl
              last_token_type: TokenSerializationType::nothing(),
              first_token_type: TokenSerializationType::nothing(),
          }
-@@ -330,30 +354,30 @@ fn parse_var_function<'i, 't>(input: &mu
+@@ -330,17 +354,17 @@ fn parse_var_function<'i, 't>(input: &mu
          refs.insert(Atom::from(name));
      }
      Ok(())
@@ -87,20 +87,6 @@ diff --git a/servo/components/style/custom_properties.rs b/servo/components/styl
          return;
      }
  
-     let map = match *custom_properties {
-         Some(ref mut map) => map,
-         None => {
-             *custom_properties = Some(match *inherited {
--                Some(ref inherited) => inherited.iter().map(|(key, inherited_value)| {
-+                Some(ref inherited) => inherited.values.iter().map(|(key, inherited_value)| {
-                     (key, BorrowedSpecifiedValue {
-                         css: &inherited_value.css,
-                         first_token_type: inherited_value.first_token_type,
-                         last_token_type: inherited_value.last_token_type,
-                         references: None
-                     })
-                 }).collect(),
-                 None => HashMap::new(),
 @@ -383,18 +407,18 @@ pub fn cascade<'a>(custom_properties: &m
  
  /// Returns the final map of applicable custom properties.
@@ -244,7 +230,7 @@ diff --git a/servo/components/style/custom_properties.rs b/servo/components/styl
      let last_token_type = substitute_block(
          &mut input, &mut position, &mut substituted, &mut |name, substituted| {
 -            if let Some(value) = computed_values_map.as_ref().and_then(|map| map.get(name)) {
-+            if let Some(value) = computed_values_map.as_ref().and_then(|map| map.values.get(name)) {
++            if let Some(value) = computed_values_map.as_ref().and_then(|map| map.get_computed_value(name)) {
                  substituted.push_variable(value);
                  Ok(value.last_token_type)
              } else {
@@ -506,7 +492,7 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
  
      let name = unsafe { Atom::from((&*name)) };
 -    let computed_value = match custom_properties.get(&name) {
-+    let computed_value = match custom_properties.get(name) {
++    let computed_value = match custom_properties.get_computed_value(&name) {
          Some(v) => v,
          None => return false,
      };
