@@ -6,7 +6,7 @@ Bug 1375555 - Part 1: Add name index to keep custom properties ordered. r?emilio
 diff --git a/servo/components/style/custom_properties.rs b/servo/components/style/custom_properties.rs
 --- a/servo/components/style/custom_properties.rs
 +++ b/servo/components/style/custom_properties.rs
-@@ -87,17 +87,40 @@ impl ToCss for ComputedValue {
+@@ -87,17 +87,41 @@ impl ToCss for ComputedValue {
          where W: fmt::Write,
      {
          dest.write_str(&self.css)
@@ -36,6 +36,7 @@ diff --git a/servo/components/style/custom_properties.rs b/servo/components/styl
 +        self.values.get(&(name as Name))
 +    }
 +
++    /// Get an iterator for custom properties computed values.
 +    pub fn iter(&self) -> hash_map::Iter<Name, ComputedValue> {
 +        self.values.iter()
 +    }
@@ -48,7 +49,7 @@ diff --git a/servo/components/style/custom_properties.rs b/servo/components/styl
              last_token_type: TokenSerializationType::nothing(),
              first_token_type: TokenSerializationType::nothing(),
          }
-@@ -330,30 +353,30 @@ fn parse_var_function<'i, 't>(input: &mu
+@@ -330,30 +354,30 @@ fn parse_var_function<'i, 't>(input: &mu
          refs.insert(Atom::from(name));
      }
      Ok(())
@@ -81,7 +82,7 @@ diff --git a/servo/components/style/custom_properties.rs b/servo/components/styl
                      })
                  }).collect(),
                  None => HashMap::new(),
-@@ -383,18 +406,18 @@ pub fn cascade<'a>(custom_properties: &m
+@@ -383,18 +407,18 @@ pub fn cascade<'a>(custom_properties: &m
  
  /// Returns the final map of applicable custom properties.
  ///
@@ -102,7 +103,7 @@ diff --git a/servo/components/style/custom_properties.rs b/servo/components/styl
      }
  }
  
-@@ -440,40 +463,46 @@ fn remove_cycles(map: &mut HashMap<&Name
+@@ -440,40 +464,46 @@ fn remove_cycles(map: &mut HashMap<&Name
      }
      for name in &to_remove {
          map.remove(name);
@@ -155,7 +156,7 @@ diff --git a/servo/components/style/custom_properties.rs b/servo/components/styl
          }
          return Ok(computed_value.last_token_type)
      }
-@@ -486,28 +515,29 @@ fn substitute_one(name: &Name,
+@@ -486,28 +516,29 @@ fn substitute_one(name: &Name,
          let mut input = ParserInput::new(&specified_value.css);
          let mut input = Parser::new(&mut input);
          let mut position = (input.position(), specified_value.first_token_type);
@@ -187,7 +188,7 @@ diff --git a/servo/components/style/custom_properties.rs b/servo/components/styl
          }
      } else {
          // The specified value contains no var() reference
-@@ -517,16 +547,17 @@ fn substitute_one(name: &Name,
+@@ -517,16 +548,17 @@ fn substitute_one(name: &Name,
              last_token_type: specified_value.last_token_type,
          }
      };
@@ -205,7 +206,7 @@ diff --git a/servo/components/style/custom_properties.rs b/servo/components/styl
  /// The `substitute_one` callback is called for each `var()` function in `input`.
  /// If the variable has its initial value,
  /// the callback should return `Err(())` and leave `partial_computed_value` unchanged.
-@@ -611,25 +642,25 @@ fn substitute_block<'i, 't, F>(input: &m
+@@ -611,25 +643,25 @@ fn substitute_block<'i, 't, F>(input: &m
      // </div>
      // ```
      Ok(last_token_type)
