@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  6cbe3d8b507d58c9474b60a9850c87b06f8b6d23
+# Parent  4707661b7d4a5afb002170c2e18c29c7e20ea00f
 Bug 1375555 - Part 2: Get custom props count from Servo side for nsComputedDOMStyle::GetLength. r?emilio
 
 diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
@@ -76,10 +76,36 @@ diff --git a/layout/style/nsComputedDOMStyle.cpp b/layout/style/nsComputedDOMSty
    RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
    val->SetString(variableValue);
  
+diff --git a/servo/components/style/custom_properties.rs b/servo/components/style/custom_properties.rs
+--- a/servo/components/style/custom_properties.rs
++++ b/servo/components/style/custom_properties.rs
+@@ -105,16 +105,22 @@ pub struct CustomPropertiesMap {
+     values: HashMap<Name, ComputedValue>,
+ }
+ 
+ impl CustomPropertiesMap {
+     /// Custom property computed value getter by name.
+     pub fn get(&self, name: Atom) -> Option<&ComputedValue> {
+         self.values.get(&(name as Name))
+     }
++
++    /// Get the count of custom properties computed values.
++    pub fn len(&self) -> usize {
++        debug_assert!(self.values.len() == self.index.len());
++        self.values.len()
++    }
+ }
+ 
+ impl ComputedValue {
+     fn empty() -> ComputedValue {
+         ComputedValue {
+             css: String::new(),
+             last_token_type: TokenSerializationType::nothing(),
+             first_token_type: TokenSerializationType::nothing(),
 diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 --- a/servo/ports/geckolib/glue.rs
 +++ b/servo/ports/geckolib/glue.rs
-@@ -3088,24 +3088,32 @@ pub extern "C" fn Servo_StyleSet_MightHa
+@@ -3122,24 +3122,32 @@ pub extern "C" fn Servo_StyleSet_MightHa
  #[no_mangle]
  pub extern "C" fn Servo_StyleSet_HasStateDependency(raw_data: RawServoStyleSetBorrowed,
                                                      state: u64) -> bool {
@@ -98,7 +124,7 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
      };
  
      let name = unsafe { Atom::from((&*name)) };
-     let computed_value = match custom_properties.values.get(&name) {
+     let computed_value = match custom_properties.get(name) {
          Some(v) => v,
          None => return false,
      };
@@ -110,7 +136,7 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 +#[no_mangle]
 +pub extern "C" fn Servo_GetCustomPropertiesCount(computed_values: ServoComputedValuesBorrowed) -> u32 {
 +    match ComputedValues::as_arc(&computed_values).custom_properties() {
-+        Some(p) => p.values.len() as u32,
++        Some(p) => p.len() as u32,
 +        None => 0,
 +    }
 +}
