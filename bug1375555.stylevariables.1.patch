@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  b76ce82bd409218278e0abfe25a69abd048992d7
+# Parent  4935b9338ba95ac5019451ee6859cc5e18117415
 Bug 1375555 - Part 3: Implement indexed getter for custom property names. r?emilio
 
 diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
@@ -70,15 +70,68 @@ diff --git a/layout/style/nsComputedDOMStyle.cpp b/layout/style/nsComputedDOMSty
  
    ClearCurrentStyleSources();
  }
+diff --git a/servo/components/style/custom_properties.rs b/servo/components/style/custom_properties.rs
+--- a/servo/components/style/custom_properties.rs
++++ b/servo/components/style/custom_properties.rs
+@@ -102,20 +102,31 @@ pub struct CustomPropertiesMap {
+     /// Custom property name index.
+     index: Vec<Name>,
+     /// Computed values indexed by custom property name.
+     values: HashMap<Name, ComputedValue>,
+ }
+ 
+ impl CustomPropertiesMap {
+     /// Custom property computed value getter by name.
+-    pub fn get(&self, name: Atom) -> Option<&ComputedValue> {
++    pub fn get_computed_value(&self, name: Atom) -> Option<&ComputedValue> {
+         self.values.get(&(name as Name))
+     }
+ 
++    /// Get the name of a custom property given its list index.
++    pub fn get_name_at(&self, index: u32) -> Option<&Name>
++    {
++        let index = index as usize;
++        if index >= self.len() {
++            return None;
++        }
++
++        Some(&self.index[index])
++    }
++
+     /// Get the count of custom properties computed values.
+     pub fn len(&self) -> usize {
+         debug_assert!(self.values.len() == self.index.len());
+         self.values.len()
+     }
+ }
+ 
+ impl ComputedValue {
 diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 --- a/servo/ports/geckolib/glue.rs
 +++ b/servo/ports/geckolib/glue.rs
-@@ -3112,8 +3112,28 @@ pub extern "C" fn Servo_GetCustomPropert
+@@ -3130,24 +3130,42 @@ pub extern "C" fn Servo_StyleSet_HasStat
+ pub extern "C" fn Servo_GetCustomPropertyValue(computed_values: ServoComputedValuesBorrowed,
+                                                name: *const nsAString, value: *mut nsAString) -> bool {
+     let custom_properties = match ComputedValues::as_arc(&computed_values).custom_properties() {
+         Some(p) => p,
+         None => return false,
+     };
+ 
+     let name = unsafe { Atom::from((&*name)) };
+-    let computed_value = match custom_properties.get(name) {
++    let computed_value = match custom_properties.get_computed_value(name) {
+         Some(v) => v,
+         None => return false,
+     };
+ 
+     computed_value.to_css(unsafe { value.as_mut().unwrap() }).unwrap();
+     true
+ }
  
  #[no_mangle]
  pub extern "C" fn Servo_GetCustomPropertiesCount(computed_values: ServoComputedValuesBorrowed) -> u32 {
      match ComputedValues::as_arc(&computed_values).custom_properties() {
-         Some(p) => p.values.len() as u32,
+         Some(p) => p.len() as u32,
          None => 0,
      }
  }
@@ -91,14 +144,12 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 +        None => return false,
 +    };
 +
-+    let index = index as usize;
-+
-+    if index >= custom_properties.index.len() {
-+        return false;
-+    }
-+
 +    let name = unsafe { name.as_mut().unwrap() };
-+    name.assign_utf8(&custom_properties.index[index].to_string());
++    let property_name = match custom_properties.get_name_at(index) {
++        Some(n) => n,
++        None => return false,
++    };
++    name.assign_utf8(&property_name.to_string());
 +
 +    true
 +}
