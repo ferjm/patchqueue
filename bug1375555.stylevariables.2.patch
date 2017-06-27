@@ -32,7 +32,7 @@ diff --git a/servo/components/style/custom_properties.rs b/servo/components/styl
 +impl CustomPropertiesMap {
 +    /// Custom property computed value getter by name.
 +    pub fn get(&self, name: Atom) -> Option<&ComputedValue> {
-+        debug_assert!(self.index.contains(name));
++        debug_assert!(self.index.contains(&name));
 +        self.values.get(&(name as Name))
 +    }
 +}
