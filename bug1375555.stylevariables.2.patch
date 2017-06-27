@@ -6,6 +6,25 @@ Bug 1375555 - Part 1: Add name index to keep custom properties ordered. r?emilio
 diff --git a/servo/components/style/custom_properties.rs b/servo/components/style/custom_properties.rs
 --- a/servo/components/style/custom_properties.rs
 +++ b/servo/components/style/custom_properties.rs
+@@ -8,17 +8,17 @@
+ 
+ use Atom;
+ use cssparser::{Delimiter, Parser, ParserInput, SourcePosition, Token, TokenSerializationType};
+ use parser::ParserContext;
+ use properties::{CSSWideKeyword, DeclaredValue};
+ use selectors::parser::SelectorParseError;
+ use std::ascii::AsciiExt;
+ use std::borrow::Cow;
+-use std::collections::{HashMap, HashSet};
++use std::collections::{HashMap, hash_map, HashSet};
+ use std::fmt;
+ use style_traits::{HasViewportPercentage, ToCss, StyleParseError, ParseError};
+ use stylearc::Arc;
+ 
+ /// A custom property name is just an `Atom`.
+ ///
+ /// Note that this does not include the `--` prefix
+ pub type Name = Atom;
 @@ -87,17 +87,41 @@ impl ToCss for ComputedValue {
          where W: fmt::Write,
      {
