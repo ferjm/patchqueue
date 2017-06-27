@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  4935b9338ba95ac5019451ee6859cc5e18117415
+# Parent  da9b97f4a8fd2d7e76b177477d6f3ece9b067b59
 Bug 1375555 - Part 3: Implement indexed getter for custom property names. r?emilio
 
 diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
@@ -73,7 +73,7 @@ diff --git a/layout/style/nsComputedDOMStyle.cpp b/layout/style/nsComputedDOMSty
 diff --git a/servo/components/style/custom_properties.rs b/servo/components/style/custom_properties.rs
 --- a/servo/components/style/custom_properties.rs
 +++ b/servo/components/style/custom_properties.rs
-@@ -102,20 +102,31 @@ pub struct CustomPropertiesMap {
+@@ -102,21 +102,32 @@ pub struct CustomPropertiesMap {
      /// Custom property name index.
      index: Vec<Name>,
      /// Computed values indexed by custom property name.
@@ -84,6 +84,7 @@ diff --git a/servo/components/style/custom_properties.rs b/servo/components/styl
      /// Custom property computed value getter by name.
 -    pub fn get(&self, name: Atom) -> Option<&ComputedValue> {
 +    pub fn get_computed_value(&self, name: Atom) -> Option<&ComputedValue> {
+         debug_assert!(self.index.contains(name));
          self.values.get(&(name as Name))
      }
  
