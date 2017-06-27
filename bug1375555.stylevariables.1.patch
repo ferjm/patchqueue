@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  da9b97f4a8fd2d7e76b177477d6f3ece9b067b59
+# Parent  e0ecd1b1b6b01112506b41c52994ae3df08c98e0
 Bug 1375555 - Part 3: Implement indexed getter for custom property names. r?emilio
 
 diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
@@ -84,7 +84,7 @@ diff --git a/servo/components/style/custom_properties.rs b/servo/components/styl
      /// Custom property computed value getter by name.
 -    pub fn get(&self, name: Atom) -> Option<&ComputedValue> {
 +    pub fn get_computed_value(&self, name: Atom) -> Option<&ComputedValue> {
-         debug_assert!(self.index.contains(name));
+         debug_assert!(self.index.contains(&name));
          self.values.get(&(name as Name))
      }
  
@@ -99,14 +99,14 @@ diff --git a/servo/components/style/custom_properties.rs b/servo/components/styl
 +        Some(&self.index[index])
 +    }
 +
+     /// Get an iterator for custom properties computed values.
+     pub fn iter(&self) -> hash_map::Iter<Name, ComputedValue> {
+         self.values.iter()
+     }
+ 
      /// Get the count of custom properties computed values.
      pub fn len(&self) -> usize {
          debug_assert!(self.values.len() == self.index.len());
-         self.values.len()
-     }
- }
- 
- impl ComputedValue {
 diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 --- a/servo/ports/geckolib/glue.rs
 +++ b/servo/ports/geckolib/glue.rs
