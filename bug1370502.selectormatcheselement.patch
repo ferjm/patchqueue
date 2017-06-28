@@ -15,7 +15,7 @@ diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
                     uint64_t* specificity)
  SERVO_BINDING_FUNC(Servo_StyleRule_GetSelectorCount, void,
                     RawServoStyleRuleBorrowed rule, uint32_t* count)
-+SERVO_BINDING_FUNC(Servo_SelectorMatchesElement, bool,
++SERVO_BINDING_FUNC(Servo_StyleRule_SelectorMatchesElement, bool,
 +                   RawServoStyleRuleBorrowed, RawGeckoElementBorrowed,
 +                   uint32_t index)
  SERVO_BINDING_FUNC(Servo_ImportRule_GetHref, void,
@@ -40,9 +40,9 @@ diff --git a/layout/style/ServoStyleRule.cpp b/layout/style/ServoStyleRule.cpp
  {
 -  // TODO Bug 1370502
 +  // XXX aPseudo
-+  aMatches = Servo_StyleRule_SelectorMatchesElement(mRawRule,
-+                                                    aElement,
-+                                                    aSelectorIndex);
++  *aMatches = Servo_StyleRule_SelectorMatchesElement(mRawRule,
++                                                     aElement,
++                                                     aSelectorIndex);
    return NS_OK;
  }
  
