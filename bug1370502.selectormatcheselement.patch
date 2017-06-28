@@ -50,7 +50,25 @@ diff --git a/layout/style/ServoStyleRule.cpp b/layout/style/ServoStyleRule.cpp
 diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 --- a/servo/ports/geckolib/glue.rs
 +++ b/servo/ports/geckolib/glue.rs
-@@ -1254,16 +1254,23 @@ pub extern "C" fn Servo_StyleRule_GetSpe
+@@ -2,16 +2,17 @@
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ use atomic_refcell::AtomicRefMut;
+ use cssparser::{Parser, ParserInput};
+ use cssparser::ToCss as ParserToCss;
+ use env_logger::LogBuilder;
+ use selectors::Element;
++use selectors::Matching::{MatchingContext, MatchingMode, matches_selector_list};
+ use std::env;
+ use std::fmt::Write;
+ use std::ptr;
+ use style::context::{QuirksMode, SharedStyleContext, StyleContext};
+ use style::context::ThreadLocalStyleContext;
+ use style::data::{ElementData, ElementStyles, RestyleData};
+ use style::dom::{AnimationOnlyDirtyDescendants, DirtyDescendants};
+ use style::dom::{ShowSubtreeData, TElement, TNode};
+@@ -1254,16 +1255,30 @@ pub extern "C" fn Servo_StyleRule_GetSpe
              *specificity = 0;
              return;
          }
@@ -62,7 +80,14 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 +pub extern "C" fn Servo_StyleRule_SelectorMatchesElement(rule: RawServoStyleRuleBorrowed,
 +                                                         element: RawGeckoElementBorrowed,
 +                                                         index: u32) -> bool {
-+    true
++    read_locked_arc(rule, |rule: &StyleRule| {
++        let index = index as usize;
++        if index >= rule.selectors.0.len() {
++            return false;
++        }
++        let mut ctx = MatchingContext::new(MatchingMode::Normal, None, QuirksMode::NoQuirks);
++        matches_selector_list(&rule.selectors.0[index], &GeckoElement(element), &mut ctx)
++    })
 +}
 +
 +#[no_mangle]
