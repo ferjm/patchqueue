@@ -57,7 +57,7 @@ diff --git a/servo/components/style/custom_properties.rs b/servo/components/styl
 +        }
 +    }
 +
-+    /// Insert a computed value if it has not previously being inserted.
++    /// Insert a computed value if it has not previously been inserted.
 +    pub fn insert(&mut self, name: &Name, value: ComputedValue) {
 +        debug_assert!(!self.index.contains(name));
 +        if self.index.contains(name) {
