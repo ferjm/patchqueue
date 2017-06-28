@@ -29,7 +29,7 @@ diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
 diff --git a/layout/style/ServoStyleRule.cpp b/layout/style/ServoStyleRule.cpp
 --- a/layout/style/ServoStyleRule.cpp
 +++ b/layout/style/ServoStyleRule.cpp
-@@ -274,13 +274,16 @@ ServoStyleRule::GetSpecificity(uint32_t 
+@@ -274,13 +274,15 @@ ServoStyleRule::GetSpecificity(uint32_t 
  }
  
  nsresult
@@ -39,7 +39,6 @@ diff --git a/layout/style/ServoStyleRule.cpp b/layout/style/ServoStyleRule.cpp
                                         bool* aMatches)
  {
 -  // TODO Bug 1370502
-+  // XXX aPseudo
 +  *aMatches = Servo_StyleRule_SelectorMatchesElement(mRawRule,
 +                                                     aElement,
 +                                                     aSelectorIndex);
