@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  53477d584130945864c4491632f88da437353356
+# Parent  cc903e3f61894e60c3b0efaf05e9a446d1d85888
 Bug 1375555 - Part 1: Add name index to keep custom properties ordered. r?emilio
 
 diff --git a/servo/components/style/custom_properties.rs b/servo/components/style/custom_properties.rs
@@ -255,86 +255,10 @@ diff --git a/servo/components/style/custom_properties.rs b/servo/components/styl
          }
      )?;
      substituted.push_from(position, &input, last_token_type);
-diff --git a/servo/components/style/properties/gecko.mako.rs b/servo/components/style/properties/gecko.mako.rs
---- a/servo/components/style/properties/gecko.mako.rs
-+++ b/servo/components/style/properties/gecko.mako.rs
-@@ -6,17 +6,17 @@
- 
- <%!
-     from data import to_rust_ident, to_camel_case
-     from data import Keyword
- %>
- <%namespace name="helpers" file="/helpers.mako.rs" />
- 
- use app_units::Au;
--use custom_properties::ComputedValuesMap;
-+use custom_properties::CustomPropertiesMap;
- use gecko_bindings::bindings;
- % for style_struct in data.style_structs:
- use gecko_bindings::structs::${style_struct.gecko_ffi_name};
- use gecko_bindings::bindings::Gecko_Construct_Default_${style_struct.gecko_ffi_name};
- use gecko_bindings::bindings::Gecko_CopyConstruct_${style_struct.gecko_ffi_name};
- use gecko_bindings::bindings::Gecko_Destroy_${style_struct.gecko_ffi_name};
- % endfor
- use gecko_bindings::bindings::Gecko_Construct_nsStyleVariables;
-@@ -77,32 +77,32 @@ pub mod style_structs {
- 
- 
- #[derive(Clone)]
- pub struct ComputedValues {
-     % for style_struct in data.style_structs:
-     ${style_struct.ident}: Arc<style_structs::${style_struct.name}>,
-     % endfor
- 
--    custom_properties: Option<Arc<ComputedValuesMap>>,
-+    custom_properties: Option<Arc<CustomPropertiesMap>>,
-     pub writing_mode: WritingMode,
-     pub font_computation_data: FontComputationData,
- 
-     /// The rule node representing the ordered list of rules matched for this
-     /// node.  Can be None for default values and text nodes.  This is
-     /// essentially an optimization to avoid referencing the root rule node.
-     pub rules: Option<StrongRuleNode>,
-     /// The element's computed values if visited, only computed if there's a
-     /// relevant link for this element. A element's "relevant link" is the
-     /// element being matched if it is a link or the nearest ancestor link.
-     visited_style: Option<Arc<ComputedValues>>,
- }
- 
- impl ComputedValues {
--    pub fn new(custom_properties: Option<Arc<ComputedValuesMap>>,
-+    pub fn new(custom_properties: Option<Arc<CustomPropertiesMap>>,
-                writing_mode: WritingMode,
-                font_size_keyword: Option<(longhands::font_size::KeywordSize, f32)>,
-                rules: Option<StrongRuleNode>,
-                visited_style: Option<Arc<ComputedValues>>,
-                % for style_struct in data.style_structs:
-                ${style_struct.ident}: Arc<style_structs::${style_struct.name}>,
-                % endfor
-     ) -> Self {
-@@ -179,17 +179,17 @@ impl ComputedValues {
-     }
- 
-     /// Clone the visited style.  Used for inheriting parent styles in
-     /// StyleBuilder::for_inheritance.
-     pub fn clone_visited_style(&self) -> Option<Arc<ComputedValues>> {
-         self.visited_style.clone()
-     }
- 
--    pub fn custom_properties(&self) -> Option<Arc<ComputedValuesMap>> {
-+    pub fn custom_properties(&self) -> Option<Arc<CustomPropertiesMap>> {
-         self.custom_properties.clone()
-     }
- 
-     #[allow(non_snake_case)]
-     pub fn has_moz_binding(&self) -> bool {
-         !self.get_box().gecko.mBinding.mPtr.mRawPtr.is_null()
-     }
- 
 diff --git a/servo/components/style/properties/properties.mako.rs b/servo/components/style/properties/properties.mako.rs
 --- a/servo/components/style/properties/properties.mako.rs
 +++ b/servo/components/style/properties/properties.mako.rs
-@@ -367,17 +367,17 @@ impl PropertyDeclarationIdSet {
+@@ -370,17 +370,17 @@ impl PropertyDeclarationIdSet {
          /// the resulting declared value.
          #[allow(non_snake_case)]
          fn substitute_variables_${property.ident}<F>(
@@ -353,7 +277,7 @@ diff --git a/servo/components/style/properties/properties.mako.rs b/servo/compon
              % else:
                  where F: FnMut(&DeclaredValue<longhands::${property.ident}::SpecifiedValue>)
              % endif
-@@ -398,17 +398,17 @@ impl PropertyDeclarationIdSet {
+@@ -401,17 +401,17 @@ impl PropertyDeclarationIdSet {
  
          #[allow(non_snake_case)]
          #[inline(never)]
@@ -372,11 +296,11 @@ diff --git a/servo/components/style/properties/properties.mako.rs b/servo/compon
                  % else:
                      where F: FnMut(&DeclaredValue<longhands::${property.ident}::SpecifiedValue>)
                  % endif
-@@ -1812,17 +1812,17 @@ pub type ServoComputedValues = ComputedV
+@@ -1811,17 +1811,17 @@ pub type ServoComputedValues = ComputedV
+ /// every kind of style struct.
  ///
  /// When needed, the structs may be copied in order to get mutated.
- #[cfg(feature = "servo")]
- #[cfg_attr(feature = "servo", derive(Clone))]
+ #[derive(Clone)]
  pub struct ComputedValues {
      % for style_struct in data.active_style_structs():
          ${style_struct.ident}: Arc<style_structs::${style_struct.name}>,
@@ -388,29 +312,29 @@ diff --git a/servo/components/style/properties/properties.mako.rs b/servo/compon
      /// The keyword behind the current font-size property, if any
      pub font_computation_data: FontComputationData,
  
-     /// The rule node representing the ordered list of rules matched for this
-     /// node.  Can be None for default values and text nodes.  This is
-     /// essentially an optimization to avoid referencing the root rule node.
-@@ -1831,17 +1831,17 @@ pub struct ComputedValues {
+     /// A set of flags we use to store misc information regarding this style.
+     pub flags: ComputedValueFlags,
+ 
+@@ -1834,17 +1834,17 @@ pub struct ComputedValues {
      /// relevant link for this element. A element's "relevant link" is the
      /// element being matched if it is a link or the nearest ancestor link.
      visited_style: Option<Arc<ComputedValues>>,
  }
  
- #[cfg(feature = "servo")]
  impl ComputedValues {
      /// Construct a `ComputedValues` instance.
--    pub fn new(custom_properties: Option<Arc<::custom_properties::ComputedValuesMap>>,
-+    pub fn new(custom_properties: Option<Arc<::custom_properties::CustomPropertiesMap>>,
-                writing_mode: WritingMode,
-                font_size_keyword: Option<(longhands::font_size::KeywordSize, f32)>,
-                rules: Option<StrongRuleNode>,
-                visited_style: Option<Arc<ComputedValues>>,
-             % for style_struct in data.active_style_structs():
-                ${style_struct.ident}: Arc<style_structs::${style_struct.name}>,
-             % endfor
-     ) -> Self {
-@@ -1905,25 +1905,25 @@ impl ComputedValues {
+     pub fn new(
+-        custom_properties: Option<Arc<::custom_properties::ComputedValuesMap>>,
++        custom_properties: Option<Arc<::custom_properties::CustomPropertiesMap>>,
+         writing_mode: WritingMode,
+         font_size_keyword: Option<(longhands::font_size::KeywordSize, f32)>,
+         flags: ComputedValueFlags,
+         rules: Option<StrongRuleNode>,
+         visited_style: Option<Arc<ComputedValues>>,
+         % for style_struct in data.active_style_structs():
+         ${style_struct.ident}: Arc<style_structs::${style_struct.name}>,
+         % endfor
+@@ -1932,25 +1932,25 @@ impl ComputedValues {
      /// StyleBuilder::for_inheritance.
      pub fn clone_visited_style(&self) -> Option<Arc<ComputedValues>> {
          self.visited_style.clone()
@@ -428,22 +352,22 @@ diff --git a/servo/components/style/properties/properties.mako.rs b/servo/compon
      ///
      /// Cloning the Arc here is fine because it only happens in the case where
      /// we have custom properties, and those are both rare and expensive.
--    fn custom_properties(&self) -> Option<Arc<::custom_properties::ComputedValuesMap>> {
-+    fn custom_properties(&self) -> Option<Arc<::custom_properties::CustomPropertiesMap>> {
+-    pub fn custom_properties(&self) -> Option<Arc<::custom_properties::ComputedValuesMap>> {
++    pub fn custom_properties(&self) -> Option<Arc<::custom_properties::CustomPropertiesMap>> {
          self.custom_properties.clone()
      }
  
-     /// Whether this style has a -moz-binding value. This is always false for
-     /// Servo for obvious reasons.
-     pub fn has_moz_binding(&self) -> bool { false }
- 
-     /// Returns whether this style's display value is equal to contents.
-@@ -2295,17 +2295,17 @@ impl<'a, T: 'a> Deref for StyleStructRef
- ///
- /// This allows holding references to the parent/default computed values without
+     /// Get a declaration block representing the computed value for a given
+     /// property.
+     ///
+     /// Currently only implemented for animated properties.
+     pub fn to_declaration_block(
+@@ -2396,17 +2396,17 @@ impl<'a, T: 'a> Deref for StyleStructRef
  /// actually cloning them, until we either build the style, or mutate the
  /// inherited value.
  pub struct StyleBuilder<'a> {
+     /// The style we're inheriting from.
+     inherited_style: &'a ComputedValues,
      /// The rule node representing the ordered list of rules matched for this
      /// node.
      rules: Option<StrongRuleNode>,
@@ -457,26 +381,26 @@ diff --git a/servo/components/style/properties/properties.mako.rs b/servo/compon
      pub font_size_keyword: Option<(longhands::font_size::KeywordSize, f32)>,
      /// The element's style if visited, only computed if there's a relevant link
      /// for this element.  A element's "relevant link" is the element being
-@@ -2315,17 +2315,17 @@ pub struct StyleBuilder<'a> {
-         ${style_struct.ident}: StyleStructRef<'a, style_structs::${style_struct.name}>,
-     % endfor
+@@ -2418,17 +2418,17 @@ pub struct StyleBuilder<'a> {
  }
  
  impl<'a> StyleBuilder<'a> {
      /// Trivially construct a `StyleBuilder`.
-     pub fn new(
+     fn new(
+         inherited_style: &'a ComputedValues,
+         reset_style: &'a ComputedValues,
          rules: Option<StrongRuleNode>,
 -        custom_properties: Option<Arc<::custom_properties::ComputedValuesMap>>,
 +        custom_properties: Option<Arc<::custom_properties::CustomPropertiesMap>>,
          writing_mode: WritingMode,
          font_size_keyword: Option<(longhands::font_size::KeywordSize, f32)>,
          visited_style: Option<Arc<ComputedValues>>,
-         % for style_struct in data.active_style_structs():
-             ${style_struct.ident}: &'a Arc<style_structs::${style_struct.name}>,
-         % endfor
      ) -> Self {
          StyleBuilder {
-@@ -2433,17 +2433,17 @@ impl<'a> StyleBuilder<'a> {
+             inherited_style,
+             rules,
+             custom_properties,
+@@ -2539,17 +2539,17 @@ impl<'a> StyleBuilder<'a> {
                              % endfor
          )
      }
@@ -498,7 +422,7 @@ diff --git a/servo/components/style/properties/properties.mako.rs b/servo/compon
 diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 --- a/servo/ports/geckolib/glue.rs
 +++ b/servo/ports/geckolib/glue.rs
-@@ -3130,16 +3130,16 @@ pub extern "C" fn Servo_StyleSet_HasStat
+@@ -3188,16 +3188,16 @@ pub extern "C" fn Servo_StyleSet_HasStat
  pub extern "C" fn Servo_GetCustomProperty(computed_values: ServoComputedValuesBorrowed,
                                            name: *const nsAString, value: *mut nsAString) -> bool {
      let custom_properties = match ComputedValues::as_arc(&computed_values).custom_properties() {
