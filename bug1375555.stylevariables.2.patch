@@ -70,8 +70,8 @@ diff --git a/servo/components/style/custom_properties.rs b/servo/components/styl
 +
 +    /// Custom property computed value getter by name.
 +    pub fn get_computed_value(&self, name: &Name) -> Option<&ComputedValue> {
-+        debug_assert!(self.index.contains(name));
 +        if self.index.contains(name) {
++            debug_assert!(self.values.contains_key(name));
 +            self.values.get(name)
 +        } else {
 +            None
