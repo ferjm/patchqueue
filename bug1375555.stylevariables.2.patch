@@ -25,7 +25,7 @@ diff --git a/servo/components/style/custom_properties.rs b/servo/components/styl
  ///
  /// Note that this does not include the `--` prefix
  pub type Name = Atom;
-@@ -87,17 +87,41 @@ impl ToCss for ComputedValue {
+@@ -87,17 +87,64 @@ impl ToCss for ComputedValue {
          where W: fmt::Write,
      {
          dest.write_str(&self.css)
@@ -49,10 +49,33 @@ diff --git a/servo/components/style/custom_properties.rs b/servo/components/styl
 +}
 +
 +impl CustomPropertiesMap {
++    /// Creates a new custom properties map.
++    pub fn new() -> Self {
++        CustomPropertiesMap {
++            index: Vec::new(),
++            values: HashMap::new(),
++        }
++    }
++
++    /// Insert a computed value if it has not previously being inserted.
++    pub fn insert(&mut self, name: &Name, value: ComputedValue) {
++        debug_assert!(!self.index.contains(name));
++        if self.index.contains(name) {
++            warn!("Already stored custom property");
++            return;
++        }
++        self.index.push(name.clone());
++        self.values.insert(name.clone(), value);
++    }
++
 +    /// Custom property computed value getter by name.
-+    pub fn get_computed_value(&self, name: &Atom) -> Option<&ComputedValue> {
++    pub fn get_computed_value(&self, name: &Name) -> Option<&ComputedValue> {
 +        debug_assert!(self.index.contains(name));
-+        self.values.get(name as &Name)
++        if self.index.contains(name) {
++            self.values.get(name)
++        } else {
++            None
++        }
 +    }
 +
 +    /// Get an iterator for custom properties computed values.
@@ -68,7 +91,7 @@ diff --git a/servo/components/style/custom_properties.rs b/servo/components/styl
              last_token_type: TokenSerializationType::nothing(),
              first_token_type: TokenSerializationType::nothing(),
          }
-@@ -330,17 +354,17 @@ fn parse_var_function<'i, 't>(input: &mu
+@@ -330,17 +377,17 @@ fn parse_var_function<'i, 't>(input: &mu
          refs.insert(Atom::from(name));
      }
      Ok(())
@@ -87,7 +110,7 @@ diff --git a/servo/components/style/custom_properties.rs b/servo/components/styl
          return;
      }
  
-@@ -383,18 +407,18 @@ pub fn cascade<'a>(custom_properties: &m
+@@ -383,18 +430,18 @@ pub fn cascade<'a>(custom_properties: &m
  
  /// Returns the final map of applicable custom properties.
  ///
@@ -108,7 +131,7 @@ diff --git a/servo/components/style/custom_properties.rs b/servo/components/styl
      }
  }
  
-@@ -440,40 +464,46 @@ fn remove_cycles(map: &mut HashMap<&Name
+@@ -440,43 +487,44 @@ fn remove_cycles(map: &mut HashMap<&Name
      }
      for name in &to_remove {
          map.remove(name);
@@ -122,8 +145,7 @@ diff --git a/servo/components/style/custom_properties.rs b/servo/components/styl
 -    let mut computed_values_map = HashMap::new();
 +                  inherited: &Option<Arc<CustomPropertiesMap>>)
 +                  -> CustomPropertiesMap {
-+    let mut computed_values = HashMap::new();
-+    let mut index = Vec::new();
++    let mut custom_properties_map = CustomPropertiesMap::new();
      let mut invalid = HashSet::new();
      for (&name, value) in &specified_values_map {
          // If this value is invalid at computed-time it won’t be inserted in computed_values_map.
@@ -131,14 +153,11 @@ diff --git a/servo/components/style/custom_properties.rs b/servo/components/styl
          let _ = substitute_one(
              name, value, &specified_values_map, inherited, None,
 -            &mut computed_values_map, &mut invalid);
-+            &mut computed_values, &mut index, &mut invalid);
++            &mut custom_properties_map, &mut invalid);
      }
 -    computed_values_map
 +
-+    CustomPropertiesMap {
-+        index: index,
-+        values: computed_values,
-+    }
++    custom_properties_map
  }
  
  /// Replace `var()` functions for one custom property.
@@ -151,17 +170,21 @@ diff --git a/servo/components/style/custom_properties.rs b/servo/components/styl
 -                  inherited: &Option<Arc<HashMap<Name, ComputedValue>>>,
 +                  inherited: &Option<Arc<CustomPropertiesMap>>,
                    partial_computed_value: Option<&mut ComputedValue>,
-                   computed_values_map: &mut HashMap<Name, ComputedValue>,
-+                  computed_values_index: &mut Vec<Name>,
+-                  computed_values_map: &mut HashMap<Name, ComputedValue>,
++                  custom_properties_map: &mut CustomPropertiesMap,
                    invalid: &mut HashSet<Name>)
                    -> Result<TokenSerializationType, ()> {
-     if let Some(computed_value) = computed_values_map.get(name) {
+-    if let Some(computed_value) = computed_values_map.get(name) {
++    if let Some(computed_value) = custom_properties_map.get_computed_value(&name) {
          if let Some(partial_computed_value) = partial_computed_value {
              partial_computed_value.push_variable(computed_value)
          }
          return Ok(computed_value.last_token_type)
      }
-@@ -486,28 +516,29 @@ fn substitute_one(name: &Name,
+ 
+     if invalid.contains(name) {
+         return Err(());
+@@ -486,28 +534,28 @@ fn substitute_one(name: &Name,
          let mut input = ParserInput::new(&specified_value.css);
          let mut input = Parser::new(&mut input);
          let mut position = (input.position(), specified_value.first_token_type);
@@ -171,8 +194,7 @@ diff --git a/servo/components/style/custom_properties.rs b/servo/components/styl
                  if let Some(other_specified_value) = specified_values_map.get(name) {
                      substitute_one(name, other_specified_value, specified_values_map, inherited,
 -                                   Some(partial_computed_value), computed_values_map, invalid)
-+                                   Some(partial_computed_value), computed_values_map, computed_values_index,
-+                                   invalid)
++                                   Some(partial_computed_value), custom_properties_map, invalid)
                  } else {
                      Err(())
                  }
@@ -193,7 +215,8 @@ diff --git a/servo/components/style/custom_properties.rs b/servo/components/styl
          }
      } else {
          // The specified value contains no var() reference
-@@ -517,16 +548,17 @@ fn substitute_one(name: &Name,
+@@ -516,17 +564,17 @@ fn substitute_one(name: &Name,
+             first_token_type: specified_value.first_token_type,
              last_token_type: specified_value.last_token_type,
          }
      };
@@ -201,8 +224,8 @@ diff --git a/servo/components/style/custom_properties.rs b/servo/components/styl
          partial_computed_value.push_variable(&computed_value)
      }
      let last_token_type = computed_value.last_token_type;
-     computed_values_map.insert(name.clone(), computed_value);
-+    computed_values_index.push(name.clone());
+-    computed_values_map.insert(name.clone(), computed_value);
++    custom_properties_map.insert(name, computed_value);
      Ok(last_token_type)
  }
  
@@ -211,7 +234,7 @@ diff --git a/servo/components/style/custom_properties.rs b/servo/components/styl
  /// The `substitute_one` callback is called for each `var()` function in `input`.
  /// If the variable has its initial value,
  /// the callback should return `Err(())` and leave `partial_computed_value` unchanged.
-@@ -611,25 +643,25 @@ fn substitute_block<'i, 't, F>(input: &m
+@@ -611,25 +659,25 @@ fn substitute_block<'i, 't, F>(input: &m
      // </div>
      // ```
      Ok(last_token_type)
