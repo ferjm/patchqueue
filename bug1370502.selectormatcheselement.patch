@@ -1,0 +1,76 @@
+# HG changeset patch
+# User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
+# Parent  12cc06ffe50eeb962338c00181de24b9410f38d5
+Bug 1370502 - stylo: Implement ServoStyleRule::SelectorMatchesElement. r?emilio
+
+diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
+--- a/layout/style/ServoBindingList.h
++++ b/layout/style/ServoBindingList.h
+@@ -162,16 +162,19 @@ SERVO_BINDING_FUNC(Servo_StyleRule_GetSe
+ SERVO_BINDING_FUNC(Servo_StyleRule_GetSelectorTextAtIndex, void,
+                    RawServoStyleRuleBorrowed rule, uint32_t index,
+                    nsAString* result)
+ SERVO_BINDING_FUNC(Servo_StyleRule_GetSpecificityAtIndex, void,
+                    RawServoStyleRuleBorrowed rule, uint32_t index,
+                    uint64_t* specificity)
+ SERVO_BINDING_FUNC(Servo_StyleRule_GetSelectorCount, void,
+                    RawServoStyleRuleBorrowed rule, uint32_t* count)
++SERVO_BINDING_FUNC(Servo_SelectorMatchesElement, bool,
++                   RawServoStyleRuleBorrowed, RawGeckoElementBorrowed,
++                   uint32_t index)
+ SERVO_BINDING_FUNC(Servo_ImportRule_GetHref, void,
+                    RawServoImportRuleBorrowed rule, nsAString* result)
+ SERVO_BINDING_FUNC(Servo_ImportRule_GetSheet, const RawServoStyleSheet*,
+                    RawServoImportRuleBorrowed rule)
+ SERVO_BINDING_FUNC(Servo_Keyframe_GetKeyText, void,
+                    RawServoKeyframeBorrowed keyframe, nsAString* result)
+ // Returns whether it successfully changes the key text.
+ SERVO_BINDING_FUNC(Servo_Keyframe_SetKeyText, bool,
+diff --git a/layout/style/ServoStyleRule.cpp b/layout/style/ServoStyleRule.cpp
+--- a/layout/style/ServoStyleRule.cpp
++++ b/layout/style/ServoStyleRule.cpp
+@@ -274,13 +274,16 @@ ServoStyleRule::GetSpecificity(uint32_t 
+ }
+ 
+ nsresult
+ ServoStyleRule::SelectorMatchesElement(Element* aElement,
+                                        uint32_t aSelectorIndex,
+                                        const nsAString& aPseudo,
+                                        bool* aMatches)
+ {
+-  // TODO Bug 1370502
++  // XXX aPseudo
++  aMatches = Servo_StyleRule_SelectorMatchesElement(mRawRule,
++                                                    aElement,
++                                                    aSelectorIndex);
+   return NS_OK;
+ }
+ 
+ } // namespace mozilla
+diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
+--- a/servo/ports/geckolib/glue.rs
++++ b/servo/ports/geckolib/glue.rs
+@@ -1254,16 +1254,23 @@ pub extern "C" fn Servo_StyleRule_GetSpe
+             *specificity = 0;
+             return;
+         }
+         *specificity = rule.selectors.0[index].selector.specificity() as u64;
+     })
+ }
+ 
+ #[no_mangle]
++pub extern "C" fn Servo_StyleRule_SelectorMatchesElement(rule: RawServoStyleRuleBorrowed,
++                                                         element: RawGeckoElementBorrowed,
++                                                         index: u32) -> bool {
++    true
++}
++
++#[no_mangle]
+ pub extern "C" fn Servo_ImportRule_GetHref(rule: RawServoImportRuleBorrowed, result: *mut nsAString) {
+     read_locked_arc(rule, |rule: &ImportRule| {
+         write!(unsafe { &mut *result }, "{}", rule.url.as_str()).unwrap();
+     })
+ }
+ 
+ #[no_mangle]
+ pub extern "C" fn Servo_ImportRule_GetSheet(rule: RawServoImportRuleBorrowed) -> *const RawServoStyleSheet {
