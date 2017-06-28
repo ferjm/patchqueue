@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  dd2231685968b5c57c9c56ae90a2c4dc3b786424
+# Parent  a5ac011f185783624c351da0fc77e0922045779f
 Bug 1375555 - Part 2: Get custom props count from Servo side for nsComputedDOMStyle::GetLength. r?emilio
 
 diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
@@ -79,9 +79,9 @@ diff --git a/layout/style/nsComputedDOMStyle.cpp b/layout/style/nsComputedDOMSty
 diff --git a/servo/components/style/custom_properties.rs b/servo/components/style/custom_properties.rs
 --- a/servo/components/style/custom_properties.rs
 +++ b/servo/components/style/custom_properties.rs
-@@ -111,16 +111,22 @@ impl CustomPropertiesMap {
-         debug_assert!(self.index.contains(&name));
-         self.values.get(&(name as Name))
+@@ -134,16 +134,22 @@ impl CustomPropertiesMap {
+             None
+         }
      }
  
      /// Get an iterator for custom properties computed values.
@@ -124,7 +124,7 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
      };
  
      let name = unsafe { Atom::from((&*name)) };
-     let computed_value = match custom_properties.get(name) {
+     let computed_value = match custom_properties.get_computed_value(&name) {
          Some(v) => v,
          None => return false,
      };
