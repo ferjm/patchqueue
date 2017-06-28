@@ -124,7 +124,7 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
      let name = unsafe { Atom::from((&*name)) };
      let computed_value = match custom_properties.get_computed_value(&name) {
          Some(v) => v,
-@@ -3146,8 +3147,26 @@ pub extern "C" fn Servo_GetCustomPropert
+@@ -3146,8 +3147,27 @@ pub extern "C" fn Servo_GetCustomPropert
  
  #[no_mangle]
  pub extern "C" fn Servo_GetCustomPropertiesCount(computed_values: ServoComputedValuesBorrowed) -> u32 {
@@ -136,7 +136,8 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 +
 +#[no_mangle]
 +pub extern "C" fn Servo_GetCustomPropertyNameAt(computed_values: ServoComputedValuesBorrowed,
-+                                                index: u32, name: *mut nsAString) -> bool {
++                                                index: u32,
++                                                name: *mut nsAString) -> bool {
 +    let custom_properties = match ComputedValues::as_arc(&computed_values).custom_properties() {
 +        Some(p) => p,
 +        None => return false,
