@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  5b6d5747243ae7b8c9038402ca282344a254befc
+# Parent  b70fd614230ec5f71b320d5fe777dd890fde3e2f
 Bug 1375555 - Part 3: Implement indexed getter for custom property names. r?emilio
 
 diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
@@ -73,24 +73,18 @@ diff --git a/layout/style/nsComputedDOMStyle.cpp b/layout/style/nsComputedDOMSty
 diff --git a/servo/components/style/custom_properties.rs b/servo/components/style/custom_properties.rs
 --- a/servo/components/style/custom_properties.rs
 +++ b/servo/components/style/custom_properties.rs
-@@ -130,16 +130,27 @@ impl CustomPropertiesMap {
-         if self.index.contains(name) {
-             debug_assert!(self.values.contains_key(name));
-             self.values.get(name)
-         } else {
-             None
-         }
+@@ -123,16 +123,21 @@ impl CustomPropertiesMap {
+ 
+     /// Custom property computed value getter by name.
+     pub fn get_computed_value(&self, name: &Name) -> Option<&ComputedValue> {
+         let value = self.values.get(name);
+         debug_assert_eq!(value.is_some(), self.index.contains(name));
+         value
      }
  
 +    /// Get the name of a custom property given its list index.
-+    pub fn get_name_at(&self, index: u32) -> Option<&Name>
-+    {
-+        let index = index as usize;
-+        if index >= self.len() {
-+            return None;
-+        }
-+
-+        Some(&self.index[index])
++    pub fn get_name_at(&self, index: u32) -> Option<&Name> {
++        self.index.get(index)
 +    }
 +
      /// Get an iterator for custom properties computed values.
@@ -143,12 +137,12 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 +        None => return false,
 +    };
 +
-+    let name = unsafe { name.as_mut().unwrap() };
 +    let property_name = match custom_properties.get_name_at(index) {
 +        Some(n) => n,
 +        None => return false,
 +    };
-+    name.assign_utf8(&property_name.to_string());
++    let name = unsafe { name.as_mut().unwrap() };
++    name.assign(&**property_name);
 +
 +    true
 +}
