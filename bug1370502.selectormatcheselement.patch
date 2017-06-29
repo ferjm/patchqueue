@@ -17,7 +17,7 @@ diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
                     RawServoStyleRuleBorrowed rule, uint32_t* count)
 +SERVO_BINDING_FUNC(Servo_StyleRule_SelectorMatchesElement, bool,
 +                   RawServoStyleRuleBorrowed, RawGeckoElementBorrowed,
-+                   uint32_t index)
++                   uint32_t index, const nsAString* pseudo)
  SERVO_BINDING_FUNC(Servo_ImportRule_GetHref, void,
                     RawServoImportRuleBorrowed rule, nsAString* result)
  SERVO_BINDING_FUNC(Servo_ImportRule_GetSheet, const RawServoStyleSheet*,
@@ -29,7 +29,7 @@ diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
 diff --git a/layout/style/ServoStyleRule.cpp b/layout/style/ServoStyleRule.cpp
 --- a/layout/style/ServoStyleRule.cpp
 +++ b/layout/style/ServoStyleRule.cpp
-@@ -274,13 +274,15 @@ ServoStyleRule::GetSpecificity(uint32_t 
+@@ -274,13 +274,16 @@ ServoStyleRule::GetSpecificity(uint32_t 
  }
  
  nsresult
@@ -41,7 +41,8 @@ diff --git a/layout/style/ServoStyleRule.cpp b/layout/style/ServoStyleRule.cpp
 -  // TODO Bug 1370502
 +  *aMatches = Servo_StyleRule_SelectorMatchesElement(mRawRule,
 +                                                     aElement,
-+                                                     aSelectorIndex);
++                                                     aSelectorIndex,
++                                                     &aPseudo);
    return NS_OK;
  }
  
@@ -58,7 +59,7 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
  use cssparser::ToCss as ParserToCss;
  use env_logger::LogBuilder;
  use selectors::Element;
-+use selectors::Matching::{MatchingContext, MatchingMode, matches_selector_list};
++use selectors::matching::{MatchingContext, MatchingMode, matches_selector};
  use std::env;
  use std::fmt::Write;
  use std::ptr;
@@ -67,7 +68,7 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
  use style::data::{ElementData, ElementStyles, RestyleData};
  use style::dom::{AnimationOnlyDirtyDescendants, DirtyDescendants};
  use style::dom::{ShowSubtreeData, TElement, TNode};
-@@ -1254,16 +1255,30 @@ pub extern "C" fn Servo_StyleRule_GetSpe
+@@ -1254,16 +1255,46 @@ pub extern "C" fn Servo_StyleRule_GetSpe
              *specificity = 0;
              return;
          }
@@ -78,14 +79,30 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
  #[no_mangle]
 +pub extern "C" fn Servo_StyleRule_SelectorMatchesElement(rule: RawServoStyleRuleBorrowed,
 +                                                         element: RawGeckoElementBorrowed,
-+                                                         index: u32) -> bool {
++                                                         index: u32,
++                                                         pseudo: *const nsAString) -> bool {
 +    read_locked_arc(rule, |rule: &StyleRule| {
 +        let index = index as usize;
 +        if index >= rule.selectors.0.len() {
 +            return false;
 +        }
++
++        let selector_and_hashes = &rule.selectors.0[index];
++
++        // Do not attempt to match if a pseudo element is requested and this is not
++        // a pseudo element selector, or vice versa.
++        let pseudo = unsafe { (*pseudo).to_string() };
++        if selector_and_hashes.selector.has_pseudo_element() == pseudo.is_empty() {
++            return false;
++        }
++
++        // XXX pseudo element.
++        // We need to make sure that the requested pseudo element type
++        // matches the selector pseudo element type before proceeding.
++
 +        let mut ctx = MatchingContext::new(MatchingMode::Normal, None, QuirksMode::NoQuirks);
-+        matches_selector_list(&rule.selectors.0[index], &GeckoElement(element), &mut ctx)
++        matches_selector(&selector_and_hashes.selector, 0, &selector_and_hashes.hashes,
++                         &GeckoElement(element), &mut ctx, &mut |_, _| {})
 +    })
 +}
 +
