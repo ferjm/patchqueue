@@ -1,12 +1,12 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  12cc06ffe50eeb962338c00181de24b9410f38d5
+# Parent  f3483af8ecf997453064201c49c48a682c7f3c29
 Bug 1370502 - stylo: Implement ServoStyleRule::SelectorMatchesElement. r?emilio
 
 diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
 --- a/layout/style/ServoBindingList.h
 +++ b/layout/style/ServoBindingList.h
-@@ -162,16 +162,19 @@ SERVO_BINDING_FUNC(Servo_StyleRule_GetSe
+@@ -164,16 +164,19 @@ SERVO_BINDING_FUNC(Servo_StyleRule_GetSe
  SERVO_BINDING_FUNC(Servo_StyleRule_GetSelectorTextAtIndex, void,
                     RawServoStyleRuleBorrowed rule, uint32_t index,
                     nsAString* result)
@@ -17,7 +17,7 @@ diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
                     RawServoStyleRuleBorrowed rule, uint32_t* count)
 +SERVO_BINDING_FUNC(Servo_StyleRule_SelectorMatchesElement, bool,
 +                   RawServoStyleRuleBorrowed, RawGeckoElementBorrowed,
-+                   uint32_t index, const nsAString* pseudo)
++                   uint32_t index, mozilla::CSSPseudoElementType pseudo_type)
  SERVO_BINDING_FUNC(Servo_ImportRule_GetHref, void,
                     RawServoImportRuleBorrowed rule, nsAString* result)
  SERVO_BINDING_FUNC(Servo_ImportRule_GetSheet, const RawServoStyleSheet*,
@@ -29,7 +29,7 @@ diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
 diff --git a/layout/style/ServoStyleRule.cpp b/layout/style/ServoStyleRule.cpp
 --- a/layout/style/ServoStyleRule.cpp
 +++ b/layout/style/ServoStyleRule.cpp
-@@ -274,13 +274,16 @@ ServoStyleRule::GetSpecificity(uint32_t 
+@@ -274,13 +274,20 @@ ServoStyleRule::GetSpecificity(uint32_t 
  }
  
  nsresult
@@ -39,10 +39,14 @@ diff --git a/layout/style/ServoStyleRule.cpp b/layout/style/ServoStyleRule.cpp
                                         bool* aMatches)
  {
 -  // TODO Bug 1370502
++  nsCOMPtr<nsIAtom> pseudoElt = NS_Atomize(aPseudo);
++  const CSSPseudoElementType pseudoType =
++    nsCSSPseudoElements::GetPseudoType(pseudoElt,
++                                       CSSEnabledState::eIgnoreEnabledState);
 +  *aMatches = Servo_StyleRule_SelectorMatchesElement(mRawRule,
 +                                                     aElement,
 +                                                     aSelectorIndex,
-+                                                     &aPseudo);
++                                                     pseudoType);
    return NS_OK;
  }
  
@@ -68,7 +72,7 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
  use style::data::{ElementData, ElementStyles, RestyleData};
  use style::dom::{AnimationOnlyDirtyDescendants, DirtyDescendants};
  use style::dom::{ShowSubtreeData, TElement, TNode};
-@@ -1254,16 +1255,46 @@ pub extern "C" fn Servo_StyleRule_GetSpe
+@@ -1254,16 +1255,55 @@ pub extern "C" fn Servo_StyleRule_GetSpe
              *specificity = 0;
              return;
          }
@@ -80,7 +84,7 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 +pub extern "C" fn Servo_StyleRule_SelectorMatchesElement(rule: RawServoStyleRuleBorrowed,
 +                                                         element: RawGeckoElementBorrowed,
 +                                                         index: u32,
-+                                                         pseudo: *const nsAString) -> bool {
++                                                         pseudo_type: CSSPseudoElementType) -> bool {
 +    read_locked_arc(rule, |rule: &StyleRule| {
 +        let index = index as usize;
 +        if index >= rule.selectors.0.len() {
@@ -89,18 +93,27 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 +
 +        let selector_and_hashes = &rule.selectors.0[index];
 +
-+        // Do not attempt to match if a pseudo element is requested and this is not
-+        // a pseudo element selector, or vice versa.
-+        let pseudo = unsafe { (*pseudo).to_string() };
-+        if selector_and_hashes.selector.has_pseudo_element() == pseudo.is_empty() {
-+            return false;
-+        }
++        match PseudoElement::from_pseudo_type(pseudo_type) {
++            Some(p) => {
++                // We need to make sure that the requested pseudo element type
++                // matches the selector pseudo element type before proceeding.
++                if let Some(ep) = selector_and_hashes.selector.pseudo_element() {
++                    if *ep != p {
++                        return false;
++                    }
++                }
++            },
++            None => {
++                // Do not attempt to match if a pseudo element is requested and
++                // this is not a pseudo element selector, or vice versa.
++                if selector_and_hashes.selector.has_pseudo_element() {
++                    return false;
++                }
++            },
++        };
 +
-+        // XXX pseudo element.
-+        // We need to make sure that the requested pseudo element type
-+        // matches the selector pseudo element type before proceeding.
-+
-+        let mut ctx = MatchingContext::new(MatchingMode::Normal, None, QuirksMode::NoQuirks);
++        let mut ctx = MatchingContext::new(MatchingMode::ForStatelessPseudoElement, None,
++                                           QuirksMode::NoQuirks);
 +        matches_selector(&selector_and_hashes.selector, 0, &selector_and_hashes.hashes,
 +                         &GeckoElement(element), &mut ctx, &mut |_, _| {})
 +    })
