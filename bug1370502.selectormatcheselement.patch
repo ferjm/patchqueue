@@ -72,7 +72,7 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
  use style::data::{ElementData, ElementStyles, RestyleData};
  use style::dom::{AnimationOnlyDirtyDescendants, DirtyDescendants};
  use style::dom::{ShowSubtreeData, TElement, TNode};
-@@ -1254,16 +1255,55 @@ pub extern "C" fn Servo_StyleRule_GetSpe
+@@ -1254,16 +1255,54 @@ pub extern "C" fn Servo_StyleRule_GetSpe
              *specificity = 0;
              return;
          }
@@ -112,8 +112,7 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 +            },
 +        };
 +
-+        let mut ctx = MatchingContext::new(MatchingMode::ForStatelessPseudoElement, None,
-+                                           QuirksMode::NoQuirks);
++        let mut ctx = MatchingContext::new(MatchingMode::Normal, None, QuirksMode::NoQuirks);
 +        matches_selector(&selector_and_hashes.selector, 0, &selector_and_hashes.hashes,
 +                         &GeckoElement(element), &mut ctx, &mut |_, _| {})
 +    })
