@@ -51,6 +51,31 @@ diff --git a/layout/style/ServoStyleRule.cpp b/layout/style/ServoStyleRule.cpp
  }
  
  } // namespace mozilla
+diff --git a/servo/components/style/gecko/wrapper.rs b/servo/components/style/gecko/wrapper.rs
+--- a/servo/components/style/gecko/wrapper.rs
++++ b/servo/components/style/gecko/wrapper.rs
+@@ -681,16 +681,21 @@ impl<'le> GeckoElement<'le> {
+         self.as_node().get_bool_flag(nsINode_BooleanFlag::ElementMayHaveStyle)
+     }
+ 
+     #[inline]
+     fn get_document_theme(&self) -> DocumentTheme {
+         let node = self.as_node();
+         unsafe { Gecko_GetDocumentLWTheme(node.owner_doc()) }
+     }
++
++    /// Quirks mode getter.
++    pub fn get_quirks_mode(&self) -> QuirksMode {
++        self.as_node().owner_doc().mCompatMode.into()
++    }
+ }
+ 
+ /// Converts flags from the layout used by rust-selectors to the layout used
+ /// by Gecko. We could align these and then do this without conditionals, but
+ /// it's probably not worth the trouble.
+ fn selector_flags_to_node_flags(flags: ElementSelectorFlags) -> u32 {
+     use gecko_bindings::structs::*;
+     use selectors::matching::*;
 diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 --- a/servo/ports/geckolib/glue.rs
 +++ b/servo/ports/geckolib/glue.rs
@@ -72,7 +97,7 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
  use style::data::{ElementData, ElementStyles, RestyleData};
  use style::dom::{AnimationOnlyDirtyDescendants, DirtyDescendants};
  use style::dom::{ShowSubtreeData, TElement, TNode};
-@@ -1254,16 +1255,54 @@ pub extern "C" fn Servo_StyleRule_GetSpe
+@@ -1254,16 +1255,57 @@ pub extern "C" fn Servo_StyleRule_GetSpe
              *specificity = 0;
              return;
          }
@@ -92,16 +117,18 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 +        }
 +
 +        let selector_and_hashes = &rule.selectors.0[index];
++        let mut matching_mode = MatchingMode::Normal;
 +
 +        match PseudoElement::from_pseudo_type(pseudo_type) {
 +            Some(p) => {
 +                // We need to make sure that the requested pseudo element type
 +                // matches the selector pseudo element type before proceeding.
-+                if let Some(ep) = selector_and_hashes.selector.pseudo_element() {
-+                    if *ep != p {
-+                        return false;
-+                    }
-+                }
++                match selector_and_hashes.selector.pseudo_element() {
++                    Some(ep) => if *ep == p {
++                        matching_mode = MatchingMode::ForStatelessPseudoElement
++                    },
++                    None => return false,
++                };
 +            },
 +            None => {
 +                // Do not attempt to match if a pseudo element is requested and
@@ -112,9 +139,10 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 +            },
 +        };
 +
-+        let mut ctx = MatchingContext::new(MatchingMode::Normal, None, QuirksMode::NoQuirks);
++        let element = GeckoElement(element);
++        let mut ctx = MatchingContext::new(matching_mode, None, element.get_quirks_mode());
 +        matches_selector(&selector_and_hashes.selector, 0, &selector_and_hashes.hashes,
-+                         &GeckoElement(element), &mut ctx, &mut |_, _| {})
++                         &element, &mut ctx, &mut |_, _| {})
 +    })
 +}
 +
