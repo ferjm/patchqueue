@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  f3483af8ecf997453064201c49c48a682c7f3c29
+# Parent  6f8f10f48ace5692256efd91f011bd23054ee2ec
 Bug 1370502 - stylo: Implement ServoStyleRule::SelectorMatchesElement. r?emilio
 
 diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
@@ -54,7 +54,7 @@ diff --git a/layout/style/ServoStyleRule.cpp b/layout/style/ServoStyleRule.cpp
 diff --git a/servo/components/style/gecko/wrapper.rs b/servo/components/style/gecko/wrapper.rs
 --- a/servo/components/style/gecko/wrapper.rs
 +++ b/servo/components/style/gecko/wrapper.rs
-@@ -681,16 +681,21 @@ impl<'le> GeckoElement<'le> {
+@@ -689,16 +689,21 @@ impl<'le> GeckoElement<'le> {
          self.as_node().get_bool_flag(nsINode_BooleanFlag::ElementMayHaveStyle)
      }
  
@@ -92,7 +92,7 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
  use std::env;
  use std::fmt::Write;
  use std::ptr;
- use style::context::{QuirksMode, SharedStyleContext, StyleContext};
+ use style::context::{CascadeInputs, QuirksMode, SharedStyleContext, StyleContext};
  use style::context::ThreadLocalStyleContext;
  use style::data::{ElementData, ElementStyles, RestyleData};
  use style::dom::{AnimationOnlyDirtyDescendants, DirtyDescendants};
