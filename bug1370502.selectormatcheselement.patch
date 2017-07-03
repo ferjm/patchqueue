@@ -64,8 +64,8 @@ diff --git a/servo/components/style/gecko/wrapper.rs b/servo/components/style/ge
          unsafe { Gecko_GetDocumentLWTheme(node.owner_doc()) }
      }
 +
-+    /// Quirks mode getter.
-+    pub fn get_quirks_mode(&self) -> QuirksMode {
++    /// Owner document quirks mode getter.
++    pub fn owner_document_quirks_mode(&self) -> QuirksMode {
 +        self.as_node().owner_doc().mCompatMode.into()
 +    }
  }
@@ -120,14 +120,14 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 +        let mut matching_mode = MatchingMode::Normal;
 +
 +        match PseudoElement::from_pseudo_type(pseudo_type) {
-+            Some(p) => {
++            Some(pseudo) => {
 +                // We need to make sure that the requested pseudo element type
 +                // matches the selector pseudo element type before proceeding.
 +                match selector_and_hashes.selector.pseudo_element() {
-+                    Some(ep) => if *ep == p {
++                    Some(selector_pseudo) if *selector_pseudo == pseudo => {
 +                        matching_mode = MatchingMode::ForStatelessPseudoElement
 +                    },
-+                    None => return false,
++                    _ => return false,
 +                };
 +            },
 +            None => {
@@ -140,7 +140,7 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 +        };
 +
 +        let element = GeckoElement(element);
-+        let mut ctx = MatchingContext::new(matching_mode, None, element.get_quirks_mode());
++        let mut ctx = MatchingContext::new(matching_mode, None, element.owner_document_quirks_mode());
 +        matches_selector(&selector_and_hashes.selector, 0, &selector_and_hashes.hashes,
 +                         &element, &mut ctx, &mut |_, _| {})
 +    })
