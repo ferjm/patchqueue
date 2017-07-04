@@ -1,12 +1,12 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  6f8f10f48ace5692256efd91f011bd23054ee2ec
+# Parent  fef489e8c2a193dde885adc48deb74cc883a5881
 Bug 1370502 - stylo: Implement ServoStyleRule::SelectorMatchesElement. r?emilio
 
 diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
 --- a/layout/style/ServoBindingList.h
 +++ b/layout/style/ServoBindingList.h
-@@ -164,16 +164,19 @@ SERVO_BINDING_FUNC(Servo_StyleRule_GetSe
+@@ -152,16 +152,19 @@ SERVO_BINDING_FUNC(Servo_StyleRule_GetSe
  SERVO_BINDING_FUNC(Servo_StyleRule_GetSelectorTextAtIndex, void,
                     RawServoStyleRuleBorrowed rule, uint32_t index,
                     nsAString* result)
@@ -20,12 +20,12 @@ diff --git a/layout/style/ServoBindingList.h b/layout/style/ServoBindingList.h
 +                   uint32_t index, mozilla::CSSPseudoElementType pseudo_type)
  SERVO_BINDING_FUNC(Servo_ImportRule_GetHref, void,
                     RawServoImportRuleBorrowed rule, nsAString* result)
- SERVO_BINDING_FUNC(Servo_ImportRule_GetSheet, const RawServoStyleSheet*,
+ SERVO_BINDING_FUNC(Servo_ImportRule_GetSheet,
+                    const mozilla::ServoStyleSheet*,
                     RawServoImportRuleBorrowed rule)
  SERVO_BINDING_FUNC(Servo_Keyframe_GetKeyText, void,
                     RawServoKeyframeBorrowed keyframe, nsAString* result)
  // Returns whether it successfully changes the key text.
- SERVO_BINDING_FUNC(Servo_Keyframe_SetKeyText, bool,
 diff --git a/layout/style/ServoStyleRule.cpp b/layout/style/ServoStyleRule.cpp
 --- a/layout/style/ServoStyleRule.cpp
 +++ b/layout/style/ServoStyleRule.cpp
@@ -97,7 +97,7 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
  use style::data::{ElementData, ElementStyles, RestyleData};
  use style::dom::{AnimationOnlyDirtyDescendants, DirtyDescendants};
  use style::dom::{ShowSubtreeData, TElement, TNode};
-@@ -1254,16 +1255,57 @@ pub extern "C" fn Servo_StyleRule_GetSpe
+@@ -1251,16 +1252,57 @@ pub extern "C" fn Servo_StyleRule_GetSpe
              *specificity = 0;
              return;
          }
@@ -154,4 +154,4 @@ diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
  }
  
  #[no_mangle]
- pub extern "C" fn Servo_ImportRule_GetSheet(rule: RawServoImportRuleBorrowed) -> *const RawServoStyleSheet {
+ pub extern "C" fn Servo_ImportRule_GetSheet(
