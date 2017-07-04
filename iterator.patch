@@ -1,0 +1,481 @@
+# HG changeset patch
+# User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
+# Parent  5bed7af5695125fa7aca66239fe15698e0fd4a3c
+
+diff --git a/servo/components/style/custom_properties.rs b/servo/components/style/custom_properties.rs
+--- a/servo/components/style/custom_properties.rs
++++ b/servo/components/style/custom_properties.rs
+@@ -8,18 +8,19 @@
+ 
+ use Atom;
+ use cssparser::{Delimiter, Parser, ParserInput, SourcePosition, Token, TokenSerializationType};
+ use parser::ParserContext;
+ use properties::{CSSWideKeyword, DeclaredValue};
+ use selectors::parser::SelectorParseError;
+ use std::ascii::AsciiExt;
+ use std::borrow::Cow;
+-use std::collections::{HashMap, hash_map, HashSet};
++use std::collections::{HashMap, HashSet};
+ use std::fmt;
++use std::iter::FromIterator;
+ use style_traits::{HasViewportPercentage, ToCss, StyleParseError, ParseError};
+ use stylearc::Arc;
+ 
+ /// A custom property name is just an `Atom`.
+ ///
+ /// Note that this does not include the `--` prefix
+ pub type Name = Atom;
+ 
+@@ -52,23 +53,156 @@ pub struct SpecifiedValue {
+ 
+ impl HasViewportPercentage for SpecifiedValue {
+     fn has_viewport_percentage(&self) -> bool {
+         panic!("has_viewport_percentage called before resolving!");
+     }
+ }
+ 
+ /// This struct is a cheap borrowed version of a `SpecifiedValue`.
++#[derive(Debug)]
+ pub struct BorrowedSpecifiedValue<'a> {
+     css: &'a str,
+     first_token_type: TokenSerializationType,
+     last_token_type: TokenSerializationType,
+     references: Option<&'a HashSet<Name>>,
+ }
+ 
++#[allow(missing_docs)]
++#[derive(Clone, Debug, Eq, PartialEq)]
++pub struct OrderedMap<'a, T>
++where T: 'a {
++    index: Vec<Name>,
++    values: HashMap<Name, T>,
++    _phantom: ::std::marker::PhantomData<&'a T>,
++}
++
++#[allow(missing_docs)]
++impl<'a, T> OrderedMap<'a, T> {
++    pub fn new() -> Self {
++        Self {
++            index: Vec::new(),
++            values: HashMap::new(),
++            _phantom: ::std::marker::PhantomData,
++        }
++    }
++
++    pub fn insert(&mut self, name: &Name, value: T) {
++        self.index.push(name.clone());
++        self.values.insert(name.clone(), value);
++    }
++
++    pub fn remove(&mut self, name: &Name) {
++        self.index.retain(|n| n != name);
++        self.values.remove(name);
++    }
++
++    pub fn get_value(&self, name: &Name) -> Option<&T> {
++        let value = self.values.get(name);
++        debug_assert_eq!(value.is_some(), self.index.contains(name));
++        value
++    }
++
++    pub fn get_name_at(&self, index: u32) -> Option<&Name> {
++        self.index.get(index as usize)
++    }
++
++    pub fn iter(&'a self) -> OrderedMapIterator<'a, T> {
++        self.into_iter()
++    }
++
++    pub fn len(&self) -> usize {
++        debug_assert_eq!(self.values.len(), self.index.len());
++        self.values.len()
++    }
++}
++
++trait Iterable<'a, T> {
++    fn index(&'a self) -> &'a Vec<Name>;
++    fn values(&'a self) -> &'a HashMap<Name, T>;
++}
++
++impl<'a, T> Iterable<'a, T> for OrderedMap<'a, T> {
++    fn index(&'a self) -> &'a Vec<Name> {
++        &self.index
++    }
++
++    fn values(&'a self) -> &'a HashMap<Name, T> {
++        &self.values
++    }
++}
++
++#[allow(missing_docs)]
++pub struct OrderedMapIterator<'a, T>
++where T: 'a {
++    inner: &'a OrderedMap<'a, T>,
++    pos: usize,
++}
++
++impl<'a, T> Iterator for OrderedMapIterator<'a, T> {
++    type Item = (&'a Name, &'a T);
++
++    fn next(&mut self) -> Option<Self::Item> {
++        let ref index = self.inner.index();
++        if self.pos >= index.len() {
++            return None;
++        }
++
++        let ref name = index[index.len() - self.pos - 1];
++        self.pos += 1;
++        match self.inner.values().get(name) {
++            Some(value) => Some((name, value)),
++            None => None,
++        }
++    }
++}
++
++impl<'a, T> IntoIterator for &'a OrderedMap<'a, T> {
++    type Item = (&'a Name, &'a T);
++    type IntoIter = OrderedMapIterator<'a, T>;
++
++    fn into_iter(self) -> Self::IntoIter {
++        OrderedMapIterator {
++            inner: self,
++            pos: 0,
++        }
++    }
++}
++
++type SpecifiedValuesMap<'a> = OrderedMap<'a, BorrowedSpecifiedValue<'a>>;
++#[allow(missing_docs)]
++pub type CustomPropertiesMap<'a> = OrderedMap<'a, ComputedValue<'a>>;
++
++impl<'a> FromIterator<(&'a Name, &'a BorrowedSpecifiedValue<'a>)>
++    for CustomPropertiesMap<'a> {
++    fn from_iter<I: IntoIterator<Item = (&'a Name, &'a BorrowedSpecifiedValue<'a>)>>(iter: I)
++        -> Self {
++        let mut map = CustomPropertiesMap::new();
++        for item in iter {
++            map.insert(item.0, ComputedValue {
++                css: item.1.css.to_string(),
++                first_token_type: item.1.first_token_type,
++                last_token_type: item.1.last_token_type,
++            });
++        }
++        map
++    }
++}
++
++impl<'a> FromIterator<(&'a Name, BorrowedSpecifiedValue<'a>)>
++    for SpecifiedValuesMap<'a> {
++    fn from_iter<I: IntoIterator<Item = (&'a Name, BorrowedSpecifiedValue<'a>)>>(iter: I) -> Self {
++        let mut map = SpecifiedValuesMap::new();
++        for item in iter {
++            map.insert(item.0, item.1);
++        }
++        map
++    }
++}
++
+ /// A computed value is just a set of tokens as well, until we resolve variables
+ /// properly.
+ #[derive(Clone, Debug, Eq, PartialEq)]
+ #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+ pub struct ComputedValue {
+     css: String,
+     first_token_type: TokenSerializationType,
+     last_token_type: TokenSerializationType,
+@@ -85,71 +219,16 @@ impl ToCss for SpecifiedValue {
+ impl ToCss for ComputedValue {
+     fn to_css<W>(&self, dest: &mut W) -> fmt::Result
+         where W: fmt::Write,
+     {
+         dest.write_str(&self.css)
+     }
+ }
+ 
+-/// A map from CSS variable names to CSS variable computed values, used for
+-/// resolving.
+-///
+-/// A consistent ordering is required for CSSDeclaration objects in the
+-/// DOM. CSSDeclarations expose property names as indexed properties, which
+-/// need to be stable. So we keep an array of property names which order is
+-/// determined on the order that they are added to the name-value map.
+-#[derive(Clone, Debug, Eq, PartialEq)]
+-pub struct CustomPropertiesMap {
+-    /// Custom property name index.
+-    index: Vec<Name>,
+-    /// Computed values indexed by custom property name.
+-    values: HashMap<Name, ComputedValue>,
+-}
+-
+-impl CustomPropertiesMap {
+-    /// Creates a new custom properties map.
+-    pub fn new() -> Self {
+-        CustomPropertiesMap {
+-            index: Vec::new(),
+-            values: HashMap::new(),
+-        }
+-    }
+-
+-    /// Insert a computed value if it has not previously been inserted.
+-    pub fn insert(&mut self, name: &Name, value: ComputedValue) {
+-        debug_assert!(!self.index.contains(name));
+-        self.index.push(name.clone());
+-        self.values.insert(name.clone(), value);
+-    }
+-
+-    /// Custom property computed value getter by name.
+-    pub fn get_computed_value(&self, name: &Name) -> Option<&ComputedValue> {
+-        let value = self.values.get(name);
+-        debug_assert_eq!(value.is_some(), self.index.contains(name));
+-        value
+-    }
+-
+-    /// Get the name of a custom property given its list index.
+-    pub fn get_name_at(&self, index: u32) -> Option<&Name> {
+-        self.index.get(index as usize)
+-    }
+-
+-    /// Get an iterator for custom properties computed values.
+-    pub fn iter(&self) -> hash_map::Iter<Name, ComputedValue> {
+-        self.values.iter()
+-    }
+-
+-    /// Get the count of custom properties computed values.
+-    pub fn len(&self) -> usize {
+-        debug_assert_eq!(self.values.len(), self.index.len());
+-        self.values.len()
+-    }
+-}
+-
+ impl ComputedValue {
+     fn empty() -> ComputedValue {
+         ComputedValue {
+             css: String::new(),
+             last_token_type: TokenSerializationType::nothing(),
+             first_token_type: TokenSerializationType::nothing(),
+         }
+     }
+@@ -380,17 +459,17 @@ fn parse_var_function<'i, 't>(input: &mu
+     if let Some(ref mut refs) = *references {
+         refs.insert(Atom::from(name));
+     }
+     Ok(())
+ }
+ 
+ /// Add one custom property declaration to a map, unless another with the same
+ /// name was already there.
+-pub fn cascade<'a>(custom_properties: &mut Option<HashMap<&'a Name, BorrowedSpecifiedValue<'a>>>,
++pub fn cascade<'a>(custom_properties: &'a mut Option<SpecifiedValuesMap<'a>>,
+                    inherited: &'a Option<Arc<CustomPropertiesMap>>,
+                    seen: &mut HashSet<&'a Name>,
+                    name: &'a Name,
+                    specified_value: DeclaredValue<'a, Box<SpecifiedValue>>) {
+     let was_already_present = !seen.insert(name);
+     if was_already_present {
+         return;
+     }
+@@ -402,17 +481,17 @@ pub fn cascade<'a>(custom_properties: &m
+                 Some(ref inherited) => inherited.iter().map(|(key, inherited_value)| {
+                     (key, BorrowedSpecifiedValue {
+                         css: &inherited_value.css,
+                         first_token_type: inherited_value.first_token_type,
+                         last_token_type: inherited_value.last_token_type,
+                         references: None
+                     })
+                 }).collect(),
+-                None => HashMap::new(),
++                None => SpecifiedValuesMap::new(),
+             });
+             custom_properties.as_mut().unwrap()
+         }
+     };
+     match specified_value {
+         DeclaredValue::Value(ref specified_value) => {
+             map.insert(name, BorrowedSpecifiedValue {
+                 css: &specified_value.css,
+@@ -433,49 +512,49 @@ pub fn cascade<'a>(custom_properties: &m
+ }
+ 
+ /// Returns the final map of applicable custom properties.
+ ///
+ /// If there was any specified property, we've created a new map and now we need
+ /// to remove any potential cycles, and wrap it in an arc.
+ ///
+ /// Otherwise, just use the inherited custom properties map.
+-pub fn finish_cascade(specified_values_map: Option<HashMap<&Name, BorrowedSpecifiedValue>>,
+-                      inherited: &Option<Arc<CustomPropertiesMap>>)
+-                      -> Option<Arc<CustomPropertiesMap>> {
++pub fn finish_cascade<'a>(specified_values_map: Option<SpecifiedValuesMap>,
++                          inherited: &Option<Arc<CustomPropertiesMap>>)
++                          -> Option<Arc<CustomPropertiesMap<'a>>> {
+     if let Some(mut map) = specified_values_map {
+         remove_cycles(&mut map);
+         Some(Arc::new(substitute_all(map, inherited)))
+     } else {
+         inherited.clone()
+     }
+ }
+ 
+ /// https://drafts.csswg.org/css-variables/#cycles
+ ///
+ /// The initial value of a custom property is represented by this property not
+ /// being in the map.
+-fn remove_cycles(map: &mut HashMap<&Name, BorrowedSpecifiedValue>) {
++fn remove_cycles(map: &mut SpecifiedValuesMap) {
+     let mut to_remove = HashSet::new();
+     {
+         let mut visited = HashSet::new();
+         let mut stack = Vec::new();
+-        for name in map.keys() {
++        for (ref name, _) in map.iter() {
+             walk(map, name, &mut stack, &mut visited, &mut to_remove);
+ 
+-            fn walk<'a>(map: &HashMap<&'a Name, BorrowedSpecifiedValue<'a>>,
++            fn walk<'a>(map: &'a SpecifiedValuesMap,
+                         name: &'a Name,
+                         stack: &mut Vec<&'a Name>,
+                         visited: &mut HashSet<&'a Name>,
+                         to_remove: &mut HashSet<Name>) {
+                 let already_visited_before = !visited.insert(name);
+                 if already_visited_before {
+                     return
+                 }
+-                if let Some(value) = map.get(name) {
++                if let Some(value) = map.get_value(name) {
+                     if let Some(references) = value.references {
+                         stack.push(name);
+                         for next in references {
+                             if let Some(position) = stack.iter().position(|&x| x == next) {
+                                 // Found a cycle
+                                 for &in_cycle in &stack[position..] {
+                                     to_remove.insert(in_cycle.clone());
+                                 }
+@@ -490,39 +569,39 @@ fn remove_cycles(map: &mut HashMap<&Name
+         }
+     }
+     for name in &to_remove {
+         map.remove(name);
+     }
+ }
+ 
+ /// Replace `var()` functions for all custom properties.
+-fn substitute_all(specified_values_map: HashMap<&Name, BorrowedSpecifiedValue>,
+-                  inherited: &Option<Arc<CustomPropertiesMap>>)
+-                  -> CustomPropertiesMap {
++fn substitute_all<'a>(specified_values_map: SpecifiedValuesMap,
++                      inherited: &Option<Arc<CustomPropertiesMap>>)
++                      -> CustomPropertiesMap<'a> {
+     let mut custom_properties_map = CustomPropertiesMap::new();
+     let mut invalid = HashSet::new();
+-    for (&name, value) in &specified_values_map {
++    for (ref name, ref value) in specified_values_map.iter() {
+         // If this value is invalid at computed-time it won’t be inserted in computed_values_map.
+         // Nothing else to do.
+         let _ = substitute_one(
+             name, value, &specified_values_map, inherited, None,
+             &mut custom_properties_map, &mut invalid);
+     }
+ 
+     custom_properties_map
+ }
+ 
+ /// Replace `var()` functions for one custom property.
+ /// Also recursively record results for other custom properties referenced by `var()` functions.
+ /// Return `Err(())` for invalid at computed time.
+ /// or `Ok(last_token_type that was pushed to partial_computed_value)` otherwise.
+ fn substitute_one(name: &Name,
+                   specified_value: &BorrowedSpecifiedValue,
+-                  specified_values_map: &HashMap<&Name, BorrowedSpecifiedValue>,
++                  specified_values_map: &SpecifiedValuesMap,
+                   inherited: &Option<Arc<CustomPropertiesMap>>,
+                   partial_computed_value: Option<&mut ComputedValue>,
+                   custom_properties_map: &mut CustomPropertiesMap,
+                   invalid: &mut HashSet<Name>)
+                   -> Result<TokenSerializationType, ()> {
+     if let Some(computed_value) = custom_properties_map.get_computed_value(&name) {
+         if let Some(partial_computed_value) = partial_computed_value {
+             partial_computed_value.push_variable(computed_value)
+@@ -536,17 +615,17 @@ fn substitute_one(name: &Name,
+     let computed_value = if specified_value.references.map(|set| set.is_empty()) == Some(false) {
+         let mut partial_computed_value = ComputedValue::empty();
+         let mut input = ParserInput::new(&specified_value.css);
+         let mut input = Parser::new(&mut input);
+         let mut position = (input.position(), specified_value.first_token_type);
+         let result = substitute_block(
+             &mut input, &mut position, &mut partial_computed_value,
+             &mut |name, partial_computed_value| {
+-                if let Some(other_specified_value) = specified_values_map.get(name) {
++                if let Some(other_specified_value) = specified_values_map.get_value(name) {
+                     substitute_one(name, other_specified_value, specified_values_map, inherited,
+                                    Some(partial_computed_value), custom_properties_map, invalid)
+                 } else {
+                     Err(())
+                 }
+             }
+         );
+         if let Ok(last_token_type) = result {
+diff --git a/servo/components/style/properties/properties.mako.rs b/servo/components/style/properties/properties.mako.rs
+--- a/servo/components/style/properties/properties.mako.rs
++++ b/servo/components/style/properties/properties.mako.rs
+@@ -1813,21 +1813,21 @@ pub type ServoComputedValues = ComputedV
+ 
+ /// The struct that Servo uses to represent computed values.
+ ///
+ /// This struct contains an immutable atomically-reference-counted pointer to
+ /// every kind of style struct.
+ ///
+ /// When needed, the structs may be copied in order to get mutated.
+ #[derive(Clone)]
+-pub struct ComputedValues {
++pub struct ComputedValues<'a> {
+     % for style_struct in data.active_style_structs():
+         ${style_struct.ident}: Arc<style_structs::${style_struct.name}>,
+     % endfor
+-    custom_properties: Option<Arc<::custom_properties::CustomPropertiesMap>>,
++    custom_properties: Option<Arc<::custom_properties::CustomPropertiesMap<'a>>>,
+     /// The writing mode of this computed values struct.
+     pub writing_mode: WritingMode,
+     /// The keyword behind the current font-size property, if any
+     pub font_computation_data: FontComputationData,
+ 
+     /// A set of flags we use to store misc information regarding this style.
+     pub flags: ComputedValueFlags,
+ 
+@@ -1837,17 +1837,17 @@ pub struct ComputedValues {
+     pub rules: Option<StrongRuleNode>,
+ 
+     /// The element's computed values if visited, only computed if there's a
+     /// relevant link for this element. A element's "relevant link" is the
+     /// element being matched if it is a link or the nearest ancestor link.
+     visited_style: Option<Arc<ComputedValues>>,
+ }
+ 
+-impl ComputedValues {
++impl<'a> ComputedValues<'a> {
+     /// Construct a `ComputedValues` instance.
+     pub fn new(
+         custom_properties: Option<Arc<::custom_properties::CustomPropertiesMap>>,
+         writing_mode: WritingMode,
+         font_size_keyword: Option<(longhands::font_size::KeywordSize, f32)>,
+         flags: ComputedValueFlags,
+         rules: Option<StrongRuleNode>,
+         visited_style: Option<Arc<ComputedValues>>,
+@@ -2402,17 +2402,17 @@ impl<'a, T: 'a> Deref for StyleStructRef
+ /// actually cloning them, until we either build the style, or mutate the
+ /// inherited value.
+ pub struct StyleBuilder<'a> {
+     /// The style we're inheriting from.
+     inherited_style: &'a ComputedValues,
+     /// The rule node representing the ordered list of rules matched for this
+     /// node.
+     rules: Option<StrongRuleNode>,
+-    custom_properties: Option<Arc<::custom_properties::CustomPropertiesMap>>,
++    custom_properties: Option<Arc<::custom_properties::CustomPropertiesMap<'a>>>,
+     /// The writing mode flags.
+     ///
+     /// TODO(emilio): Make private.
+     pub writing_mode: WritingMode,
+     /// The keyword behind the current font-size property, if any.
+     pub font_size_keyword: Option<(longhands::font_size::KeywordSize, f32)>,
+     /// The element's style if visited, only computed if there's a relevant link
+     /// for this element.  A element's "relevant link" is the element being
