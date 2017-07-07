@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  5bed7af5695125fa7aca66239fe15698e0fd4a3c
+# Parent  af0466865a212c84fbbab343c9cbb984c6132920
 
 diff --git a/servo/components/style/custom_properties.rs b/servo/components/style/custom_properties.rs
 --- a/servo/components/style/custom_properties.rs
@@ -417,15 +417,15 @@ diff --git a/servo/components/style/custom_properties.rs b/servo/components/styl
 diff --git a/servo/components/style/properties/properties.mako.rs b/servo/components/style/properties/properties.mako.rs
 --- a/servo/components/style/properties/properties.mako.rs
 +++ b/servo/components/style/properties/properties.mako.rs
-@@ -1813,21 +1813,21 @@ pub type ServoComputedValues = ComputedV
- 
+@@ -1817,21 +1817,21 @@ pub type ServoComputedValues = ComputedV
  /// The struct that Servo uses to represent computed values.
  ///
  /// This struct contains an immutable atomically-reference-counted pointer to
  /// every kind of style struct.
  ///
  /// When needed, the structs may be copied in order to get mutated.
- #[derive(Clone)]
+ #[cfg(feature = "servo")]
+ #[cfg_attr(feature = "servo", derive(Clone))]
 -pub struct ComputedValues {
 +pub struct ComputedValues<'a> {
      % for style_struct in data.active_style_structs():
@@ -441,8 +441,7 @@ diff --git a/servo/components/style/properties/properties.mako.rs b/servo/compon
      /// A set of flags we use to store misc information regarding this style.
      pub flags: ComputedValueFlags,
  
-@@ -1837,17 +1837,17 @@ pub struct ComputedValues {
-     pub rules: Option<StrongRuleNode>,
+@@ -1842,17 +1842,17 @@ pub struct ComputedValues {
  
      /// The element's computed values if visited, only computed if there's a
      /// relevant link for this element. A element's "relevant link" is the
@@ -450,6 +449,7 @@ diff --git a/servo/components/style/properties/properties.mako.rs b/servo/compon
      visited_style: Option<Arc<ComputedValues>>,
  }
  
+ #[cfg(feature = "servo")]
 -impl ComputedValues {
 +impl<'a> ComputedValues<'a> {
      /// Construct a `ComputedValues` instance.
@@ -460,7 +460,7 @@ diff --git a/servo/components/style/properties/properties.mako.rs b/servo/compon
          flags: ComputedValueFlags,
          rules: Option<StrongRuleNode>,
          visited_style: Option<Arc<ComputedValues>>,
-@@ -2402,17 +2402,17 @@ impl<'a, T: 'a> Deref for StyleStructRef
+@@ -2314,17 +2314,17 @@ impl<'a, T: 'a> Deref for StyleStructRef
  /// actually cloning them, until we either build the style, or mutate the
  /// inherited value.
  pub struct StyleBuilder<'a> {
