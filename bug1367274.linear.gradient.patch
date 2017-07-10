@@ -1,0 +1,534 @@
+# HG changeset patch
+# User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
+# Parent  173533a310060d0a52d6f6c3b3bee998ab9199d2
+Bug 1367274 - stylo: Serialization of computed value of gradient functions is different between Stylo and Gecko
+
+diff --git a/layout/style/test/test_computed_style.html b/layout/style/test/test_computed_style.html
+--- a/layout/style/test/test_computed_style.html
++++ b/layout/style/test/test_computed_style.html
+@@ -66,17 +66,17 @@ var noframe_container = document.getElem
+   is(cs.MozOutlineRadiusTopright, "5px",
+      "computed value of px outline-radius, without frame");
+   is(cs.MozOutlineRadiusBottomright, "5px 3px",
+      "computed value of px outline-radius, without frame");
+   is(cs.MozOutlineRadiusBottomleft, "1.5625% 3.125%",
+      "computed value of % outline-radius, without frame");
+ 
+   p.remove();
+-})();
++});
+ 
+ (function test_bug_1292447() {
+   // Was for bug 595651 which tests that clamping of border-radius
+   // is reflected in computed style.
+   // For compatibility issue, resolved value is computed value now.
+   var p = document.createElement("p");
+   p.setAttribute("style", "width: 190px; height: 90px; border: 5px solid;");
+   p.style.borderRadius = "1000px";
+@@ -125,17 +125,17 @@ var noframe_container = document.getElem
+   } else {
+     is(cs.borderBottomRightRadius, "1000px",
+        "computed value of clamped border radius (bottom right, overflow-x)");
+     is(cs.borderBottomLeftRadius, "1000px",
+        "computed value of clamped border radius (bottom left, overflow-x)");
+   }
+ 
+   p.remove();
+-})();
++});
+ 
+ (function test_bug_647885_1() {
+   // Test that various background-position styles round-trip correctly
+   var backgroundPositions = [
+     [ "0 0", "0px 0px", "unitless 0" ],
+     [ "0px 0px", "0px 0px", "0 with units" ],
+     [ "0% 0%", "0% 0%", "0%" ],
+     [ "calc(0px) 0", "0px 0px", "0 calc with units x" ],
+@@ -159,17 +159,17 @@ var noframe_container = document.getElem
+ 
+   for (var i = 0; i < backgroundPositions.length; ++i) {
+     var test = backgroundPositions[i];
+     p.style.backgroundPosition = test[0];
+     is(cs.backgroundPosition, test[1], "computed value of " + test[2] + " background-position");
+   }
+ 
+   p.remove();
+-})();
++});
+ 
+ (function test_bug_647885_2() {
+   // Test that various background-size styles round-trip correctly
+   var backgroundSizes = [
+     [ "0 0", "0px 0px", "unitless 0" ],
+     [ "0px 0px", "0px 0px", "0 with units" ],
+     [ "0% 0%", "0% 0%", "0%" ],
+     [ "calc(0px) 0", "0px 0px", "0 calc with units horizontal" ],
+@@ -193,45 +193,46 @@ var noframe_container = document.getElem
+ 
+   for (var i = 0; i < backgroundSizes.length; ++i) {
+     var test = backgroundSizes[i];
+     p.style.backgroundSize = test[0];
+     is(cs.backgroundSize, test[1], "computed value of " + test[2] + " background-size");
+   }
+ 
+   p.remove();
+-})();
++});
+ 
+ (function test_bug_716628() {
+   // Test that various gradient styles round-trip correctly
+   var backgroundImages = [
+-    [ "radial-gradient(at 10% bottom, #ffffff, black)",
++/*    [ "radial-gradient(at 10% bottom, #ffffff, black)",
+       "radial-gradient(at 10% 100%, rgb(255, 255, 255), rgb(0, 0, 0))",
+       "radial gradient 1" ],
+     [ "radial-gradient(#ffffff, black)",
+       "radial-gradient(rgb(255, 255, 255), rgb(0, 0, 0))",
+       "radial gradient 2" ],
+     [ "radial-gradient(farthest-corner, #ffffff, black)",
+       "radial-gradient(rgb(255, 255, 255), rgb(0, 0, 0))",
+-      "radial gradient 3" ],
++      "radial gradient 3" ],*/
+     [ "linear-gradient(red, blue)",
+       "linear-gradient(rgb(255, 0, 0), rgb(0, 0, 255))",
+       "linear gradient 1" ],
+     [ "linear-gradient(to bottom, red, blue)",
+       "linear-gradient(rgb(255, 0, 0), rgb(0, 0, 255))",
+       "linear gradient 2" ],
+     [ "linear-gradient(to right, red, blue)",
+       "linear-gradient(to right, rgb(255, 0, 0), rgb(0, 0, 255))",
+       "linear gradient 3" ],
++/*
+     [ "linear-gradient(-45deg, red, blue)",
+       "linear-gradient(-45deg, rgb(255, 0, 0), rgb(0, 0, 255))",
+       "linear gradient with angle in degrees" ],
+     [ "linear-gradient(-0.125turn, red, blue)",
+       "linear-gradient(-0.125turn, rgb(255, 0, 0), rgb(0, 0, 255))",
+-      "linear gradient with angle in turns" ],
++      "linear gradient with angle in turns" ],*/
+   ];
+ 
+   var p = document.createElement("p");
+   var cs = getComputedStyle(p, "");
+   frame_container.appendChild(p);
+ 
+   for (var i = 0; i < backgroundImages.length; ++i) {
+     var test = backgroundImages[i];
+@@ -332,17 +333,17 @@ var noframe_container = document.getElem
+   for (var prop in nonEmptyMasks) {
+     var subProp = nonEmptyMasks[prop];
+     for (var i = 0; i < subProp.length; i++) {
+       p.style.mask = subProp[i];
+       isnot(cs.mask, "", "computed value of " + subProp[i] + " mask");
+     }
+   }
+   p.remove();
+-})();
++});
+ 
+ (function test_bug_1241623() {
+   // Test that -webkit-gradient() styles are approximated the way we expect:
+ 
+   // For compactness, we'll pull out the common prefix & suffix from all of the
+   // specified & expected styles, and construct the full expression on the fly:
+   const specPrefix = "-webkit-gradient(linear, ";
+   const specSuffix = ", from(blue), to(lime))";
+@@ -448,17 +449,17 @@ var noframe_container = document.getElem
+ 
+     p.style.backgroundImage = specifiedStyle;
+     is(cs.backgroundImage, expectedStyle,
+        "computed value of -webkit-gradient expression (" + test[2] + ")");
+     p.style.backgroundImage = "";
+   }
+ 
+   p.remove();
+-})();
++});
+ 
+ (function test_bug_1293164() {
+ 
+   var p = document.createElement("p");
+   var cs = getComputedStyle(p, "");
+   frame_container.appendChild(p);
+ 
+   var docPath = document.URL.substring(0, document.URL.lastIndexOf("/") + 1);
+@@ -481,17 +482,17 @@ var noframe_container = document.getElem
+   for (var prop of testStyles) {
+     p.style[prop] = localURL;
+     is(cs[prop], localURL, "computed value of " + prop);
+     p.style[prop] = nonLocalURL;
+     is(cs[prop], resolvedNonLocalURL, "computed value of " + prop);
+   }
+ 
+   p.remove();
+-})();
++});
+ 
+ (function test_bug_1347164() {
+   // Test that computed color values are serialized as "rgb()"
+   // IFF they're fully-opaque (and otherwise as "rgba()").
+   var color = [
+     ["rgba(0, 0, 0, 1)", "rgb(0, 0, 0)"],
+     ["rgba(0, 0, 0, 0.5)", "rgba(0, 0, 0, 0.5)"],
+     ["hsla(0, 0%, 0%, 1)", "rgb(0, 0, 0)"],
+@@ -520,17 +521,17 @@ var noframe_container = document.getElem
+   }
+   for (var i = 0; i < css_color_4.length; ++i) {
+     var test = css_color_4[i];
+     p.style.color = test[0];
+     is(cs.color, test[1], "css-color-4 computed value of " + test[0]);
+   }
+ 
+   p.remove();
+-})();
++});
+ 
+ (function test_bug_1357117() {
+   // Test that vendor-prefixed gradient styles round-trip with the same prefix,
+   // or with no prefix.
+   var backgroundImages = [
+     // [ specified style,
+     //   expected computed style,
+     //   descriptionOfTestcase ],
+@@ -557,17 +558,17 @@ var noframe_container = document.getElem
+   for (var i = 0; i < backgroundImages.length; ++i) {
+     var test = backgroundImages[i];
+     p.style.backgroundImage = test[0];
+     is(cs.backgroundImage, test[1],
+        "computed value of prefixed gradient expression (" + test[2] + ")");
+   }
+ 
+   p.remove();
+-})();
++});
+ 
+ (function test_bug_1367028() {
+   const borderImageSubprops = [
+     "border-image-slice",
+     "border-image-outset",
+     "border-image-width"
+   ];
+   const rectValues = [
+@@ -612,14 +613,14 @@ var noframe_container = document.getElem
+         is(cs.getPropertyValue(prop),
+            expected ? expected : value, `${desc} for ${prop}`);
+         p.style.removeProperty(prop);
+       }
+     }
+   }
+ 
+   p.remove();
+-})();
++});
+ 
+ </script>
+ </pre>
+ </body>
+ </html>
+diff --git a/servo/components/style/gecko/conversions.rs b/servo/components/style/gecko/conversions.rs
+--- a/servo/components/style/gecko/conversions.rs
++++ b/servo/components/style/gecko/conversions.rs
+@@ -134,16 +134,17 @@ impl Angle {
+             _ => panic!("Unexpected unit {:?} for angle", unit),
+         }
+     }
+ }
+ 
+ impl nsStyleImage {
+     /// Set a given Servo `Image` value into this `nsStyleImage`.
+     pub fn set(&mut self, image: Image, cacheable: &mut bool) {
++        println!("LOG - nsStyleImage::set {:?}", image);
+         match image {
+             GenericImage::Gradient(gradient) => {
+                 self.set_gradient(gradient)
+             },
+             GenericImage::Url(ref url) => {
+                 unsafe {
+                     Gecko_SetLayerImageImageValue(self, url.image_value.clone().unwrap().get());
+                     // We unfortunately must make any url() value uncacheable, since
+@@ -182,16 +183,17 @@ impl nsStyleImage {
+                 unsafe {
+                     Gecko_SetImageElement(self, element.as_ptr());
+                 }
+             }
+         }
+     }
+ 
+     fn set_gradient(&mut self, gradient: Gradient) {
++        println!("LOG - set_gradient {:?}", gradient);
+         use gecko_bindings::structs::{NS_STYLE_GRADIENT_SHAPE_CIRCULAR, NS_STYLE_GRADIENT_SHAPE_ELLIPTICAL};
+         use gecko_bindings::structs::{NS_STYLE_GRADIENT_SHAPE_LINEAR, NS_STYLE_GRADIENT_SIZE_CLOSEST_CORNER};
+         use gecko_bindings::structs::{NS_STYLE_GRADIENT_SIZE_CLOSEST_SIDE, NS_STYLE_GRADIENT_SIZE_EXPLICIT_SIZE};
+         use gecko_bindings::structs::{NS_STYLE_GRADIENT_SIZE_FARTHEST_CORNER, NS_STYLE_GRADIENT_SIZE_FARTHEST_SIDE};
+         use gecko_bindings::structs::nsStyleCoord;
+         use values::computed::image::LineDirection;
+         use values::generics::image::{Circle, Ellipse, EndingShape, GradientKind, ShapeExtent};
+         use values::specified::position::{X, Y};
+@@ -209,19 +211,19 @@ impl nsStyleImage {
+                                          NS_STYLE_GRADIENT_SIZE_FARTHEST_CORNER as u8,
+                                          gradient.repeating,
+                                          gradient.compat_mode != CompatMode::Modern,
+                                          gradient.compat_mode == CompatMode::Moz,
+                                          stop_count as u32)
+                 };
+ 
+                 match direction {
+-                    LineDirection::Angle(angle) => {
++                    LineDirection::Angle(_) => {
+                         unsafe {
+-                            (*gecko_gradient).mAngle.set(angle);
++                            //(*gecko_gradient).mAngle.set(angle);
+                             (*gecko_gradient).mBgPosX.set_value(CoordDataValue::None);
+                             (*gecko_gradient).mBgPosY.set_value(CoordDataValue::None);
+                         }
+                     },
+                     LineDirection::Corner(horiz, vert) => {
+                         let percent_x = match horiz {
+                             X::Left => 0.0,
+                             X::Right => 1.0,
+diff --git a/servo/components/style/values/computed/image.rs b/servo/components/style/values/computed/image.rs
+--- a/servo/components/style/values/computed/image.rs
++++ b/servo/components/style/values/computed/image.rs
+@@ -82,16 +82,17 @@ impl GenericLineDirection for LineDirect
+             #[cfg(feature = "gecko")]
+             LineDirection::MozPosition(_, _) => false,
+         }
+     }
+ 
+     fn to_css<W>(&self, dest: &mut W, compat_mode: CompatMode) -> fmt::Result
+         where W: fmt::Write
+     {
++        println!("LOG - LineDirection::to_css");
+         match *self {
+             LineDirection::Angle(ref angle) => angle.to_css(dest),
+             LineDirection::Corner(x, y) => {
+                 if compat_mode == CompatMode::Modern {
+                     dest.write_str("to ")?;
+                 }
+                 x.to_css(dest)?;
+                 dest.write_str(" ")?;
+@@ -115,29 +116,31 @@ impl GenericLineDirection for LineDirect
+         }
+     }
+ }
+ 
+ impl SpecifiedLineDirection {
+     /// Takes a modern linear gradient angle and convert it to Gecko's old coordinate for
+     /// webkit-prefixed version
+     fn to_gecko_coordinate(modern_angle: f32, _compat_mode: CompatMode) -> f32 {
++        println!("LOG - SpecifiedLineDirection::to_gecko_coordinate");
+         #[cfg(feature = "gecko")]
+         {
+             return match _compat_mode {
+                 CompatMode::WebKit => -modern_angle + 270.,
+                 _ => modern_angle,
+             }
+         }
+         #[cfg(feature = "servo")]
+         modern_angle
+     }
+ 
+     /// Manually derived to_computed_value
+     fn to_computed_value(&self, context: &Context, compat_mode: CompatMode) -> LineDirection {
++        println!("LOG - SpecifiedLineDirection::to_computed_value");
+         match *self {
+             SpecifiedLineDirection::Angle(ref angle) => {
+                 LineDirection::Angle(angle.to_computed_value(context))
+             },
+             SpecifiedLineDirection::Horizontal(X::Left) => {
+                 LineDirection::Angle(Angle::Degree(SpecifiedLineDirection::to_gecko_coordinate(270., compat_mode)))
+             },
+             SpecifiedLineDirection::Horizontal(X::Right) => {
+@@ -156,16 +159,17 @@ impl SpecifiedLineDirection {
+             SpecifiedLineDirection::MozPosition(ref position, ref angle) => {
+                 LineDirection::MozPosition(position.to_computed_value(context),
+                                            angle.to_computed_value(context))
+             },
+         }
+     }
+ 
+     fn from_computed_value(computed: &LineDirection) -> Self {
++        println!("SpecifiedLineDirection::from_computed_value {:?}", computed);
+         match *computed {
+             LineDirection::Angle(ref angle) => {
+                 SpecifiedLineDirection::Angle(ToComputedValue::from_computed_value(angle))
+             },
+             LineDirection::Corner(x, y) => {
+                 SpecifiedLineDirection::Corner(x, y)
+             },
+             #[cfg(feature = "gecko")]
+@@ -176,51 +180,55 @@ impl SpecifiedLineDirection {
+         }
+     }
+ }
+ 
+ impl ToComputedValue for SpecifiedGradient {
+     type ComputedValue = Gradient;
+ 
+     fn to_computed_value(&self, context: &Context) -> Self::ComputedValue {
++        println!("LOG - SpecifiedGradient::ToComputedValue {:?}", self);
+         Self::ComputedValue {
+             kind: self.kind.to_computed_value(context, self.compat_mode),
+             items: self.items.to_computed_value(context),
+             repeating: self.repeating,
+             compat_mode: self.compat_mode
+         }
+     }
+ 
+     fn from_computed_value(computed: &Self::ComputedValue) -> Self {
++        println!("LOG - SpecifiedGradient::from_computed_value {:?}", computed);
+         Self {
+             kind: SpecifiedGradientKind::from_computed_value(&computed.kind),
+             items: ToComputedValue::from_computed_value(&computed.items),
+             repeating: computed.repeating,
+             compat_mode: computed.compat_mode
+         }
+     }
+ }
+ 
+ impl SpecifiedGradientKind {
+     /// Manually derived to_computed_value
+     pub fn to_computed_value(&self, context: &Context, compat_mode: CompatMode) -> GradientKind {
++        println!("LOG - SpecifiedGradientKind::to_computed_value");
+         match self {
+             &GenericGradientKind::Linear(ref line_direction) => {
+                 GenericGradientKind::Linear(line_direction.to_computed_value(context, compat_mode))
+             },
+             &GenericGradientKind::Radial(ref ending_shape, ref position, ref angle) => {
+                 GenericGradientKind::Radial(ending_shape.to_computed_value(context),
+                                             position.to_computed_value(context),
+                                             angle.map(|angle| angle.to_computed_value(context)))
+             }
+         }
+     }
+ 
+     /// Manually derived from_computed_value
+     pub fn from_computed_value(computed: &GradientKind) -> SpecifiedGradientKind {
++        println!("LOG - SpecifiedGradientKind::from_computed_value");
+         match *computed {
+             GenericGradientKind::Linear(line_direction) => {
+                 GenericGradientKind::Linear(SpecifiedLineDirection::from_computed_value(&line_direction))
+             },
+             GenericGradientKind::Radial(ending_shape, position, angle) => {
+                 GenericGradientKind::Radial(ToComputedValue::from_computed_value(&ending_shape),
+                                             ToComputedValue::from_computed_value(&position),
+                                             angle.map(|angle| ToComputedValue::from_computed_value(&angle)))
+diff --git a/servo/components/style/values/specified/image.rs b/servo/components/style/values/specified/image.rs
+--- a/servo/components/style/values/specified/image.rs
++++ b/servo/components/style/values/specified/image.rs
+@@ -194,16 +194,17 @@ impl Parse for Gradient {
+         enum Shape {
+             Linear,
+             Radial,
+         }
+ 
+         let func = input.expect_function()?;
+         let result = match_ignore_ascii_case! { &func,
+             "linear-gradient" => {
++                println!("LOG - Gradient::parse");
+                 Some((Shape::Linear, false, CompatMode::Modern))
+             },
+             "-webkit-linear-gradient" => {
+                 Some((Shape::Linear, false, CompatMode::WebKit))
+             },
+             #[cfg(feature = "gecko")]
+             "-moz-linear-gradient" => {
+                 Some((Shape::Linear, false, CompatMode::Moz))
+@@ -528,16 +529,17 @@ impl Gradient {
+ 
+ impl GradientKind {
+     /// Parses a linear gradient.
+     /// CompatMode can change during `-moz-` prefixed gradient parsing if it come across a `to` keyword.
+     fn parse_linear<'i, 't>(context: &ParserContext,
+                             input: &mut Parser<'i, 't>,
+                             compat_mode: &mut CompatMode)
+                             -> Result<Self, ParseError<'i>> {
++        println!("LOG - GradientKind::parse_linear");
+         let direction = if let Ok(d) = input.try(|i| LineDirection::parse(context, i, compat_mode)) {
+             input.expect_comma()?;
+             d
+         } else {
+             LineDirection::Vertical(Y::Bottom)
+         };
+         Ok(GenericGradientKind::Linear(direction))
+     }
+@@ -632,16 +634,17 @@ impl GenericsLineDirection for LineDirec
+             LineDirection::Vertical(Y::Bottom) => true,
+             _ => false,
+         }
+     }
+ 
+     fn to_css<W>(&self, dest: &mut W, compat_mode: CompatMode) -> fmt::Result
+         where W: fmt::Write
+     {
++        println!("LOG - GenericsLineDirection::to_css {:?}", self);
+         match *self {
+             LineDirection::Angle(angle) => {
+                 angle.to_css(dest)
+             },
+             LineDirection::Horizontal(x) => {
+                 if compat_mode == CompatMode::Modern {
+                     dest.write_str("to ")?;
+                 }
+@@ -680,16 +683,17 @@ impl GenericsLineDirection for LineDirec
+     }
+ }
+ 
+ impl LineDirection {
+     fn parse<'i, 't>(context: &ParserContext,
+                      input: &mut Parser<'i, 't>,
+                      compat_mode: &mut CompatMode)
+                      -> Result<Self, ParseError<'i>> {
++        println!("LOG - LineDirection::parse");
+         let mut _angle = if *compat_mode == CompatMode::Moz {
+             input.try(|i| Angle::parse(context, i)).ok()
+         } else {
+             if let Ok(angle) = input.try(|i| Angle::parse_with_unitless(context, i)) {
+                 return Ok(LineDirection::Angle(angle));
+             }
+             None
+         };
+@@ -742,23 +746,25 @@ impl LineDirection {
+     }
+ }
+ 
+ #[cfg(feature = "gecko")]
+ impl ToComputedValue for GradientPosition {
+     type ComputedValue = ComputedPosition;
+ 
+     fn to_computed_value(&self, context: &Context) -> ComputedPosition {
++        println!("LOG - GradientPosition::to_computed_value");
+         match *self {
+             GradientPosition::Modern(ref pos) => pos.to_computed_value(context),
+             GradientPosition::Legacy(ref pos) => pos.to_computed_value(context),
+         }
+     }
+ 
+     fn from_computed_value(computed: &ComputedPosition) -> Self {
++        println!("LOG - GradientPosition::from_computed_value {:?}", computed);
+         GradientPosition::Modern(ToComputedValue::from_computed_value(computed))
+     }
+ }
+ 
+ impl EndingShape {
+     fn parse<'i, 't>(context: &ParserContext,
+                      input: &mut Parser<'i, 't>,
+                      compat_mode: CompatMode)
+@@ -852,16 +858,17 @@ impl ShapeExtent {
+             keyword => Ok(keyword),
+         }
+     }
+ }
+ 
+ impl GradientItem {
+     fn parse_comma_separated<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>)
+                                      -> Result<Vec<Self>, ParseError<'i>> {
++        println!("LOG - GradientItem::parse_comma_separated");
+         let mut seen_stop = false;
+         let items = input.parse_comma_separated(|input| {
+             if seen_stop {
+                 if let Ok(hint) = input.try(|i| LengthOrPercentage::parse(context, i)) {
+                     seen_stop = false;
+                     return Ok(GenericGradientItem::InterpolationHint(hint));
+                 }
+             }
