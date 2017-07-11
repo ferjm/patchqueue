@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  173533a310060d0a52d6f6c3b3bee998ab9199d2
+# Parent  a418121d46250f91728b86d9eea331029c264c30
 Bug 1367274 - stylo: Serialization of computed value of gradient functions is different between Stylo and Gecko
 
 diff --git a/layout/style/test/test_computed_style.html b/layout/style/test/test_computed_style.html
@@ -63,7 +63,7 @@ diff --git a/layout/style/test/test_computed_style.html b/layout/style/test/test
      [ "0px 0px", "0px 0px", "0 with units" ],
      [ "0% 0%", "0% 0%", "0%" ],
      [ "calc(0px) 0", "0px 0px", "0 calc with units horizontal" ],
-@@ -193,45 +193,46 @@ var noframe_container = document.getElem
+@@ -193,17 +193,17 @@ var noframe_container = document.getElem
  
    for (var i = 0; i < backgroundSizes.length; ++i) {
      var test = backgroundSizes[i];
@@ -78,43 +78,11 @@ diff --git a/layout/style/test/test_computed_style.html b/layout/style/test/test
  (function test_bug_716628() {
    // Test that various gradient styles round-trip correctly
    var backgroundImages = [
--    [ "radial-gradient(at 10% bottom, #ffffff, black)",
-+/*    [ "radial-gradient(at 10% bottom, #ffffff, black)",
+     [ "radial-gradient(at 10% bottom, #ffffff, black)",
        "radial-gradient(at 10% 100%, rgb(255, 255, 255), rgb(0, 0, 0))",
        "radial gradient 1" ],
      [ "radial-gradient(#ffffff, black)",
-       "radial-gradient(rgb(255, 255, 255), rgb(0, 0, 0))",
-       "radial gradient 2" ],
-     [ "radial-gradient(farthest-corner, #ffffff, black)",
-       "radial-gradient(rgb(255, 255, 255), rgb(0, 0, 0))",
--      "radial gradient 3" ],
-+      "radial gradient 3" ],*/
-     [ "linear-gradient(red, blue)",
-       "linear-gradient(rgb(255, 0, 0), rgb(0, 0, 255))",
-       "linear gradient 1" ],
-     [ "linear-gradient(to bottom, red, blue)",
-       "linear-gradient(rgb(255, 0, 0), rgb(0, 0, 255))",
-       "linear gradient 2" ],
-     [ "linear-gradient(to right, red, blue)",
-       "linear-gradient(to right, rgb(255, 0, 0), rgb(0, 0, 255))",
-       "linear gradient 3" ],
-+/*
-     [ "linear-gradient(-45deg, red, blue)",
-       "linear-gradient(-45deg, rgb(255, 0, 0), rgb(0, 0, 255))",
-       "linear gradient with angle in degrees" ],
-     [ "linear-gradient(-0.125turn, red, blue)",
-       "linear-gradient(-0.125turn, rgb(255, 0, 0), rgb(0, 0, 255))",
--      "linear gradient with angle in turns" ],
-+      "linear gradient with angle in turns" ],*/
-   ];
- 
-   var p = document.createElement("p");
-   var cs = getComputedStyle(p, "");
-   frame_container.appendChild(p);
- 
-   for (var i = 0; i < backgroundImages.length; ++i) {
-     var test = backgroundImages[i];
-@@ -332,17 +333,17 @@ var noframe_container = document.getElem
+@@ -332,17 +332,17 @@ var noframe_container = document.getElem
    for (var prop in nonEmptyMasks) {
      var subProp = nonEmptyMasks[prop];
      for (var i = 0; i < subProp.length; i++) {
@@ -133,7 +101,7 @@ diff --git a/layout/style/test/test_computed_style.html b/layout/style/test/test
    // specified & expected styles, and construct the full expression on the fly:
    const specPrefix = "-webkit-gradient(linear, ";
    const specSuffix = ", from(blue), to(lime))";
-@@ -448,17 +449,17 @@ var noframe_container = document.getElem
+@@ -448,17 +448,17 @@ var noframe_container = document.getElem
  
      p.style.backgroundImage = specifiedStyle;
      is(cs.backgroundImage, expectedStyle,
@@ -152,7 +120,7 @@ diff --git a/layout/style/test/test_computed_style.html b/layout/style/test/test
    frame_container.appendChild(p);
  
    var docPath = document.URL.substring(0, document.URL.lastIndexOf("/") + 1);
-@@ -481,17 +482,17 @@ var noframe_container = document.getElem
+@@ -481,17 +481,17 @@ var noframe_container = document.getElem
    for (var prop of testStyles) {
      p.style[prop] = localURL;
      is(cs[prop], localURL, "computed value of " + prop);
@@ -171,7 +139,7 @@ diff --git a/layout/style/test/test_computed_style.html b/layout/style/test/test
      ["rgba(0, 0, 0, 1)", "rgb(0, 0, 0)"],
      ["rgba(0, 0, 0, 0.5)", "rgba(0, 0, 0, 0.5)"],
      ["hsla(0, 0%, 0%, 1)", "rgb(0, 0, 0)"],
-@@ -520,17 +521,17 @@ var noframe_container = document.getElem
+@@ -520,17 +520,17 @@ var noframe_container = document.getElem
    }
    for (var i = 0; i < css_color_4.length; ++i) {
      var test = css_color_4[i];
@@ -190,7 +158,7 @@ diff --git a/layout/style/test/test_computed_style.html b/layout/style/test/test
      // [ specified style,
      //   expected computed style,
      //   descriptionOfTestcase ],
-@@ -557,17 +558,17 @@ var noframe_container = document.getElem
+@@ -557,17 +557,17 @@ var noframe_container = document.getElem
    for (var i = 0; i < backgroundImages.length; ++i) {
      var test = backgroundImages[i];
      p.style.backgroundImage = test[0];
@@ -209,7 +177,7 @@ diff --git a/layout/style/test/test_computed_style.html b/layout/style/test/test
      "border-image-width"
    ];
    const rectValues = [
-@@ -612,14 +613,14 @@ var noframe_container = document.getElem
+@@ -612,14 +612,14 @@ var noframe_container = document.getElem
          is(cs.getPropertyValue(prop),
             expected ? expected : value, `${desc} for ${prop}`);
          p.style.removeProperty(prop);
@@ -228,7 +196,25 @@ diff --git a/layout/style/test/test_computed_style.html b/layout/style/test/test
 diff --git a/servo/components/style/gecko/conversions.rs b/servo/components/style/gecko/conversions.rs
 --- a/servo/components/style/gecko/conversions.rs
 +++ b/servo/components/style/gecko/conversions.rs
-@@ -134,16 +134,17 @@ impl Angle {
+@@ -10,16 +10,17 @@
+ 
+ use app_units::Au;
+ use gecko::values::{convert_rgba_to_nscolor, GeckoStyleCoordConvertible};
+ use gecko_bindings::bindings::{Gecko_CreateGradient, Gecko_SetGradientImageValue, Gecko_SetLayerImageImageValue};
+ use gecko_bindings::bindings::{Gecko_InitializeImageCropRect, Gecko_SetImageElement};
+ use gecko_bindings::structs::{nsCSSUnit, nsStyleCoord_CalcValue, nsStyleImage};
+ use gecko_bindings::structs::{nsresult, SheetType};
+ use gecko_bindings::sugar::ns_style_coord::{CoordDataValue, CoordData, CoordDataMut};
++use std::f32::consts::PI;
+ use stylesheets::{Origin, RulesMutateError};
+ use values::computed::{Angle, CalcLengthOrPercentage, Gradient, Image};
+ use values::computed::{LengthOrPercentage, LengthOrPercentageOrAuto};
+ use values::generics::grid::TrackSize;
+ use values::generics::image::{CompatMode, Image as GenericImage, GradientItem};
+ use values::generics::rect::Rect;
+ use values::specified::length::Percentage;
+ use values::specified::url::SpecifiedUrl;
+@@ -134,16 +135,17 @@ impl Angle {
              _ => panic!("Unexpected unit {:?} for angle", unit),
          }
      }
@@ -246,7 +232,7 @@ diff --git a/servo/components/style/gecko/conversions.rs b/servo/components/styl
                  unsafe {
                      Gecko_SetLayerImageImageValue(self, url.image_value.clone().unwrap().get());
                      // We unfortunately must make any url() value uncacheable, since
-@@ -182,16 +183,17 @@ impl nsStyleImage {
+@@ -182,16 +184,17 @@ impl nsStyleImage {
                  unsafe {
                      Gecko_SetImageElement(self, element.as_ptr());
                  }
@@ -264,8 +250,7 @@ diff --git a/servo/components/style/gecko/conversions.rs b/servo/components/styl
          use values::computed::image::LineDirection;
          use values::generics::image::{Circle, Ellipse, EndingShape, GradientKind, ShapeExtent};
          use values::specified::position::{X, Y};
-@@ -209,19 +211,19 @@ impl nsStyleImage {
-                                          NS_STYLE_GRADIENT_SIZE_FARTHEST_CORNER as u8,
+@@ -210,20 +213,50 @@ impl nsStyleImage {
                                           gradient.repeating,
                                           gradient.compat_mode != CompatMode::Modern,
                                           gradient.compat_mode == CompatMode::Moz,
@@ -273,25 +258,178 @@ diff --git a/servo/components/style/gecko/conversions.rs b/servo/components/styl
                  };
  
                  match direction {
--                    LineDirection::Angle(angle) => {
-+                    LineDirection::Angle(_) => {
+                     LineDirection::Angle(angle) => {
++                        if angle.radians() != PI {
++                            unsafe {
++                                (*gecko_gradient).mAngle.set(angle);
++                                (*gecko_gradient).mBgPosX.set_value(CoordDataValue::None);
++                                (*gecko_gradient).mBgPosY.set_value(CoordDataValue::None);
++                            }
++                        }
++                    },
++                    LineDirection::Horizontal(x) => {
++                        let x = match x {
++                            X::Left => 0.0,
++                            X::Right => 1.0,
++                        };
++
                          unsafe {
 -                            (*gecko_gradient).mAngle.set(angle);
-+                            //(*gecko_gradient).mAngle.set(angle);
-                             (*gecko_gradient).mBgPosX.set_value(CoordDataValue::None);
-                             (*gecko_gradient).mBgPosY.set_value(CoordDataValue::None);
+-                            (*gecko_gradient).mBgPosX.set_value(CoordDataValue::None);
+-                            (*gecko_gradient).mBgPosY.set_value(CoordDataValue::None);
++                            (*gecko_gradient).mAngle.set_value(CoordDataValue::None);
++                            (*gecko_gradient).mBgPosX
++                                             .set_value(CoordDataValue::Percent(x));
++                            (*gecko_gradient).mBgPosY
++                                             .set_value(CoordDataValue::Percent(0.5));
++                        }
++                    },
++                    LineDirection::Vertical(y) => {
++                        let y = match y {
++                            Y::Top => 0.0,
++                            Y::Bottom => 1.0,
++                        };
++
++                        unsafe {
++                            (*gecko_gradient).mAngle.set_value(CoordDataValue::None);
++                            (*gecko_gradient).mBgPosX
++                                             .set_value(CoordDataValue::Percent(0.5));
++                            (*gecko_gradient).mBgPosY
++                                             .set_value(CoordDataValue::Percent(y));
                          }
                      },
                      LineDirection::Corner(horiz, vert) => {
                          let percent_x = match horiz {
                              X::Left => 0.0,
                              X::Right => 1.0,
+                         };
+                         let percent_y = match vert {
+@@ -422,16 +455,17 @@ impl nsStyleImage {
+         use gecko_bindings::structs::{NS_STYLE_GRADIENT_SHAPE_CIRCULAR, NS_STYLE_GRADIENT_SHAPE_ELLIPTICAL};
+         use gecko_bindings::structs::{NS_STYLE_GRADIENT_SHAPE_LINEAR, NS_STYLE_GRADIENT_SIZE_CLOSEST_CORNER};
+         use gecko_bindings::structs::{NS_STYLE_GRADIENT_SIZE_CLOSEST_SIDE, NS_STYLE_GRADIENT_SIZE_EXPLICIT_SIZE};
+         use gecko_bindings::structs::{NS_STYLE_GRADIENT_SIZE_FARTHEST_CORNER, NS_STYLE_GRADIENT_SIZE_FARTHEST_SIDE};
+         use values::computed::{Length, LengthOrPercentage};
+         use values::computed::image::LineDirection;
+         use values::computed::position::Position;
+         use values::generics::image::{ColorStop, CompatMode, Circle, Ellipse, EndingShape, GradientKind, ShapeExtent};
++        use values::specified::image::GradientKind as SpecifiedGradientKind;
+         use values::specified::position::{X, Y};
+ 
+         let gecko_gradient = Gecko_GetGradientImageValue(self).as_ref().unwrap();
+         let angle = Angle::from_gecko_style_coord(&gecko_gradient.mAngle);
+         let horizontal_style = LengthOrPercentage::from_gecko_style_coord(&gecko_gradient.mBgPosX);
+         let vertical_style = LengthOrPercentage::from_gecko_style_coord(&gecko_gradient.mBgPosY);
+ 
+         let kind = match gecko_gradient.mShape as u32 {
+@@ -564,17 +598,23 @@ impl nsStyleImage {
+             if gecko_gradient.mMozLegacySyntax {
+                 CompatMode::Moz
+             } else if gecko_gradient.mLegacySyntax {
+                 CompatMode::WebKit
+             } else {
+                 CompatMode::Modern
+             };
+ 
+-        Gradient { items, repeating: gecko_gradient.mRepeating, kind, compat_mode }
++        Gradient {
++            initial_kind: SpecifiedGradientKind::from_computed_value(&kind),
++            kind,
++            items,
++            repeating: gecko_gradient.mRepeating,
++            compat_mode
++        }
+     }
+ }
+ 
+ pub mod basic_shape {
+     //! Conversions from and to CSS shape representations.
+ 
+     use gecko::values::GeckoStyleCoordConvertible;
+     use gecko_bindings::structs;
 diff --git a/servo/components/style/values/computed/image.rs b/servo/components/style/values/computed/image.rs
 --- a/servo/components/style/values/computed/image.rs
 +++ b/servo/components/style/values/computed/image.rs
-@@ -82,16 +82,17 @@ impl GenericLineDirection for LineDirect
+@@ -13,36 +13,43 @@ use std::fmt;
+ use style_traits::ToCss;
+ use values::{Either, None_};
+ use values::computed::{Angle, Context, Length, LengthOrPercentage, NumberOrPercentage, ToComputedValue};
+ use values::computed::position::Position;
+ use values::generics::image::{CompatMode, ColorStop as GenericColorStop, EndingShape as GenericEndingShape};
+ use values::generics::image::{Gradient as GenericGradient, GradientItem as GenericGradientItem};
+ use values::generics::image::{Image as GenericImage, GradientKind as GenericGradientKind};
+ use values::generics::image::{ImageRect as GenericImageRect, LineDirection as GenericLineDirection};
++use values::specified::Angle as SpecifiedAngle;
++use values::specified::{Length as SpecifiedLength, LengthOrPercentage as SpecifiedLengthOrPercentage};
+ use values::specified::image::{Gradient as SpecifiedGradient, LineDirection as SpecifiedLineDirection};
+-use values::specified::image::{GradientKind as SpecifiedGradientKind};
++use values::specified::image::{GradientKind as SpecifiedGradientKind, GradientPosition as SpecifiedPosition};
+ use values::specified::position::{X, Y};
+ 
+ /// A computed image layer.
+ pub type ImageLayer = Either<None_, Image>;
+ 
+ /// Computed values for an image according to CSS-IMAGES.
+ /// https://drafts.csswg.org/css-images/#image-values
+ pub type Image = GenericImage<Gradient, ImageRect>;
+ 
+ /// Computed values for a CSS gradient.
+ /// https://drafts.csswg.org/css-images/#gradients
+ pub type Gradient = GenericGradient<
++    SpecifiedLineDirection,
+     LineDirection,
++    SpecifiedLength,
+     Length,
++    SpecifiedLengthOrPercentage,
+     LengthOrPercentage,
++    SpecifiedPosition,
+     Position,
++    SpecifiedAngle,
++    Angle,
+     RGBA,
+-    Angle,
+ >;
+ 
+ /// A computed gradient kind.
+ pub type GradientKind = GenericGradientKind<
+     LineDirection,
+     Length,
+     LengthOrPercentage,
+     Position,
+@@ -52,16 +59,20 @@ pub type GradientKind = GenericGradientK
+ /// A computed gradient line direction.
+ #[derive(Clone, Copy, Debug, PartialEq)]
+ #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+ pub enum LineDirection {
+     /// An angle.
+     Angle(Angle),
+     /// A corner.
+     Corner(X, Y),
++    /// A horizontal direction.
++    Horizontal(X),
++    /// A vertical direction.
++    Vertical(Y),
+     /// A Position and an Angle for legacy `-moz-` prefixed gradient.
+     #[cfg(feature = "gecko")]
+     MozPosition(Option<Position>, Option<Angle>),
+ }
+ 
+ /// A computed radial gradient ending shape.
+ pub type EndingShape = GenericEndingShape<Length, LengthOrPercentage>;
+ 
+@@ -74,34 +85,49 @@ pub type ColorStop = GenericColorStop<RG
+ /// Computed values for ImageRect.
+ pub type ImageRect = GenericImageRect<NumberOrPercentage>;
+ 
+ impl GenericLineDirection for LineDirection {
+     fn points_downwards(&self) -> bool {
+         match *self {
+             LineDirection::Angle(angle) => angle.radians() == PI,
+             LineDirection::Corner(..) => false,
++            LineDirection::Vertical(Y::Bottom) => true,
              #[cfg(feature = "gecko")]
              LineDirection::MozPosition(_, _) => false,
++            _ => false,
          }
      }
  
@@ -307,13 +445,39 @@ diff --git a/servo/components/style/values/computed/image.rs b/servo/components/
                  }
                  x.to_css(dest)?;
                  dest.write_str(" ")?;
-@@ -115,29 +116,31 @@ impl GenericLineDirection for LineDirect
+                 y.to_css(dest)
+             },
++            LineDirection::Horizontal(x) => {
++                if compat_mode == CompatMode::Modern {
++                    dest.write_str("to ")?;
++                }
++                x.to_css(dest)
++            },
++            LineDirection::Vertical(y) => {
++                if compat_mode == CompatMode::Modern {
++                    dest.write_str("to ")?;
++                }
++                y.to_css(dest)
++            },
+             #[cfg(feature = "gecko")]
+             LineDirection::MozPosition(position, angle) => {
+                 let mut need_space = false;
+                 if let Some(position) = position {
+                     position.to_css(dest)?;
+                     need_space = true;
+                 }
+                 if let Some(angle) = angle {
+@@ -112,115 +138,124 @@ impl GenericLineDirection for LineDirect
+                 }
+                 Ok(())
+             }
          }
      }
  }
  
  impl SpecifiedLineDirection {
-     /// Takes a modern linear gradient angle and convert it to Gecko's old coordinate for
+-    /// Takes a modern linear gradient angle and convert it to Gecko's old coordinate for
++/*    /// Takes a modern linear gradient angle and convert it to Gecko's old coordinate for
      /// webkit-prefixed version
      fn to_gecko_coordinate(modern_angle: f32, _compat_mode: CompatMode) -> f32 {
 +        println!("LOG - SpecifiedLineDirection::to_gecko_coordinate");
@@ -327,19 +491,36 @@ diff --git a/servo/components/style/values/computed/image.rs b/servo/components/
          #[cfg(feature = "servo")]
          modern_angle
      }
- 
+-
++*/ // XXX
      /// Manually derived to_computed_value
-     fn to_computed_value(&self, context: &Context, compat_mode: CompatMode) -> LineDirection {
+-    fn to_computed_value(&self, context: &Context, compat_mode: CompatMode) -> LineDirection {
++    fn to_computed_value(&self, context: &Context, _: CompatMode) -> LineDirection {
 +        println!("LOG - SpecifiedLineDirection::to_computed_value");
          match *self {
              SpecifiedLineDirection::Angle(ref angle) => {
                  LineDirection::Angle(angle.to_computed_value(context))
              },
-             SpecifiedLineDirection::Horizontal(X::Left) => {
-                 LineDirection::Angle(Angle::Degree(SpecifiedLineDirection::to_gecko_coordinate(270., compat_mode)))
+-            SpecifiedLineDirection::Horizontal(X::Left) => {
+-                LineDirection::Angle(Angle::Degree(SpecifiedLineDirection::to_gecko_coordinate(270., compat_mode)))
+-            },
+-            SpecifiedLineDirection::Horizontal(X::Right) => {
+-                LineDirection::Angle(Angle::Degree(SpecifiedLineDirection::to_gecko_coordinate(90., compat_mode)))
++            SpecifiedLineDirection::Horizontal(x) => {
++                LineDirection::Horizontal(x)
              },
-             SpecifiedLineDirection::Horizontal(X::Right) => {
-@@ -156,16 +159,17 @@ impl SpecifiedLineDirection {
+-            SpecifiedLineDirection::Vertical(Y::Top) => {
+-                LineDirection::Angle(Angle::Degree(SpecifiedLineDirection::to_gecko_coordinate(0., compat_mode)))
+-            },
+-            SpecifiedLineDirection::Vertical(Y::Bottom) => {
+-                LineDirection::Angle(Angle::Degree(SpecifiedLineDirection::to_gecko_coordinate(180., compat_mode)))
++            SpecifiedLineDirection::Vertical(y) => {
++                LineDirection::Vertical(y)
+             },
+             SpecifiedLineDirection::Corner(x, y) => {
+                 LineDirection::Corner(x, y)
+             },
+             #[cfg(feature = "gecko")]
              SpecifiedLineDirection::MozPosition(ref position, ref angle) => {
                  LineDirection::MozPosition(position.to_computed_value(context),
                                             angle.to_computed_value(context))
@@ -353,11 +534,20 @@ diff --git a/servo/components/style/values/computed/image.rs b/servo/components/
              LineDirection::Angle(ref angle) => {
                  SpecifiedLineDirection::Angle(ToComputedValue::from_computed_value(angle))
              },
++            LineDirection::Horizontal(x) => {
++                SpecifiedLineDirection::Horizontal(x)
++            },
++            LineDirection::Vertical(y) => {
++                SpecifiedLineDirection::Vertical(y)
++            },
              LineDirection::Corner(x, y) => {
                  SpecifiedLineDirection::Corner(x, y)
              },
              #[cfg(feature = "gecko")]
-@@ -176,51 +180,55 @@ impl SpecifiedLineDirection {
+             LineDirection::MozPosition(ref position, ref angle) => {
+                 SpecifiedLineDirection::MozPosition(ToComputedValue::from_computed_value(position),
+                                                     ToComputedValue::from_computed_value(angle))
+             },
          }
      }
  }
@@ -368,6 +558,7 @@ diff --git a/servo/components/style/values/computed/image.rs b/servo/components/
      fn to_computed_value(&self, context: &Context) -> Self::ComputedValue {
 +        println!("LOG - SpecifiedGradient::ToComputedValue {:?}", self);
          Self::ComputedValue {
++            initial_kind: self.kind.clone(),
              kind: self.kind.to_computed_value(context, self.compat_mode),
              items: self.items.to_computed_value(context),
              repeating: self.repeating,
@@ -378,6 +569,7 @@ diff --git a/servo/components/style/values/computed/image.rs b/servo/components/
      fn from_computed_value(computed: &Self::ComputedValue) -> Self {
 +        println!("LOG - SpecifiedGradient::from_computed_value {:?}", computed);
          Self {
++            initial_kind: computed.initial_kind.clone(),
              kind: SpecifiedGradientKind::from_computed_value(&computed.kind),
              items: ToComputedValue::from_computed_value(&computed.items),
              repeating: computed.repeating,
@@ -413,10 +605,106 @@ diff --git a/servo/components/style/values/computed/image.rs b/servo/components/
                  GenericGradientKind::Radial(ToComputedValue::from_computed_value(&ending_shape),
                                              ToComputedValue::from_computed_value(&position),
                                              angle.map(|angle| ToComputedValue::from_computed_value(&angle)))
+diff --git a/servo/components/style/values/generics/image.rs b/servo/components/style/values/generics/image.rs
+--- a/servo/components/style/values/generics/image.rs
++++ b/servo/components/style/values/generics/image.rs
+@@ -32,17 +32,22 @@ pub enum Image<Gradient, ImageRect> {
+     #[cfg(feature = "servo")]
+     PaintWorklet(PaintWorklet),
+ }
+ 
+ /// A CSS gradient.
+ /// https://drafts.csswg.org/css-images/#gradients
+ #[derive(Clone, Debug, HasViewportPercentage, PartialEq)]
+ #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+-pub struct Gradient<LineDirection, Length, LengthOrPercentage, Position, Color, Angle> {
++pub struct Gradient<InitialLineDirection, LineDirection, InitialLength, Length,
++                    InitialLengthOrPercentage, LengthOrPercentage, InitialPosition, Position,
++                    InitialAngle, Angle, Color> {
++    /// XXX
++    pub initial_kind: GradientKind<InitialLineDirection, InitialLength, InitialLengthOrPercentage,
++                                   InitialPosition, InitialAngle>,
+     /// Gradients can be linear or radial.
+     pub kind: GradientKind<LineDirection, Length, LengthOrPercentage, Position, Angle>,
+     /// The color stops and interpolation hints.
+     pub items: Vec<GradientItem<Color, LengthOrPercentage>>,
+     /// True if this is a repeating gradient.
+     pub repeating: bool,
+     /// Compatibility mode.
+     pub compat_mode: CompatMode,
+@@ -209,18 +214,20 @@ impl<G, R> HasViewportPercentage for Ima
+     fn has_viewport_percentage(&self) -> bool {
+         match *self {
+             Image::Gradient(ref gradient) => gradient.has_viewport_percentage(),
+             _ => false,
+         }
+     }
+ }
+ 
+-impl<D, L, LoP, P, C, A> ToCss for Gradient<D, L, LoP, P, C, A>
+-    where D: LineDirection, L: ToCss, LoP: ToCss, P: ToCss, C: ToCss, A: ToCss
++impl<ID, D, IL, L, ILoP, LoP, IP, P, IA, A, C> ToCss
++    for Gradient<ID, D, IL, L, ILoP, LoP, IP, P, IA, A, C>
++    where ID: LineDirection, D: LineDirection, IL: ToCss, L: ToCss,
++          ILoP: ToCss, LoP: ToCss, IP: ToCss, P: ToCss, IA: ToCss, A: ToCss, C: ToCss
+ {
+     fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
+         match self.compat_mode {
+             CompatMode::WebKit => dest.write_str("-webkit-")?,
+             CompatMode::Moz => dest.write_str("-moz-")?,
+             _ => {},
+         }
+ 
 diff --git a/servo/components/style/values/specified/image.rs b/servo/components/style/values/specified/image.rs
 --- a/servo/components/style/values/specified/image.rs
 +++ b/servo/components/style/values/specified/image.rs
-@@ -194,16 +194,17 @@ impl Parse for Gradient {
+@@ -40,33 +40,43 @@ pub type ImageLayer = Either<None_, Imag
+ /// https://drafts.csswg.org/css-images/#image-values
+ pub type Image = GenericImage<Gradient, ImageRect>;
+ 
+ /// Specified values for a CSS gradient.
+ /// https://drafts.csswg.org/css-images/#gradients
+ #[cfg(not(feature = "gecko"))]
+ pub type Gradient = GenericGradient<
+     LineDirection,
++    LineDirection,
+     Length,
++    Length,
++    LengthOrPercentage,
+     LengthOrPercentage,
+     Position,
++    Position,
++    Angle,
++    Angle,
+     RGBAColor,
+-    Angle,
+ >;
+ 
+ /// Specified values for a CSS gradient.
+ /// https://drafts.csswg.org/css-images/#gradients
+ #[cfg(feature = "gecko")]
+ pub type Gradient = GenericGradient<
+     LineDirection,
++    LineDirection,
+     Length,
++    Length,
++    LengthOrPercentage,
+     LengthOrPercentage,
+     GradientPosition,
++    GradientPosition,
++    Angle,
++    Angle,
+     RGBAColor,
+-    Angle,
+ >;
+ 
+ /// A specified gradient kind.
+ #[cfg(not(feature = "gecko"))]
+ pub type GradientKind = GenericGradientKind<
+     LineDirection,
+     Length,
+     LengthOrPercentage,
+@@ -194,16 +204,17 @@ impl Parse for Gradient {
          enum Shape {
              Linear,
              Radial,
@@ -434,7 +722,45 @@ diff --git a/servo/components/style/values/specified/image.rs b/servo/components
              #[cfg(feature = "gecko")]
              "-moz-linear-gradient" => {
                  Some((Shape::Linear, false, CompatMode::Moz))
-@@ -528,16 +529,17 @@ impl Gradient {
+@@ -258,19 +269,20 @@ impl Parse for Gradient {
+             Ok((shape, items))
+         })?;
+ 
+         if items.len() < 2 {
+             return Err(StyleParseError::UnspecifiedError.into());
+         }
+ 
+         Ok(Gradient {
++            initial_kind: kind.clone(),
++            kind: kind,
+             items: items,
+             repeating: repeating,
+-            kind: kind,
+             compat_mode: compat_mode,
+         })
+     }
+ }
+ 
+ impl Gradient {
+     fn parse_webkit_gradient_argument<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>)
+                                               -> Result<Self, ParseError<'i>> {
+@@ -513,31 +525,33 @@ impl Gradient {
+                     Ordering::Greater
+                 } else {
+                     Ordering::Less
+                 }
+             })
+         }
+ 
+         Ok(GenericGradient {
++            initial_kind: kind.clone(),
+             kind: kind,
+             items: items,
+             repeating: false,
+             compat_mode: CompatMode::Modern,
+         })
+     }
+ }
  
  impl GradientKind {
      /// Parses a linear gradient.
@@ -452,7 +778,7 @@ diff --git a/servo/components/style/values/specified/image.rs b/servo/components
          };
          Ok(GenericGradientKind::Linear(direction))
      }
-@@ -632,16 +634,17 @@ impl GenericsLineDirection for LineDirec
+@@ -632,16 +646,17 @@ impl GenericsLineDirection for LineDirec
              LineDirection::Vertical(Y::Bottom) => true,
              _ => false,
          }
@@ -470,7 +796,7 @@ diff --git a/servo/components/style/values/specified/image.rs b/servo/components
                  if compat_mode == CompatMode::Modern {
                      dest.write_str("to ")?;
                  }
-@@ -680,16 +683,17 @@ impl GenericsLineDirection for LineDirec
+@@ -680,16 +695,17 @@ impl GenericsLineDirection for LineDirec
      }
  }
  
@@ -488,7 +814,7 @@ diff --git a/servo/components/style/values/specified/image.rs b/servo/components
              }
              None
          };
-@@ -742,23 +746,25 @@ impl LineDirection {
+@@ -742,23 +758,25 @@ impl LineDirection {
      }
  }
  
@@ -514,7 +840,7 @@ diff --git a/servo/components/style/values/specified/image.rs b/servo/components
      fn parse<'i, 't>(context: &ParserContext,
                       input: &mut Parser<'i, 't>,
                       compat_mode: CompatMode)
-@@ -852,16 +858,17 @@ impl ShapeExtent {
+@@ -852,16 +870,17 @@ impl ShapeExtent {
              keyword => Ok(keyword),
          }
      }
