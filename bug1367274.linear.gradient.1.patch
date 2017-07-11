@@ -3,6 +3,57 @@
 # Parent  a418121d46250f91728b86d9eea331029c264c30
 Bug 1367274 - stylo: preserve linear-gradient keyword values. r?xidorn
 
+diff --git a/servo/components/layout/display_list_builder.rs b/servo/components/layout/display_list_builder.rs
+--- a/servo/components/layout/display_list_builder.rs
++++ b/servo/components/layout/display_list_builder.rs
+@@ -51,17 +51,17 @@ use style::computed_values::{background_
+ use style::computed_values::{background_repeat, border_style, cursor};
+ use style::computed_values::{image_rendering, overflow_x, pointer_events, position, visibility};
+ use style::logical_geometry::{LogicalPoint, LogicalRect, LogicalSize, WritingMode};
+ use style::properties::{self, ServoComputedValues};
+ use style::properties::longhands::border_image_repeat::computed_value::RepeatKeyword;
+ use style::properties::style_structs;
+ use style::servo::restyle_damage::REPAINT;
+ use style::values::{Either, RGBA};
+-use style::values::computed::{Gradient, GradientItem, LengthOrPercentage};
++use style::values::computed::{Angle, Gradient, GradientItem, LengthOrPercentage};
+ use style::values::computed::{LengthOrPercentageOrAuto, NumberOrPercentage, Position};
+ use style::values::computed::effects::SimpleShadow;
+ use style::values::computed::image::{EndingShape, LineDirection};
+ use style::values::generics::background::BackgroundSize;
+ use style::values::generics::effects::Filter;
+ use style::values::generics::image::{Circle, Ellipse, EndingShape as GenericEndingShape};
+ use style::values::generics::image::{GradientItem as GenericGradientItem, GradientKind};
+ use style::values::generics::image::{Image, ShapeExtent};
+@@ -1204,16 +1204,28 @@ impl FragmentDisplayListBuilding for Fra
+     fn convert_linear_gradient(&self,
+                                bounds: &Rect<Au>,
+                                stops: &[GradientItem],
+                                direction: &LineDirection,
+                                repeating: bool)
+                                -> display_list::Gradient {
+         let angle = match *direction {
+             LineDirection::Angle(angle) => angle.radians(),
++            LineDirection::Horizontal(x) => {
++                match x {
++                    X::Left => Angle::Degree(270.).radians(),
++                    X::Right => Angle::Degree(90.).radians(),
++                }
++            },
++            LineDirection::Vertical(y) => {
++                match y {
++                    Y::Top => Angle::Degree(0.).radians(),
++                    Y::Bottom => Angle::Degree(180.).radians(),
++                }
++            },
+             LineDirection::Corner(horizontal, vertical) => {
+                 // This the angle for one of the diagonals of the box. Our angle
+                 // will either be this one, this one + PI, or one of the other
+                 // two perpendicular angles.
+                 let atan = (bounds.size.height.to_f32_px() /
+                             bounds.size.width.to_f32_px()).atan();
+                 match (horizontal, vertical) {
+                     (X::Right, Y::Bottom)
 diff --git a/servo/components/style/gecko/conversions.rs b/servo/components/style/gecko/conversions.rs
 --- a/servo/components/style/gecko/conversions.rs
 +++ b/servo/components/style/gecko/conversions.rs
