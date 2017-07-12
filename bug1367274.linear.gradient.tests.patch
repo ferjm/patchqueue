@@ -1,20 +1,20 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  349b485db9665ffe887af1ad09c1230a12d7718d
+# Parent  d2f9cd57b9ee2385ca3de115439d5fcb2f44be71
 Bug 1367274 - Update test expectations for test_computed_style.html. r?xidorn
 
 diff --git a/layout/style/test/stylo-failures.md b/layout/style/test/stylo-failures.md
 --- a/layout/style/test/stylo-failures.md
 +++ b/layout/style/test/stylo-failures.md
-@@ -60,18 +60,18 @@ to mochitest command.
+@@ -55,18 +55,18 @@ to mochitest command.
+   * different parsing bug 1364260
+     * test_supports_rules.html [6]
      * test_condition_text.html [1]
  * Incorrect serialization
    * place-{content,items,self} shorthands bug 1363971
      * test_align_shorthand_serialization.html [6]
    * system font serialization with subprop specified bug 1364286
      * test_system_font_serialization.html [3]
-   * serialize subprops to -moz-use-system-font when using system font bug 1364289
-     * test_value_storage.html `'font'` [240]
 -  * different serialization for gradient functions in computed value bug 1367274
 -    * test_computed_style.html `gradient` [13]
 +  * radial gradients are not serialized using modern unprefixed style bug 1380259
