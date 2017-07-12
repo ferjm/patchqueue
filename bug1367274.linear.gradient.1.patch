@@ -75,7 +75,7 @@ diff --git a/servo/components/style/gecko/conversions.rs b/servo/components/styl
  use values::generics::rect::Rect;
  use values::specified::length::Percentage;
  use values::specified::url::SpecifiedUrl;
-@@ -210,20 +211,50 @@ impl nsStyleImage {
+@@ -210,20 +211,51 @@ impl nsStyleImage {
                                           gradient.repeating,
                                           gradient.compat_mode != CompatMode::Modern,
                                           gradient.compat_mode == CompatMode::Moz,
@@ -84,6 +84,7 @@ diff --git a/servo/components/style/gecko/conversions.rs b/servo/components/styl
  
                  match direction {
                      LineDirection::Angle(angle) => {
++                        // PI radians (180 degrees) is ignored because this is the default value.
 +                        if angle.radians() != PI {
 +                            unsafe {
 +                                (*gecko_gradient).mAngle.set(angle);
