@@ -1,7 +1,7 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
 # Parent  a418121d46250f91728b86d9eea331029c264c30
-Bug 1367274 - stylo: preserve linear-gradient keyword values. r?xidorn
+Bug 1367274 - Part 1: preserve linear-gradient keyword values. r?xidorn
 
 diff --git a/servo/components/layout/display_list_builder.rs b/servo/components/layout/display_list_builder.rs
 --- a/servo/components/layout/display_list_builder.rs
