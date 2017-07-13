@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  a418121d46250f91728b86d9eea331029c264c30
+# Parent  30ea2905130e85f9e1d8d56fa3097901eec6514b
 Bug 1367274 - Part 1: preserve linear-gradient keyword values. r?xidorn
 
 diff --git a/servo/components/layout/display_list_builder.rs b/servo/components/layout/display_list_builder.rs
@@ -25,7 +25,7 @@ diff --git a/servo/components/layout/display_list_builder.rs b/servo/components/
  use style::values::generics::image::{Circle, Ellipse, EndingShape as GenericEndingShape};
  use style::values::generics::image::{GradientItem as GenericGradientItem, GradientKind};
  use style::values::generics::image::{Image, ShapeExtent};
-@@ -1204,16 +1204,28 @@ impl FragmentDisplayListBuilding for Fra
+@@ -1211,16 +1211,28 @@ impl FragmentDisplayListBuilding for Fra
      fn convert_linear_gradient(&self,
                                 bounds: &Rect<Au>,
                                 stops: &[GradientItem],
@@ -156,8 +156,8 @@ diff --git a/servo/components/style/values/computed/image.rs b/servo/components/
  /// A computed radial gradient ending shape.
 @@ -73,27 +77,41 @@ pub type ColorStop = GenericColorStop<RG
  
- /// Computed values for ImageRect.
- pub type ImageRect = GenericImageRect<NumberOrPercentage>;
+ /// Computed values for `-moz-image-rect(...)`.
+ pub type MozImageRect = GenericMozImageRect<NumberOrPercentage>;
  
  impl GenericLineDirection for LineDirection {
      fn points_downwards(&self) -> bool {
