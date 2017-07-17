@@ -1,0 +1,5 @@
+# HG changeset patch
+# User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
+# Parent  836db91fc5b948cedb463ebeb52796221dc762f2
+Bug 1367274 - Test 'to bottom' <side-or-corner> line-gradient default value. r?xidorn
+

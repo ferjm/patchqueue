@@ -1,0 +1,5 @@
+# HG changeset patch
+# User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
+# Parent  d43779e278d2e4d3e21dba2fcb585a3bf4b1288e
+Stylo: GetRuleColumn needs to report a 1-based value, but instead reports 0-based
+
