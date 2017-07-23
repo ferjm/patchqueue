@@ -1,30 +1,22 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  d43779e278d2e4d3e21dba2fcb585a3bf4b1288e
+# Parent  4b32e7ce740eaf6434180bc9e44731dab0aa67cc
 Bug 1380890 - stylo: make GetRuleColumn report a 1-based value. r?jryans
 
-diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
---- a/servo/ports/geckolib/glue.rs
-+++ b/servo/ports/geckolib/glue.rs
-@@ -1116,18 +1116,20 @@ macro_rules! impl_basic_rule_funcs {
+diff --git a/servo/components/style/stylesheets/rule_parser.rs b/servo/components/style/stylesheets/rule_parser.rs
+--- a/servo/components/style/stylesheets/rule_parser.rs
++++ b/servo/components/style/stylesheets/rule_parser.rs
+@@ -511,11 +511,12 @@ impl<'a, 'b, 'i> QualifiedRuleParser<'i>
  
-             if index >= rules.0.len() {
-                 return Strong::null();
-             }
- 
-             match rules.0[index] {
-                 CssRule::$name(ref rule) => {
-                     let location = rule.read_with(&guard).source_location;
-+                    // Gecko devtools expects 1-based line and column values.
-+                    // source_location provides 1-based lines but 0-based columns.
-                     *unsafe { line.as_mut().unwrap() } = location.line as u32;
--                    *unsafe { column.as_mut().unwrap() } = location.column as u32;
-+                    *unsafe { column.as_mut().unwrap() } = location.column as u32 + 1;
-                     rule.clone().into_strong()
-                 },
-                 _ => {
-                     Strong::null()
-                 }
-             }
-         }
- 
+ /// Calculates the location of a rule's source given an offset.
+ fn get_location_with_offset(
+     location: SourceLocation,
+     offset: u64
+ ) -> SourceLocation {
+     SourceLocation {
+         line: location.line + offset as u32,
+-        column: location.column,
++        // Column offsets are not yet supported, but Gecko devtools expect 1-based columns.
++        column: location.column + 1,
+     }
+ }
