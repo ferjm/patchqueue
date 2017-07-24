@@ -1,0 +1,121 @@
+# HG changeset patch
+# User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
+# Parent  eb1d92b2b6a4161492561250f51bae5bafeda68a
+Bug 1382285 - stylo: initialize missing Servo*Rule with line and column numbers. r?xidorn
+
+diff --git a/layout/style/GroupRule.cpp b/layout/style/GroupRule.cpp
+--- a/layout/style/GroupRule.cpp
++++ b/layout/style/GroupRule.cpp
+@@ -218,18 +218,19 @@ ServoGroupRuleRules::SizeOfExcludingThis
+ //
+ 
+ GroupRule::GroupRule(uint32_t aLineNumber, uint32_t aColumnNumber)
+   : Rule(aLineNumber, aColumnNumber)
+   , mInner(GeckoGroupRuleRules())
+ {
+ }
+ 
+-GroupRule::GroupRule(already_AddRefed<ServoCssRules> aRules)
+-  : Rule(0, 0) // TODO
++GroupRule::GroupRule(already_AddRefed<ServoCssRules> aRules,
++                     uint32_t aLineNumber, uint32_t aColumnNumber)
++  : Rule(aLineNumber, aColumnNumber)
+   , mInner(ServoGroupRuleRules(Move(aRules)))
+ {
+   mInner.as<ServoGroupRuleRules>().SetParentRule(this);
+ }
+ 
+ GroupRule::GroupRule(const GroupRule& aCopy)
+   : Rule(aCopy)
+   , mInner(aCopy.mInner)
+diff --git a/layout/style/GroupRule.h b/layout/style/GroupRule.h
+--- a/layout/style/GroupRule.h
++++ b/layout/style/GroupRule.h
+@@ -138,17 +138,18 @@ struct ServoGroupRuleRules
+   }                                                \
+ 
+ // inherits from Rule so it can be shared between
+ // MediaRule and DocumentRule
+ class GroupRule : public Rule
+ {
+ protected:
+   GroupRule(uint32_t aLineNumber, uint32_t aColumnNumber);
+-  explicit GroupRule(already_AddRefed<ServoCssRules> aRules);
++  GroupRule(already_AddRefed<ServoCssRules> aRules,
++            uint32_t aLineNumber, uint32_t aColumnNumber);
+   GroupRule(const GroupRule& aCopy);
+   virtual ~GroupRule();
+ public:
+ 
+   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(GroupRule, Rule)
+   NS_DECL_ISUPPORTS_INHERITED
+   virtual bool IsCCLeaf() const override;
+ 
+diff --git a/layout/style/ServoDocumentRule.cpp b/layout/style/ServoDocumentRule.cpp
+--- a/layout/style/ServoDocumentRule.cpp
++++ b/layout/style/ServoDocumentRule.cpp
+@@ -10,17 +10,18 @@
+ #include "mozilla/ServoDocumentRule.h"
+ 
+ using namespace mozilla::dom;
+ 
+ namespace mozilla {
+ 
+ ServoDocumentRule::ServoDocumentRule(RefPtr<RawServoDocumentRule> aRawRule,
+                                      uint32_t aLine, uint32_t aColumn)
+-  : CSSMozDocumentRule(Servo_DocumentRule_GetRules(aRawRule).Consume())
++  : CSSMozDocumentRule(Servo_DocumentRule_GetRules(aRawRule).Consume(),
++                       aLine, aColumn)
+   , mRawRule(Move(aRawRule))
+ {
+ }
+ 
+ ServoDocumentRule::~ServoDocumentRule()
+ {
+ }
+ 
+diff --git a/layout/style/ServoMediaRule.cpp b/layout/style/ServoMediaRule.cpp
+--- a/layout/style/ServoMediaRule.cpp
++++ b/layout/style/ServoMediaRule.cpp
+@@ -12,17 +12,17 @@
+ #include "mozilla/ServoMediaList.h"
+ 
+ using namespace mozilla::dom;
+ 
+ namespace mozilla {
+ 
+ ServoMediaRule::ServoMediaRule(RefPtr<RawServoMediaRule> aRawRule,
+                                uint32_t aLine, uint32_t aColumn)
+-  : CSSMediaRule(Servo_MediaRule_GetRules(aRawRule).Consume())
++  : CSSMediaRule(Servo_MediaRule_GetRules(aRawRule).Consume(), aLine, aColumn)
+   , mRawRule(Move(aRawRule))
+ {
+ }
+ 
+ ServoMediaRule::~ServoMediaRule()
+ {
+ }
+ 
+diff --git a/layout/style/ServoSupportsRule.cpp b/layout/style/ServoSupportsRule.cpp
+--- a/layout/style/ServoSupportsRule.cpp
++++ b/layout/style/ServoSupportsRule.cpp
+@@ -11,17 +11,18 @@
+ #include "mozilla/ServoBindings.h"
+ 
+ using namespace mozilla::dom;
+ 
+ namespace mozilla {
+ 
+ ServoSupportsRule::ServoSupportsRule(RefPtr<RawServoSupportsRule> aRawRule,
+                                      uint32_t aLine, uint32_t aColumn)
+-  : CSSSupportsRule(Servo_SupportsRule_GetRules(aRawRule).Consume())
++  : CSSSupportsRule(Servo_SupportsRule_GetRules(aRawRule).Consume(),
++                    aLine, aColumn)
+   , mRawRule(Move(aRawRule))
+ {
+ }
+ 
+ ServoSupportsRule::~ServoSupportsRule()
+ {
+ }
+ 
