@@ -1,0 +1,27 @@
+# HG changeset patch
+# User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
+# Parent  dcfb58fcb6dd8f6474eed6520ba6272dedded393
+Bug 1380259 - stylo: serialize radial gradients using modern unprefixed style. r?xidorn
+
+diff --git a/servo/components/style/gecko/conversions.rs b/servo/components/style/gecko/conversions.rs
+--- a/servo/components/style/gecko/conversions.rs
++++ b/servo/components/style/gecko/conversions.rs
+@@ -292,17 +292,17 @@ impl nsStyleImage {
+                         (NS_STYLE_GRADIENT_SHAPE_ELLIPTICAL as u8, size as u8)
+                     }
+                 };
+ 
+                 let gecko_gradient = unsafe {
+                     Gecko_CreateGradient(gecko_shape,
+                                          gecko_size,
+                                          gradient.repeating,
+-                                         gradient.compat_mode != CompatMode::Modern,
++                                         false,
+                                          gradient.compat_mode == CompatMode::Moz,
+                                          stop_count as u32)
+                 };
+ 
+                 // Clear mBgPos field and set mAngle if angle is set. Otherwise clear it.
+                 unsafe {
+                     if let Some(angle) = angle {
+                         (*gecko_gradient).mAngle.set(angle);

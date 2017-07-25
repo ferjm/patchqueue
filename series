@@ -1,5 +1,6 @@
-bug1380890.column.0.patch
+bug1380259.radial.gradients.patch
 bug1382285.line.column.patch
+bug1380890.column.0.patch
 bug1367274.linear.gradient.tests.patch
 bug1367274.linear.gradient.patch
 iterator.patch
