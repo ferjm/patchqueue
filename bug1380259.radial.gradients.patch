@@ -151,7 +151,7 @@ diff --git a/servo/components/style/values/generics/image.rs b/servo/components/
              dest.write_str("repeating-")?;
          }
          dest.write_str(self.kind.label())?;
-@@ -246,16 +289,25 @@ impl<D, L, LoP, P, C, A> ToCss for Gradi
+@@ -246,16 +289,21 @@ impl<D, L, LoP, P, C, A> ToCss for Gradi
                  };
                  if self.compat_mode == CompatMode::Modern {
                      if !omit_shape {
@@ -161,10 +161,6 @@ diff --git a/servo/components/style/values/generics/image.rs b/servo/components/
                      dest.write_str("at ")?;
                      position.to_css(dest)?;
 +                } else if self.compat_mode == CompatMode::WebKit {
-+                    if let Some(ref a) = *angle {
-+                        dest.write_str(" ")?;
-+                        a.to_css(dest)?;
-+                    }
 +                    if !omit_shape {
 +                        shape.to_css(dest)?;
 +                    }
