@@ -1,7 +1,7 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  6e9f9db526d2fad58d63e7751e76e9bd9524769c
-Bug 1380259 - update test expectations for test_computed_style.html. r?xidorn
+# Parent  dcfb58fcb6dd8f6474eed6520ba6272dedded393
+Bug 1380259 - stylo: update test expectations. r=xidorn
 
 diff --git a/layout/style/test/stylo-failures.md b/layout/style/test/stylo-failures.md
 --- a/layout/style/test/stylo-failures.md
