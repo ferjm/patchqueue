@@ -1,0 +1,243 @@
+# HG changeset patch
+# User Fernando Jimenez <ferjmoreno@gmail.com>
+# Parent  9eddb0a92820c6445f9d1e680e4c239e888e93f0
+stylo: serialize radial gradients using modern unprefixed style
+
+diff --git a/servo/components/style/gecko/conversions.rs b/servo/components/style/gecko/conversions.rs
+--- a/servo/components/style/gecko/conversions.rs
++++ b/servo/components/style/gecko/conversions.rs
+@@ -292,17 +292,17 @@ impl nsStyleImage {
+                         (NS_STYLE_GRADIENT_SHAPE_ELLIPTICAL as u8, size as u8)
+                     }
+                 };
+ 
+                 let gecko_gradient = unsafe {
+                     Gecko_CreateGradient(gecko_shape,
+                                          gecko_size,
+                                          gradient.repeating,
+-                                         gradient.compat_mode != CompatMode::Modern,
++                                         false,
+                                          gradient.compat_mode == CompatMode::Moz,
+                                          stop_count as u32)
+                 };
+ 
+                 // Clear mBgPos field and set mAngle if angle is set. Otherwise clear it.
+                 unsafe {
+                     if let Some(angle) = angle {
+                         (*gecko_gradient).mAngle.set(angle);
+diff --git a/servo/components/style/values/generics/image.rs b/servo/components/style/values/generics/image.rs
+--- a/servo/components/style/values/generics/image.rs
++++ b/servo/components/style/values/generics/image.rs
+@@ -2,20 +2,21 @@
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ //! Generic types for the handling of [images].
+ //!
+ //! [images]: https://drafts.csswg.org/css-images/#image-values
+ 
+ use Atom;
+-use cssparser::serialize_identifier;
++use cssparser::{serialize_identifier, Parser};
++use parser::{ParserContext, Parse};
++use selectors::parser::SelectorParseError;
+ use std::fmt;
+-use style_traits::{HasViewportPercentage, ToCss};
+-use values::computed::ComputedValueAsSpecified;
++use style_traits::{HasViewportPercentage, ParseError, ToCss};
+ use values::specified::url::SpecifiedUrl;
+ 
+ /// An [image].
+ ///
+ /// [image]: https://drafts.csswg.org/css-images/#image-values
+ #[derive(Clone, PartialEq, ToComputedValue)]
+ #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+ pub enum Image<Gradient, MozImageRect> {
+@@ -96,26 +97,64 @@ pub enum Circle<Length> {
+ pub enum Ellipse<LengthOrPercentage> {
+     /// An ellipse pair of radii.
+     Radii(LengthOrPercentage, LengthOrPercentage),
+     /// An ellipse extent.
+     Extent(ShapeExtent),
+ }
+ 
+ /// https://drafts.csswg.org/css-images/#typedef-extent-keyword
+-define_css_keyword_enum!(ShapeExtent:
+-    "closest-side" => ClosestSide,
+-    "farthest-side" => FarthestSide,
+-    "closest-corner" => ClosestCorner,
+-    "farthest-corner" => FarthestCorner,
+-    "contain" => Contain,
+-    "cover" => Cover
+-);
+-no_viewport_percentage!(ShapeExtent);
+-impl ComputedValueAsSpecified for ShapeExtent {}
++#[derive(Clone, Copy, Debug, HasViewportPercentage, PartialEq, ToComputedValue)]
++#[cfg_attr(feature = "servo", derive(HeapSizeOf))]
++pub enum ShapeExtent {
++    /// The gradient's ending shape meets the side of the box closest to its center (for circles) or
++    /// meets both the vertical and horizontal sides closest to the center (for ellipses).
++    ClosestSide,
++    /// Similar to closest-side, except the ending shape is sized to meet the side of the box
++    /// farthest from its center (or vertical and horizontal sides).
++    FarthestSide,
++    /// The gradient's ending shape is sized so that it exactly meets the closest corner of the box
++    /// from its center.
++    ClosestCorner,
++    /// The gradient's ending shape is sized so that it exactly meets the closest corner of the box
++    /// from its center.
++    FarthestCorner,
++    /// Legacy value, equivalent to ClosestSide.
++    Contain,
++    /// Legacy value, equivalent to FarthestCorner.
++    Cover,
++}
++
++impl Parse for ShapeExtent {
++    fn parse<'i, 't>(_: &ParserContext, input: &mut Parser<'i, 't>) -> Result<Self, ParseError<'i>> {
++        let ident = input.expect_ident()?;
++        Ok(match_ignore_ascii_case! { &ident,
++            "closest-side" => ShapeExtent::ClosestSide,
++            "farthest-side" => ShapeExtent::FarthestSide,
++            "closest-corner" => ShapeExtent::ClosestCorner,
++            "farthest-corner" => ShapeExtent::FarthestCorner,
++            "contain" => ShapeExtent::ClosestSide,
++            "cover" => ShapeExtent::FarthestCorner,
++            _ => return Err(SelectorParseError::UnexpectedIdent(ident.clone()).into()),
++        })
++    }
++}
++
++impl ToCss for ShapeExtent {
++    fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
++        match *self {
++            ShapeExtent::ClosestSide |
++            ShapeExtent::Contain => dest.write_str("closest-side"),
++            ShapeExtent::FarthestSide => dest.write_str("farthest-side"),
++            ShapeExtent::ClosestCorner => dest.write_str("closest-corner"),
++            ShapeExtent::FarthestCorner |
++            ShapeExtent::Cover => dest.write_str("farthest-corner"),
++        }
++    }
++}
+ 
+ /// A gradient item.
+ /// https://drafts.csswg.org/css-images-4/#color-stop-syntax
+ #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+ #[derive(Clone, Copy, Debug, HasViewportPercentage, PartialEq, ToComputedValue, ToCss)]
+ pub enum GradientItem<Color, LengthOrPercentage> {
+     /// A color stop.
+     ColorStop(ColorStop<Color, LengthOrPercentage>),
+@@ -215,17 +254,22 @@ impl<G, R> HasViewportPercentage for Ima
+     }
+ }
+ 
+ impl<D, L, LoP, P, C, A> ToCss for Gradient<D, L, LoP, P, C, A>
+     where D: LineDirection, L: ToCss, LoP: ToCss, P: ToCss, C: ToCss, A: ToCss
+ {
+     fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: fmt::Write {
+         match self.compat_mode {
+-            CompatMode::WebKit => dest.write_str("-webkit-")?,
++            CompatMode::WebKit => {
++                match self.kind {
++                    GradientKind::Radial(_, _, _) => {},
++                    _ => dest.write_str("-webkit-")?
++                }
++            },
+             CompatMode::Moz => dest.write_str("-moz-")?,
+             _ => {},
+         }
+ 
+         if self.repeating {
+             dest.write_str("repeating-")?;
+         }
+         dest.write_str(self.kind.label())?;
+@@ -246,16 +290,21 @@ impl<D, L, LoP, P, C, A> ToCss for Gradi
+                 };
+                 if self.compat_mode == CompatMode::Modern {
+                     if !omit_shape {
+                         shape.to_css(dest)?;
+                         dest.write_str(" ")?;
+                     }
+                     dest.write_str("at ")?;
+                     position.to_css(dest)?;
++                } else if self.compat_mode == CompatMode::WebKit {
++                    if !omit_shape {
++                        shape.to_css(dest)?;
++                    }
++
+                 } else {
+                     position.to_css(dest)?;
+                     if let Some(ref a) = *angle {
+                         dest.write_str(" ")?;
+                         a.to_css(dest)?;
+                     }
+                     if !omit_shape {
+                         dest.write_str(", ")?;
+diff --git a/servo/components/style/values/specified/image.rs b/servo/components/style/values/specified/image.rs
+--- a/servo/components/style/values/specified/image.rs
++++ b/servo/components/style/values/specified/image.rs
+@@ -746,36 +746,36 @@ impl ToComputedValue for GradientPositio
+     }
+ }
+ 
+ impl EndingShape {
+     fn parse<'i, 't>(context: &ParserContext,
+                      input: &mut Parser<'i, 't>,
+                      compat_mode: CompatMode)
+                      -> Result<Self, ParseError<'i>> {
+-        if let Ok(extent) = input.try(|i| ShapeExtent::parse_with_compat_mode(i, compat_mode)) {
++        if let Ok(extent) = input.try(|i| ShapeExtent::parse_with_compat_mode(context, i, compat_mode)) {
+             if input.try(|i| i.expect_ident_matching("circle")).is_ok() {
+                 return Ok(GenericEndingShape::Circle(Circle::Extent(extent)));
+             }
+             let _ = input.try(|i| i.expect_ident_matching("ellipse"));
+             return Ok(GenericEndingShape::Ellipse(Ellipse::Extent(extent)));
+         }
+         if input.try(|i| i.expect_ident_matching("circle")).is_ok() {
+-            if let Ok(extent) = input.try(|i| ShapeExtent::parse_with_compat_mode(i, compat_mode)) {
++            if let Ok(extent) = input.try(|i| ShapeExtent::parse_with_compat_mode(context, i, compat_mode)) {
+                 return Ok(GenericEndingShape::Circle(Circle::Extent(extent)));
+             }
+             if compat_mode == CompatMode::Modern {
+                 if let Ok(length) = input.try(|i| Length::parse(context, i)) {
+                     return Ok(GenericEndingShape::Circle(Circle::Radius(length)));
+                 }
+             }
+             return Ok(GenericEndingShape::Circle(Circle::Extent(ShapeExtent::FarthestCorner)));
+         }
+         if input.try(|i| i.expect_ident_matching("ellipse")).is_ok() {
+-            if let Ok(extent) = input.try(|i| ShapeExtent::parse_with_compat_mode(i, compat_mode)) {
++            if let Ok(extent) = input.try(|i| ShapeExtent::parse_with_compat_mode(context, i, compat_mode)) {
+                 return Ok(GenericEndingShape::Ellipse(Ellipse::Extent(extent)));
+             }
+             if compat_mode == CompatMode::Modern {
+                 let pair: Result<_, ParseError> = input.try(|i| {
+                     let x = LengthOrPercentage::parse(context, i)?;
+                     let y = LengthOrPercentage::parse(context, i)?;
+                     Ok((x, y))
+                 });
+@@ -823,20 +823,21 @@ impl EndingShape {
+                 LengthOrPercentage::parse(context, i)?
+             };
+             Ok(GenericEndingShape::Ellipse(Ellipse::Radii(x.into(), y)))
+         })
+     }
+ }
+ 
+ impl ShapeExtent {
+-    fn parse_with_compat_mode<'i, 't>(input: &mut Parser<'i, 't>,
++    fn parse_with_compat_mode<'i, 't>(context: &ParserContext,
++                                      input: &mut Parser<'i, 't>,
+                                       compat_mode: CompatMode)
+                                       -> Result<Self, ParseError<'i>> {
+-        match Self::parse(input)? {
++        match Self::parse(context, input)? {
+             ShapeExtent::Contain | ShapeExtent::Cover if compat_mode == CompatMode::Modern => {
+                 Err(StyleParseError::UnspecifiedError.into())
+             },
+             ShapeExtent::Contain => Ok(ShapeExtent::ClosestSide),
+             ShapeExtent::Cover => Ok(ShapeExtent::FarthestCorner),
+             keyword => Ok(keyword),
+         }
+     }
