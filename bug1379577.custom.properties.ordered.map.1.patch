@@ -5,7 +5,50 @@
 diff --git a/servo/components/style/custom_properties.rs b/servo/components/style/custom_properties.rs
 --- a/servo/components/style/custom_properties.rs
 +++ b/servo/components/style/custom_properties.rs
-@@ -163,16 +163,81 @@ where
+@@ -9,17 +9,17 @@
+ use Atom;
+ use cssparser::{Delimiter, Parser, ParserInput, SourcePosition, Token, TokenSerializationType};
+ use parser::ParserContext;
+ use properties::{CSSWideKeyword, DeclaredValue};
+ use selectors::parser::SelectorParseError;
+ use servo_arc::Arc;
+ use std::ascii::AsciiExt;
+ use std::borrow::{Borrow, Cow};
+-use std::collections::{HashMap, hash_map, HashSet};
++use std::collections::{HashMap, HashSet};
+ use std::fmt;
+ use std::hash::Hash;
+ use style_traits::{HasViewportPercentage, ToCss, StyleParseError, ParseError};
+ 
+ /// A custom property name is just an `Atom`.
+ ///
+ /// Note that this does not include the `--` prefix
+ pub type Name = Atom;
+@@ -139,18 +139,21 @@ where
+     }
+ 
+     /// Get the name of a custom property given its list index.
+     pub fn get_key_at(&self, index: u32) -> Option<&K> {
+         self.index.get(index as usize)
+     }
+ 
+     /// Get an iterator for custom properties computed values.
+-    pub fn iter(&self) -> hash_map::Iter<K, V> {
+-        self.values.iter()
++    pub fn iter<'a>(&'a self) -> OrderedMapIterator<'a, K, V> {
++        OrderedMapIterator {
++            inner: self,
++            pos: 0,
++        }
+     }
+ 
+     /// Get the count of custom properties computed values.
+     pub fn len(&self) -> usize {
+         debug_assert_eq!(self.values.len(), self.index.len());
+         self.values.len()
+     }
+ 
+@@ -163,16 +166,66 @@ where
              Some(p) => p,
              None => return None,
          };
@@ -60,21 +103,6 @@ diff --git a/servo/components/style/custom_properties.rs b/servo/components/styl
 +        match self.inner.values().get(name) {
 +            Some(value) => Some((name, value)),
 +            None => None,
-+        }
-+    }
-+}
-+
-+impl<'a, K, V> IntoIterator for OrderedMap<K, V>
-+where
-+    K: Eq + Hash + Clone,
-+{
-+    type Item = (&'a K, &'a V);
-+    type IntoIter = OrderedMapIterator<'a, K, V>;
-+
-+    fn into_iter(self) -> Self::IntoIter {
-+        OrderedMapIterator {
-+            inner: self,
-+            pos: 0,
 +        }
 +    }
 +}
