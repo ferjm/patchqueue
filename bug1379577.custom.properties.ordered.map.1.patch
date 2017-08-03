@@ -2,6 +2,91 @@
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
 # Parent  6cda2f503bc90348d7b05f1406b516db87847667
 
+diff --git a/servo/components/style/custom_properties.rs b/servo/components/style/custom_properties.rs
+--- a/servo/components/style/custom_properties.rs
++++ b/servo/components/style/custom_properties.rs
+@@ -163,16 +163,81 @@ where
+             Some(p) => p,
+             None => return None,
+         };
+         self.index.remove(index);
+         self.values.remove(key)
+     }
+ }
+ 
++trait Iterable<K, V> {
++    fn index(&self) -> &Vec<K>;
++    fn values(&self) -> &HashMap<K, V>;
++}
++
++impl<K, V> Iterable<K, V> for OrderedMap<K, V>
++where
++    K: Eq + Hash + Clone,
++{
++    fn index(&self) -> &Vec<K> {
++        &self.index
++    }
++
++    fn values(&self) -> &HashMap<K, V> {
++        &self.values
++    }
++}
++
++/// An iterator for OrderedMap
++pub struct OrderedMapIterator<'a, K, V>
++where
++    K: 'a + Eq + Hash + Clone, V: 'a,
++{
++    /// The OrderedMap itself.
++    inner: &'a OrderedMap<K, V>,
++    /// The position of the iterator.
++    pos: usize,
++}
++
++impl<'a, K, V> Iterator for OrderedMapIterator<'a, K, V>
++where
++    K: Eq + Hash + Clone,
++{
++    type Item = (&'a K, &'a V);
++
++    fn next(&mut self) -> Option<Self::Item> {
++        let ref index = self.inner.index();
++        if self.pos >= index.len() {
++            return None;
++        }
++
++        let ref name = index[index.len() - self.pos - 1];
++        self.pos += 1;
++        match self.inner.values().get(name) {
++            Some(value) => Some((name, value)),
++            None => None,
++        }
++    }
++}
++
++impl<'a, K, V> IntoIterator for OrderedMap<K, V>
++where
++    K: Eq + Hash + Clone,
++{
++    type Item = (&'a K, &'a V);
++    type IntoIter = OrderedMapIterator<'a, K, V>;
++
++    fn into_iter(self) -> Self::IntoIter {
++        OrderedMapIterator {
++            inner: self,
++            pos: 0,
++        }
++    }
++}
++
+ impl ComputedValue {
+     fn empty() -> ComputedValue {
+         ComputedValue {
+             css: String::new(),
+             last_token_type: TokenSerializationType::nothing(),
+             first_token_type: TokenSerializationType::nothing(),
+         }
+     }
 diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 --- a/servo/ports/geckolib/glue.rs
 +++ b/servo/ports/geckolib/glue.rs
