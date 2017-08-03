@@ -1,0 +1,45 @@
+# HG changeset patch
+# User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
+# Parent  6cda2f503bc90348d7b05f1406b516db87847667
+
+diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
+--- a/servo/ports/geckolib/glue.rs
++++ b/servo/ports/geckolib/glue.rs
+@@ -3521,17 +3521,17 @@ pub extern "C" fn Servo_GetCustomPropert
+                                                name: *const nsAString,
+                                                value: *mut nsAString) -> bool {
+     let custom_properties = match computed_values.custom_properties() {
+         Some(p) => p,
+         None => return false,
+     };
+ 
+     let name = unsafe { Atom::from((&*name)) };
+-    let computed_value = match custom_properties.get_computed_value(&name) {
++    let computed_value = match custom_properties.get(&name) {
+         Some(v) => v,
+         None => return false,
+     };
+ 
+     computed_value.to_css(unsafe { value.as_mut().unwrap() }).unwrap();
+     true
+ }
+ 
+@@ -3547,17 +3547,17 @@ pub extern "C" fn Servo_GetCustomPropert
+ pub extern "C" fn Servo_GetCustomPropertyNameAt(computed_values: ServoStyleContextBorrowed,
+                                                 index: u32,
+                                                 name: *mut nsAString) -> bool {
+     let custom_properties = match computed_values.custom_properties() {
+         Some(p) => p,
+         None => return false,
+     };
+ 
+-    let property_name = match custom_properties.get_name_at(index) {
++    let property_name = match custom_properties.get_key_at(index) {
+         Some(n) => n,
+         None => return false,
+     };
+ 
+     let name = unsafe { name.as_mut().unwrap() };
+     name.assign(&*property_name.as_slice());
+ 
+     true
