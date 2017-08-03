@@ -1,0 +1,30 @@
+# HG changeset patch
+# User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
+# Parent  52285ea5e54c73d3ed824544cef2ee3f195f05e6
+Bug 1344314 - stylo: Setup for pref checks is broken for aliases. r?Manishearth
+
+diff --git a/layout/style/ServoPropPrefList.h b/layout/style/ServoPropPrefList.h
+--- a/layout/style/ServoPropPrefList.h
++++ b/layout/style/ServoPropPrefList.h
+@@ -9,17 +9,21 @@
+ 
+ namespace mozilla {
+ 
+ #define CSS_PROP(name_, id_, method_, flags_, pref_, parsevariant_, kwtable_, \
+                  stylestruct_, stylestructoffset_, animtype_)                 \
+     const bool SERVO_PREF_ENABLED_##id_ = !(sizeof(pref_) == 1);
+ #define CSS_PROP_SHORTHAND(name_, id_, method_, flags_, pref_)  \
+     const bool SERVO_PREF_ENABLED_##id_ = !(sizeof(pref_) == 1);
++#define CSS_PROP_ALIAS(name_, id_, method_, pref_)  \
++    const bool SERVO_PREF_ENABLED_##id_ = !(sizeof(pref_) == 1);
+ #define CSS_PROP_LIST_INCLUDE_LOGICAL
+ #include "nsCSSPropList.h"
++#include "nsCSSPropAliasList.h"
+ #undef CSS_PROP_LIST_INCLUDE_LOGICAL
+ #undef CSS_PROP
+ #undef CSS_PROP_SHORTHAND
++#undef CSS_PROP_ALIAS
+ 
+ }
+ 
+ #endif // mozilla_ServoPropPrefList_h
