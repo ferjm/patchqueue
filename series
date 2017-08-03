@@ -1,6 +1,6 @@
-bug1344314.alias.prefs.patch
-bug1380259.radial.gradients.0.patch
+#bug1380259.radial.gradients.0.patch
 bug1380259.radial.gradients.2.patch
+bug1344314.alias.prefs.patch
 bug1380259.radial.gradients.1.patch
 bug1382285.line.column.patch
 bug1380890.column.0.patch
