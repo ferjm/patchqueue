@@ -72,25 +72,3 @@ new file mode 100644
 +SimpleTest.waitForExplicitFinish();
 +prepareTest();
 +</script>
-diff --git a/servo/components/style/custom_properties.rs b/servo/components/style/custom_properties.rs
---- a/servo/components/style/custom_properties.rs
-+++ b/servo/components/style/custom_properties.rs
-@@ -109,17 +109,17 @@ where
-     /// Custom property name index.
-     index: Vec<K>,
-     /// Computed values indexed by custom property name.
-     values: HashMap<K, V>,
- }
- 
- impl<K, V> OrderedMap<K, V>
- where
--    K: Eq + Hash + Clone,
-+    K: Eq + Hash + Clone + fmt::Debug,
- {
-     /// Creates a new custom properties map.
-     pub fn new() -> Self {
-         OrderedMap {
-             index: Vec::new(),
-             values: HashMap::new(),
-         }
-     }
