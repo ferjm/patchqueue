@@ -29,7 +29,7 @@ diff --git a/layout/style/test/test_variables_order.html b/layout/style/test/tes
 new file mode 100644
 --- /dev/null
 +++ b/layout/style/test/test_variables_order.html
-@@ -0,0 +1,43 @@
+@@ -0,0 +1,42 @@
 +<!DOCTYPE type>
 +<title>CSS variables order tests</title>
 +<script src="/MochiKit/MochiKit.js"></script>
@@ -62,7 +62,6 @@ new file mode 100644
 +  var cs = window.getComputedStyle(element);
 +
 +  ["--SomeVariableName", "--a"].forEach((varName, index) => {
-+    console.log(varName, index);
 +    is(cs.item(cs.length - (index + 1)), varName, "custom property name returned by item() on computed style");
 +    is(cs[cs.length - (index + 1)], varName, "custom property name returned by indexed getter on style declaration");
 +  });
