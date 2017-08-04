@@ -24,7 +24,32 @@ diff --git a/servo/components/style/custom_properties.rs b/servo/components/styl
  ///
  /// Note that this does not include the `--` prefix
  pub type Name = Atom;
-@@ -139,18 +139,21 @@ where
+@@ -119,41 +119,45 @@ where
+     /// Creates a new custom properties map.
+     pub fn new() -> Self {
+         OrderedMap {
+             index: Vec::new(),
+             values: HashMap::new(),
+         }
+     }
+ 
+-    /// Insert a computed value if it has not previously been inserted.
++    /// Insert a custom property value.
+     pub fn insert(&mut self, name: K, value: V) {
+-        debug_assert!(!self.index.contains(&name));
+-        self.index.push(name.clone());
++        if !self.index.contains(&name) {
++            self.index.push(name.clone());
++        }
+         self.values.insert(name, value);
+     }
+ 
+-    /// Custom property computed value getter by name.
++    /// Custom property value getter by name.
+     pub fn get(&self, name: &K) -> Option<&V> {
+         let value = self.values.get(name);
+         debug_assert_eq!(value.is_some(), self.index.contains(name));
+         value
      }
  
      /// Get the name of a custom property given its list index.
@@ -32,9 +57,10 @@ diff --git a/servo/components/style/custom_properties.rs b/servo/components/styl
          self.index.get(index as usize)
      }
  
-     /// Get an iterator for custom properties computed values.
+-    /// Get an iterator for custom properties computed values.
 -    pub fn iter(&self) -> hash_map::Iter<K, V> {
 -        self.values.iter()
++    /// Get an iterator for custom properties values.
 +    pub fn iter<'a>(&'a self) -> OrderedMapIterator<'a, K, V> {
 +        OrderedMapIterator {
 +            inner: self,
@@ -42,13 +68,17 @@ diff --git a/servo/components/style/custom_properties.rs b/servo/components/styl
 +        }
      }
  
-     /// Get the count of custom properties computed values.
+-    /// Get the count of custom properties computed values.
++    /// Get the count of custom properties values.
      pub fn len(&self) -> usize {
          debug_assert_eq!(self.values.len(), self.index.len());
          self.values.len()
      }
  
-@@ -163,16 +166,66 @@ where
+     fn remove<Q: ?Sized>(&mut self, key: &Q) -> Option<V>
+     where
+         K: Borrow<Q>,
+@@ -163,16 +167,66 @@ where
              Some(p) => p,
              None => return None,
          };
