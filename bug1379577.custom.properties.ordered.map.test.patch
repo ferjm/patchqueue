@@ -29,7 +29,7 @@ diff --git a/layout/style/test/test_variables_order.html b/layout/style/test/tes
 new file mode 100644
 --- /dev/null
 +++ b/layout/style/test/test_variables_order.html
-@@ -0,0 +1,42 @@
+@@ -0,0 +1,53 @@
 +<!DOCTYPE type>
 +<title>CSS variables order tests</title>
 +<script src="/MochiKit/MochiKit.js"></script>
@@ -42,6 +42,17 @@ new file mode 100644
 +<div id="t4"></div>
 +
 +<script>
++
++/*
++ * Although the spec does not enforce any specific order, Gecko and Servo
++ * implement a consistent ordering for CSSDeclaration objects in the DOM.
++ * CSSDeclarations expose property names as indexed properties, which need
++ * to be stable. This order is the order that properties are cascaded in.
++ *
++ * We have this test just to prevent regressions, rather than testing specific
++ * mandated behavior.
++ */
++
 +function prepareTest() {
 +  var e = document.createElement("link");
 +  e.addEventListener("load", runTest);
