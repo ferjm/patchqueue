@@ -1,0 +1,769 @@
+# HG changeset patch
+# User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
+# Parent  4c5fbf49376351679dcc49f4cff26c3c2e055ccc
+
+diff --git a/browser/extensions/freedom/install.rdf b/browser/extensions/freedom/install.rdf
+new file mode 100644
+--- /dev/null
++++ b/browser/extensions/freedom/install.rdf
+@@ -0,0 +1,19 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<RDF xmlns="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
++     xmlns:em="http://www.mozilla.org/2004/em-rdf#">
++  <Description about="urn:mozilla:install-manifest">
++    <em:id>freedom@mozilla.org</em:id>
++    <em:name>Freedom</em:name>
++    <em:targetApplication>
++      <Description>
++        <em:id>{ec8030f7-c20a-464f-9b0e-13a3a9e97384}</em:id> <!--Firefox-->
++        <em:minVersion>51.0a1</em:minVersion>
++        <em:maxVersion>*</em:maxVersion>
++      </Description>
++    </em:targetApplication>
++    <em:type>2</em:type>
++    <em:version>0.29</em:version>
++    <em:bootstrap>true</em:bootstrap>
++    <em:multiprocessCompatible>true</em:multiprocessCompatible>
++  </Description>
++</RDF>
+diff --git a/browser/extensions/freedom/moz.build b/browser/extensions/freedom/moz.build
+new file mode 100644
+--- /dev/null
++++ b/browser/extensions/freedom/moz.build
+@@ -0,0 +1,25 @@
++# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
++# vim: set filetype=python:
++# This Source Code Form is subject to the terms of the Mozilla Public
++# License, v. 2.0. If a copy of the MPL was not distributed with this
++# file, You can obtain one at http://mozilla.org/MPL/2.0/.
++
++FINAL_TARGET_FILES.features['freedom@mozilla.org'] += [
++  'bootstrap.js',
++  'install.rdf'
++]
++
++FINAL_TARGET_FILES.features['freedom@mozilla.org']["webextension"] += [
++  'webextension/background.html',
++  'webextension/background.js',
++  'webextension/configuration.json',
++  'webextension/contentscript.js',
++  'webextension/manifest.json'
++]
++
++FINAL_TARGET_FILES.features['freedom@mozilla.org']["webextension"]["img"] += [
++  'webextension/img/freedom-128.png',
++  'webextension/img/freedom-16.png',
++  'webextension/img/freedom-24.png',
++  'webextension/img/freedom-32.png',
++]
+diff --git a/browser/extensions/freedom/webextension/META-INF/manifest.mf b/browser/extensions/freedom/webextension/META-INF/manifest.mf
+new file mode 100644
+--- /dev/null
++++ b/browser/extensions/freedom/webextension/META-INF/manifest.mf
+@@ -0,0 +1,52 @@
++Manifest-Version: 1.0
++
++Name: background.html
++Digest-Algorithms: MD5 SHA1
++MD5-Digest: p2x+VrgijZDLFk7l7FjwQg==
++SHA1-Digest: +eySRGCqlV7loHf5amW5LXtvbVo=
++
++Name: background.js
++Digest-Algorithms: MD5 SHA1
++MD5-Digest: QY6PXVHV8KezQOw0Wd0Ugg==
++SHA1-Digest: japN0SMesjlAHCeJ+RxBX6Qlagw=
++
++Name: configuration.json
++Digest-Algorithms: MD5 SHA1
++MD5-Digest: kqybu3OyUPG4TEFzSwsIIA==
++SHA1-Digest: NN3Bp4OhCcm0qGylS51bR0T8pjc=
++
++Name: contentscript.js
++Digest-Algorithms: MD5 SHA1
++MD5-Digest: ubti3uOPuYb+j1U9RnsnJg==
++SHA1-Digest: h1QNR4cgTKiDxtfaX3H5c9y3qgs=
++
++Name: manifest.json
++Digest-Algorithms: MD5 SHA1
++MD5-Digest: Qj+5s9pWG3HnSfD3ykPM9Q==
++SHA1-Digest: LWHIfguOkmFCVV50/JutkLOU+Xw=
++
++Name: README.md
++Digest-Algorithms: MD5 SHA1
++MD5-Digest: cM8M9pDrCGxpOBnXWv1y4Q==
++SHA1-Digest: X2nWPG1RNZWB2Io+kTPQdlWyaSc=
++
++Name: img/freedom-128.png
++Digest-Algorithms: MD5 SHA1
++MD5-Digest: KLbmZTAFMbOY5vBY+gV8wA==
++SHA1-Digest: 89mMfSNvShET75FFSlY1FuHvc48=
++
++Name: img/freedom-16.png
++Digest-Algorithms: MD5 SHA1
++MD5-Digest: XiwSXPAUboPQckjZma6nXw==
++SHA1-Digest: rzUXrwe/wumpVn8E/2ZyeNJisp8=
++
++Name: img/freedom-24.png
++Digest-Algorithms: MD5 SHA1
++MD5-Digest: aQleh8uT6cbVZS8CsBywVA==
++SHA1-Digest: aqit5ngv84THHOcHxF68Mkqp1kw=
++
++Name: img/freedom-32.png
++Digest-Algorithms: MD5 SHA1
++MD5-Digest: A+h161alYXikHL5QBDd8VQ==
++SHA1-Digest: 4f1FJnM7PgkTRLLfGmkfy7x6XYI=
++
+diff --git a/browser/extensions/freedom/webextension/META-INF/mozilla.rsa b/browser/extensions/freedom/webextension/META-INF/mozilla.rsa
+new file mode 100644
+index e69de29bb2d1d6434b8b29ae775ad8c2e48c5391..1e120393a2de994f51077a9bbf4adb9ecda4dfa3
+GIT binary patch
+literal 4196
+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
+JOGH;c{0Fa@xfuWe
+
+diff --git a/browser/extensions/freedom/webextension/META-INF/mozilla.sf b/browser/extensions/freedom/webextension/META-INF/mozilla.sf
+new file mode 100644
+--- /dev/null
++++ b/browser/extensions/freedom/webextension/META-INF/mozilla.sf
+@@ -0,0 +1,4 @@
++Signature-Version: 1.0
++MD5-Digest-Manifest: F1QmNGQRw2Br/EB2GA5DNQ==
++SHA1-Digest-Manifest: Hu0gQU6J0D1VgMG3K0ywdbLeUUU=
++
+diff --git a/browser/extensions/freedom/webextension/README.md b/browser/extensions/freedom/webextension/README.md
+new file mode 100755
+--- /dev/null
++++ b/browser/extensions/freedom/webextension/README.md
+@@ -0,0 +1,2 @@
++# browserDemo
++Browser experiment files - Freedom
+diff --git a/browser/extensions/freedom/webextension/background.html b/browser/extensions/freedom/webextension/background.html
+new file mode 100755
+--- /dev/null
++++ b/browser/extensions/freedom/webextension/background.html
+@@ -0,0 +1,12 @@
++<!DOCTYPE html>
++<html>
++<head>
++<meta charset="utf-8">
++<title>Freedom Ad Replacer</title>
++</head>
++<body>
++    <script src="background.js"></script>
++  </body>
++</html>
++
++
+diff --git a/browser/extensions/freedom/webextension/background.js b/browser/extensions/freedom/webextension/background.js
+new file mode 100755
+--- /dev/null
++++ b/browser/extensions/freedom/webextension/background.js
+@@ -0,0 +1,33 @@
++(function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
++(i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
++m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
++})(window,document,'script','https://www.google-analytics.com/analytics.js','ga');
++ga('create', 'UA-103317960-1', 'auto');
++ga('set', 'checkProtocolTask', function(){}); // Removes failing protocol check. @see: http://stackoverflow.com/a/22152353/1958200
++ga('require', 'displayfeatures');
++
++
++// const handleAdRequest = details => {
++//   const url = details.url.replace(/(^\w+:|^)\/\//, '')
++//   return { cancel: true }
++// }
++
++// chrome.webRequest.onBeforeRequest.addListener(
++//   handleAdRequest,
++//   { urls: adHosts },
++//   ['blocking']
++// )
++
++// here we receive the coming message from the content script page
++let userHash = null
++chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
++  if (request.action === 'gaEvent') {
++    chrome.storage.sync.get(['hash'], items => {
++      userHash = items.hash
++      ga('set', 'userId', userHash.toString());
++
++      ga('send', 'event', 'extension', request.data.url, `TotalTransferred: ${request.data.performance.toString()}bytes, timings: ${request.data.timings.toString()}s` , 1);
++      ga('send', 'timing', 'page load', 'load', request.data.timings);
++    })
++  }
++})
+diff --git a/browser/extensions/freedom/webextension/configuration.json b/browser/extensions/freedom/webextension/configuration.json
+new file mode 100755
+--- /dev/null
++++ b/browser/extensions/freedom/webextension/configuration.json
+@@ -0,0 +1,158 @@
++{
++  "ads": {
++    "300250": [
++      "<iframe class=\"freedom-ad\" style=\"width:300px;height:250px;\" src=\"https://content.freedomtelefonica.com/campaigns/300250/akg.html\" frameborder=\"0\" scrolling=\"no\"></iframe>",
++      "<iframe class=\"freedom-ad\" style=\"width:300px;height:250px;\" src=\"https://content.freedomtelefonica.com/campaigns/300250/amazon.html\" frameborder=\"0\" scrolling=\"no\"></iframe>",
++      "<iframe class=\"freedom-ad\" style=\"width:300px;height:250px;\" src=\"https://content.freedomtelefonica.com/campaigns/300250/aston.html\" frameborder=\"0\" scrolling=\"no\"></iframe>",
++      "<iframe class=\"freedom-ad\" style=\"width:300px;height:250px;\" src=\"https://content.freedomtelefonica.com/campaigns/300250/cocacola.html\" frameborder=\"0\" scrolling=\"no\"></iframe>",
++      "<iframe class=\"freedom-ad\" style=\"width:300px;height:250px;\" src=\"https://content.freedomtelefonica.com/campaigns/300250/giffgaff.html\" frameborder=\"0\" scrolling=\"no\"></iframe>",
++      "<iframe class=\"freedom-ad\" style=\"width:300px;height:250px;\" src=\"https://content.freedomtelefonica.com/campaigns/300250/o2.html\" frameborder=\"0\" scrolling=\"no\"></iframe>"
++    ],
++    "32050": [
++      "<iframe class=\"freedom-ad\" style=\"width:320px;height:50px;\" src=\"https://via.placeholder.com/320x50\" frameborder=\"0\" scrolling=\"no\"></iframe>"
++    ],
++    "320100": [
++      "<iframe class=\"freedom-ad\" style=\"width:320px;height:100px;\" src=\"https://via.placeholder.com/320x100\" frameborder=\"0\" scrolling=\"no\"></iframe>"
++    ],
++    "27090": [
++      "<iframe class=\"freedom-ad\" style=\"width:270px;height:90px;\" src=\"https://content.freedomtelefonica.com/campaigns/83e4d243ad880b3e90fb7a1790f76b6b/berkley.html\" frameborder=\"0\" scrolling=\"no\"></iframe>",
++      "<iframe class=\"freedom-ad\" style=\"width:270px;height:90px;\" src=\"https://content.freedomtelefonica.com/campaigns/83e4d243ad880b3e90fb7a1790f76b6b/bewley-homes.html\" frameborder=\"0\" scrolling=\"no\"></iframe>",
++      "<iframe class=\"freedom-ad\" style=\"width:270px;height:90px;\" src=\"https://content.freedomtelefonica.com/campaigns/83e4d243ad880b3e90fb7a1790f76b6b/bloor-homes.html\" frameborder=\"0\" scrolling=\"no\"></iframe>",
++      "<iframe class=\"freedom-ad\" style=\"width:270px;height:90px;\" src=\"https://content.freedomtelefonica.com/campaigns/83e4d243ad880b3e90fb7a1790f76b6b/churchill_place.html\" frameborder=\"0\" scrolling=\"no\"></iframe>",
++      "<iframe class=\"freedom-ad\" style=\"width:270px;height:90px;\" src=\"https://content.freedomtelefonica.com/campaigns/83e4d243ad880b3e90fb7a1790f76b6b/Commercial_A_FA_mob.html\" frameborder=\"0\" scrolling=\"no\"></iframe>",
++      "<iframe class=\"freedom-ad\" style=\"width:270px;height:90px;\" src=\"https://content.freedomtelefonica.com/campaigns/83e4d243ad880b3e90fb7a1790f76b6b/Commercial_C_FA_mob.html\" frameborder=\"0\" scrolling=\"no\"></iframe>",
++      "<iframe class=\"freedom-ad\" style=\"width:270px;height:90px;\" src=\"https://content.freedomtelefonica.com/campaigns/83e4d243ad880b3e90fb7a1790f76b6b/Commercial_C_FA_mob.html\" frameborder=\"0\" scrolling=\"no\"></iframe>",
++      "<iframe class=\"freedom-ad\" style=\"width:270px;height:90px;\" src=\"https://content.freedomtelefonica.com/campaigns/83e4d243ad880b3e90fb7a1790f76b6b/david-wilson-houses.html\" frameborder=\"0\" scrolling=\"no\"></iframe>",
++      "<iframe class=\"freedom-ad\" style=\"width:270px;height:90px;\" src=\"https://content.freedomtelefonica.com/campaigns/83e4d243ad880b3e90fb7a1790f76b6b/ecala-houses.html\" frameborder=\"0\" scrolling=\"no\"></iframe>",
++      "<iframe class=\"freedom-ad\" style=\"width:270px;height:90px;\" src=\"https://content.freedomtelefonica.com/campaigns/83e4d243ad880b3e90fb7a1790f76b6b/prospect.html\" frameborder=\"0\" scrolling=\"no\"></iframe>",
++      "<iframe class=\"freedom-ad\" style=\"width:270px;height:90px;\" src=\"https://content.freedomtelefonica.com/campaigns/83e4d243ad880b3e90fb7a1790f76b6b/Removals_A_FA_mob.html\" frameborder=\"0\" scrolling=\"no\"></iframe>",
++      "<iframe class=\"freedom-ad\" style=\"width:270px;height:90px;\" src=\"https://content.freedomtelefonica.com/campaigns/83e4d243ad880b3e90fb7a1790f76b6b/Removals_B_FA_mob.html\" frameborder=\"0\" scrolling=\"no\"></iframe>",
++      "<iframe class=\"freedom-ad\" style=\"width:270px;height:90px;\" src=\"https://content.freedomtelefonica.com/campaigns/83e4d243ad880b3e90fb7a1790f76b6b/sarah-batting.html\" frameborder=\"0\" scrolling=\"no\"></iframe>",
++      "<iframe class=\"freedom-ad\" style=\"width:270px;height:90px;\" src=\"https://content.freedomtelefonica.com/campaigns/83e4d243ad880b3e90fb7a1790f76b6b/SoldPrices_FA_mob.html\" frameborder=\"0\" scrolling=\"no\"></iframe>"
++    ]
++  },
++  "sites": {
++    "www.theguardian.com": {
++      "items": {
++        ".fc-slice__item--mpu-candidate": "300250",
++        ".fc-container__mpu--mobile": "300250",
++        ".ad-slot--inline": "300250"
++      }
++    },
++    "m.ebay.co.uk": {
++      "items": {
++        "[title=\"ADVERTISEMENT\"]": "300250"
++      }
++    },
++    "uk\\..*.yahoo.com": {
++      "timeout": 500,
++      "items": {
++        "#mobile-displayad-wraper": "300250",
++        "#mobile-displayad-outer-wraper": "300250",
++        "#defaultLREC-wrapper": "300250",
++        "#defaultLREC2-wrapper": "300250",
++        "#ad_wp_base": "32050"
++      }
++    },
++    "www.thetimes.co.uk": {
++      "items": {
++        "#ads": "32050",
++        "#ad-header": "300250",
++        "#ad-news": "300250",
++        "#ad-comment": "300250",
++        "ad-sport": "300250",
++        "ad-puzzles": "300250"
++      }
++    },
++    "diply.com": {
++      "items": {
++        ".dad-spot": "300250"
++      }
++    },
++    "www.dailymail.co.uk": {
++      "items": {
++        ".puff-ad": "300250",
++        ".sticky_banner_overrides": "32050",
++        ".adHolder:not(#ssds_ad)": "300250"
++      }
++    },
++    "www.ladbible.com": {
++      "items": {
++        ".advert": "300250"
++      }
++    },
++    "www.givemesport.com": {
++      "items": {
++        ".gms-advert:not(.gms-native):not(.gms-interstitial)": "300250"
++      }
++    },
++    "www.rightmove.co.uk": {
++      "timeout": 700,
++      "items": {
++        "[data-test=\"featured-agent-banner\"]": "27090"
++      }
++    },
++    "www.gumtree.com": {
++      "items": {
++        ".ad-hpto": "Review format",
++        "#homeBanner": "32050",
++        "#floatingFooter": "32050",
++        ".ad-text-link": "300250",
++        "#integratedListing": "32050",
++        "#textLinkBase": "32050"
++      }
++    },
++    "www.mirror.co.uk": {
++      "items": {
++        "#div-gpt-ad-top-slot": "32050",
++        "#div-gpt-ad-in-article-slot": "300250",
++        ".ayl_v_ckr_b": "Review format",
++        "#div-gpt-ad-sticky-bottom-banner": "32050"
++      }
++    },
++    "www.sportbible.com": {
++      "items": {
++        ".advert__container--portrait": "300250"
++      }
++    },
++    "www.telegraph.co.uk": {
++      "items": {
++        "#advert_tmg_ban": "32050",
++        "#advert_tmg_mpu": "300250",
++        "[id^=\"advert_tmg_dyn_\"]": "32050"
++      }
++    },
++    "news.sky.com": {
++      "items": {
++        ".ad--leaderboard": "32050",
++        ".ad--mpu-2": "300250",
++        ".ad--mpu-mobile": "300250"
++      }
++    },
++    "www.independent.co.uk": {
++      "items": {
++        ".tynt-ad-frame-container": "320100",
++        ".ad-leaderboard": "320100",
++        ".grid-mod-single-mpu": "300250",
++        "#mpu0": "300250",
++        ".onscroll-injected-ad": "300250"
++      }
++    },
++    "www.timeout.com": {
++      "items": {
++        ".ads-widget": "300250"
++      }
++    },
++    "www.msn.com": {
++      "items": {
++        ".bannersectionad": "300250",
++        ".outeradcontainer": "32050"
++      }
++    },
++    "m.imdb.com": {
++      "items": {
++        "#mobile-ads-ad": "32050"
++      }
++    }
++  }
++}
+diff --git a/browser/extensions/freedom/webextension/contentscript.js b/browser/extensions/freedom/webextension/contentscript.js
+new file mode 100755
+--- /dev/null
++++ b/browser/extensions/freedom/webextension/contentscript.js
+@@ -0,0 +1,169 @@
++document.addEventListener(
++  'DOMContentLoaded',
++  () => {
++    init()
++  },
++  false
++)
++
++window.onload = function () {
++  isValidHostname().then(response => {
++    if (response) {
++      const data = {
++        performance: getPerformanceEntries(),
++        timings: getPageLoadTime(),
++        url: getPageUrl()
++      }
++
++      chrome.runtime.sendMessage({ action: 'gaEvent', data })
++    }
++  })
++}
++
++let userHash = null
++let configurationFile = null
++
++function init () {
++  listenForHash()
++
++  return getConfiguration(window.location.hostname).then(configuration => {
++    if (configuration) {
++      if (configuration.timeout) {
++        setTimeout(() => {
++          findsAdsPlacements(configuration)
++        }, configuration.timeout)
++      } else {
++        findsAdsPlacements(configuration)
++      }
++    }
++  })
++}
++
++function getConfigurationFile () {
++  if (configurationFile === null) {
++    return fetch(
++      'https://www.publishertests.com/extension/configuration.json'
++      // 'https://127.0.0.1:8080/configuration.json'
++    ).then(config =>
++      config.json().then(response => {
++        configurationFile = response
++        return response
++      })
++    )
++  } else {
++    return Promise.resolve(configurationFile)
++  }
++}
++
++function getConfiguration (hostname) {
++  return getConfigurationFile().then(config => {
++    let regex
++
++    for (key in config.sites) {
++      regex = new RegExp(key)
++      if (config.sites.hasOwnProperty(key) && regex.test(hostname)) {
++        return {
++          ads: config.ads,
++          site: config.sites[key]
++        }
++      }
++    }
++
++    return false
++  })
++}
++
++function findsAdsPlacements (config) {
++  let elements
++
++  Object.keys(config.site.items).map(selector => {
++    elements = document.querySelectorAll(selector)
++
++    elements.forEach(element => {
++      if (!element.classList.contains('freedom-replaced')) {
++        element.classList.add('freedom-replaced')
++        element.style.cssText = 'display: block !important;'
++        const containerId = 'freedom_container_' + Date.now()
++        const container = document.createElement('div')
++        container.id = containerId
++        container.className = 'freedom-replaced'
++        container.style.cssText = 'text-align: center;'
++
++        container.innerHTML = getAd(config.ads, config.site.items[selector])
++
++        element.innerHTML = ''
++        element.appendChild(container)
++      }
++    })
++  })
++}
++
++function getAd (ads, type) {
++  return ads[type][Math.floor(Math.random() * ads[type].length)]
++}
++
++/**
++ * Listen for user_hash message and save it to storage
++ */
++function listenForHash () {
++  window.addEventListener('message', function (event) {
++    // We only accept messages from ourselves
++    if (event.source !== window) return
++
++    if (event.data.type && event.data.type == 'user_hash') {
++      console.log('Content script received message: ' + event.data.value)
++      chrome.storage.sync.set({ hash: event.data.value }, () => {
++        console.log('hash saved to storage')
++      })
++    }
++  })
++}
++
++/**
++ * Get user hash from storage
++ */
++function getHashFromStorage () {
++  return chrome.storage.sync.get(['hash'], items => {
++    userHash = items.hash
++    return true
++  })
++}
++
++/// ////////////////////// Stats /////////////////////////
++function getPageLoadTime () {
++  var timing = window.performance.timing
++  return (timing.domComplete - timing.navigationStart) / 1000
++}
++
++function getPerformanceEntries () {
++  const resourcePerf = performance.getEntriesByType('resource')
++  const indexPerf = performance.getEntriesByType('navigation')
++  const perfs = resourcePerf.concat(indexPerf)
++  let transferedSize = 0
++
++  perfs.map(perf => {
++    if ('transferSize' in perf) {
++      transferedSize = transferedSize + perf.transferSize
++    }
++  })
++
++  return transferedSize
++}
++
++function getPageUrl () {
++  return window.location.href
++}
++
++function isValidHostname () {
++  const pageHostname = window.location.hostname
++  return getConfigurationFile().then(config => {
++    for (key in config.sites) {
++      regex = new RegExp(key)
++      if (config.sites.hasOwnProperty(key) && regex.test(pageHostname)) {
++        return true
++      }
++    }
++
++    return false
++  })
++}
+diff --git a/browser/extensions/freedom/webextension/img/freedom-128.png b/browser/extensions/freedom/webextension/img/freedom-128.png
+new file mode 100755
+index e69de29bb2d1d6434b8b29ae775ad8c2e48c5391..7f1b5685141e6c9057957a092ebed558b7492898
+GIT binary patch
+literal 2469
+zc$}@4S5(to7RCPw(g`5F4gr*&K<I>yfJCH7Par_Rh@lrT5kVqK3q>MD5RtA_r4vvP
+z2?!R9#6pv%1nFW$QSggvp5|fJnumEfcdvc!Z=bX7+s$-!J__NJ;R65wf^x8RV=MV@
+z@f={E1fzN@wj2ntcCrS5)+_wKahz-q4R&yI0)PY+Hg_2ScK`A#01&SO0BeB&fGh?8
+z$><xsC(PIv;2_7NwgAwOqpZtzywMKmIQFKAzXh^UD<!d;+-FcucHE0R+`@dKb8@mX
+z0KgN6vbFXgO>bfe;o_cR`^PT2Rn&5#F=}2`5+FOn6B)Lm=)tQZcA0@ZB1%t`98(+z
+zcv8d;Yn0jxq=nidC{k58{=gcrTaiMzTb^B!YhGt6IHKHguIG09+h6`OJIiGvA4(PU
+z;`&XA&-a$+^oYxIMnZKrGw4!@>A|$@u~B<H0x>A(c)0aIo8KTm6Fw}F9zHAtr`MKI
+z<T0TX1uKw@qp5`Hk|G)Sj?>zOauZQ0#M)Vk{94eVn+tt+QRIM{*{e2DA`3SpOD6K*
+zSk4#JHzBq1RBLy+8kudX<kUm~yj()v;iwFgnzl7+18dv*`pzSUiN_zRRN$(FvAf7=
+zvBQ&B{KAjIpF5h$VowHw-@NbozI8VsSDE|$3y0}XqvL{cEq6sYyS0s4Z*VM`XB=;`
+zMNQh=<Sz{p<?^gf^Rw2cGlf0(HKLL-E!3(v*YC6ZbAyybYWO`*)F{c?J*x5>Xe@r*
+z_a_aosP4;OStHqZXmgLd_nsDisQ>gE1WML3CQSX}dkl1q&uIZxdXZ|IAb}BxGnP`;
+zb^ll%wr|~9<U)r@BKU3~&#|e!)q*uaH0EWDEFqZ>s8G(05uAUIXu9XUW^Fp-e!;@N
+zTIG5*`Fj>3j|owJDrga_k2ZX9;mF29q6$EIr4nw?%zY$g%q`y17EHeWqYTD~dBS*X
+zSO|Ok)hdxc^CaOiUCYl17_hq0nvs{q#pLX&;#&4mB3UHlCxK>EFmB~azQiopm2i$J
+zrbtMSyO>ruU#ynM#=|7$u$Mzi2UAze8rvp>J5hvjBSL+to9cK3S`r<OHSzjA&{b*7
+z_<$tquU2tb$@Sx|Z7m$`y8T{vp1zJ@x*T3N^o1*r?p_;1=Ewbu(IsIVSRV$f%@TSR
+zOynD%4+<DkT#xbHEg#+QAH(bywbT#GT(RugalO*4E{6siry8~mD?Gg;R*^nDC(u2*
+zfAKv}{2rI-hQ`phR<vn!a%|c#CLJ%Z(6m%MsP`NBMZxTJu*B6piZW(oQ3Ww3f3DtG
+zcN*utH<VQu)%qxy)3F7$*6bb9|4F<mD~Iq5yGWE9srfQC_LEe7{h3_4`K9#%U&Hfe
+zZ`uz;If^~tb&gwN#70jI`JJ6@E<d!Kq4_|4s3{gvE)vI!GCa?*MVjrrkIR*Q(zqZi
+zcuVol%<isNw&Jq4q+UTW7JiG9(isn&&T*6za1ZwVy_I-{5fk(B=dS8KTF($H4pH_K
+zd9Sq~s?PZ<tAFsikA$UQ@(Y5?jE%c+gMy_?+*0?D6A|%^W?xIA6>04#!y_#ej8x8o
+zv)|>P>Y*)fgsYBG?`6u~T7(NvIME|iBkyFPhUQ%vH#>zzUw!c3#XwA{H2QR~=f{?;
+zG<U{6BaAlDX+8|)+GdeV48e8Bh#b-~XEj^f4g56jU2np9OWVi?HhT+&O}>6>kh|0W
+zqeL!0<n-jD-)E2R7<O~V{0WWoDq9oBc*Q5rzl<il{V2ui1KL+Tyyb~3=p*aC?s04L
+z&l_*r8hrblo;vfDe9?_0-Q3~(vg*O#xzQ^O0g8`rgu;G_wWfD8tsN;M1f+JbRNhgb
+z<DNCD=1GM?nMK~(Cb6AOy?Fl@ZIW{J8^-CP0NHpG`%aAkD_(8}w3!JIXTqe)?~`4s
+zHGmzaYn1wgw=jeV`-Nyek5rwubtjXuE1HKf{_*b4(t|e=ZfU=2OU?CgUK;N$Et*Z?
+zU{Cw{#hHA2HQw%GB}EhTSzx3wOcq0)P7`!mkpZ>}1-6~Z)Q-6fD+kbbsa&Di1CiCQ
+zsLylzIwJ9;ZM4h!{`aGsE4;!Z@{^D>F>&#V7Xy+==2T3{U`74GjX?vzD%e!P9Hd+K
+zM`FMp79hJx2uqd%Q3MicI(45T8u5-TC0*e;&;)SZHUIM`Dp)gaGkswTbk2v{I9I1C
+zU8g#aoPl7_alLb|5_7X2$tg91j``#RPukP(i!an%^fvDR2Mbb%$)9hON|9LThWL#Z
+zB;SH3L~Ut59e<`0$?G~U<@#F2b*mKL1jT@dsy(GZZl@zCAYL;WpV!d3SVM-!1dpr5
+zffBLtj`rm`2%u)4^i*79z-i9QpyEJ@BBzF)U}(dHG)%yxK<K7r;0gsB&tK6}%-vYk
+z<JT>aq_qS6(*Q35l>~~eTt=l$l~5IV+kH0I^zjeHIgp-+>TR{<No?7zW*@Gl&HP%&
+z98jG_=Rhf~k@dcwb!{<iI6;m-{1*_-Pc+jkZop4K5YUGnjMp=?h(}GY9aptD=J{`(
+zFi-6)2r|2W>D>0A45Q2dbY!pO1)W9pL{N=<UYa(!gM+!vnRnJorXOGmI?yGpra^=s
+zU<XquBmf|A*DUfwH_7_{BaADDj?W=uBQNb%Jv~Vm02%0Mjup`niHo~?Bd5P!g?Gp*
+zo0aAkF!EncB%Br8xf-N)J0@jFoKX{@ya!2-=HY9ZGVVjTEhz@{W>g-`2Gy=)gkS?A
+z>I8JRWq^gMP5QNwPwkp4%$Ump2wHd{6kYWbog{o|mBZ}8ry-*1^2jkmBc<{~g{Z_<
+zM7oQbT^AzN64mhe|MtFr!}~j6+jRw1StfGs$2EyHP2I<7VyyXOT~<Z^o}2c@{3(4z
+zqLy9KJN1K^H1XQ294lGM@5=2PHe%`DKB^oHY$U}rbail7iE>bs88!f(27zkK`&woT
+z(gJ$T3WrRd@$OScl3}&ifuFvn6!wqg@EJRwGbeFp@W|j;JX-)=9fT1~#~7w#<bg0m
+zB6N@l6HOgmq>j$g?G@&K1R|nN5>B1_?}5Ty*GP6i`ftEJ>eLw`E*1|Ei9|RdGAu3_
+Z7mbHU#fFq_naQvr0A=TFd&ed)<sX2fN=pC$
+
+diff --git a/browser/extensions/freedom/webextension/img/freedom-16.png b/browser/extensions/freedom/webextension/img/freedom-16.png
+new file mode 100755
+index e69de29bb2d1d6434b8b29ae775ad8c2e48c5391..12b0e7a6c3bf19db2bb5b87b5c9319a2b6b96791
+GIT binary patch
+literal 544
+zc%17D@N?(olHy`uVBq!ia0vp^0wB!60wlNoGJgf6SkfJR9T^xl_H+M9WCijSl0AZa
+z85pY67#JE_7#My5g&JNkFq9fFFuY1&V6d9Oz#v{QXIG#NP=YDR+uenMVO6iP5s=4O
+z;1O92wCOqsGdgL^t^f+Mmw5WRvOnZt7vMAru>K2_XL#r7;uxZFe(5<wZzo2H)`!pU
+z@t91~ixjYQaegRtQ|w}b?^e^u#Vl(bogdt|5R-i2O57LWP4X8+`1l;1JWL}NIZpHr
+zj<U2UdC>g+gB)Lb+|#GK(;o20Y)B7vbUK@z|KLL3u4StvXWLD!XWw>rR!NG$?;xSJ
+zJMFS_Hmz8edS~;tZ7s>W?WM0xT^g!l>s4j+`r4Fs2S>Lhi6^Hn%S?Wyq^tSf>AB2{
+zxWFr!XHK5H#q~AtzJrg3ka(we(h}#ky^aY-Z6b;@LlVx--6GB@E@fn>sw!X^T9R~l
+z>zY^J@BHuQvAREVRjRqsDm9ZM9~XXNUHi&RJ@^OP1)$GWOI#yLQW8s2t&)pUffR$0
+zfuXssfrYMtd5EEzm4T&|sgbsUk(Gf#e4*P76b-rgDVb@NxHahM{7V69kOXN6&QB{T
+oPb^AhC@(M9%goCzPEIUH)ypqRpZ(583aE&|)78&qol`;+0L96^uK)l5
+
+diff --git a/browser/extensions/freedom/webextension/img/freedom-24.png b/browser/extensions/freedom/webextension/img/freedom-24.png
+new file mode 100755
+index e69de29bb2d1d6434b8b29ae775ad8c2e48c5391..72f40180403d0d084cd1cff8168303f3d51a55fb
+GIT binary patch
+literal 781
+zc%17D@N?(olHy`uVBq!ia0vp^3LwnE0wix1Z>k4UEa{HEjtmSN`?>!lvVtU&J%W50
+z7^>757#dm_7=8hT8eT9klo~KFyh>nTu$sZZAYL$MSD+10f+@+{-GzZ+Rj;xUkjGiz
+z5m^kh={g8AI%&+V01C2~c>21sKjdH+;Nn!Sd$f>&f$_Gdi(`n#@wb<Jy{{yS9DDfM
+zUf(KYQoufy$fO{(mP<;WIz~<<f=OFC%%mor{>J6iEmqsO;01Gr>%~Kd7Pz`hoG~jv
+zaG|7V>XHO!VctnT-D!yyeZpHZ9#)#2KfSa5`G+~PV-{VUV$D@_>a4`kZxUChzSP{a
+z%wo+kMRghR?{^N}57jF^T&`K@uX=Q;&x@^<m0lX%f7S?kTfE#V=lqLT<61(<*;`u=
+zx7`U%yd@c}a->9B<g3U0wD()qv%V;g-^ceo;Jx9u$~LdhW)=@tAItgFtd@I3I5(r1
+z`)Jz133?_oV`>=;jiUlzHyiAVb-b}iAgZ@<_PMoe8J`%w>|*&9!%*BM@M9T6^;z!J
+zd503OAK(jKaAdm40v65uH;1(4L)WrNus>aPxnXB2!?MuE!crHOzOH|aE5g(Eb3Wac
+zeK2oolt8JENMjo3pODv83+{&MZ}8k|=wedwVlUtPJzHliJj|tNtYP}lWceMoQZ>hg
+zDOMjhU+S4(bI<icrory1#a*Qb>=|7Clre~Y3SI25AnK0JDv`7cIa4F}Dl(Tp{E{i5
+zSlQ;Ad8|P-XR|`5lD$g6i=u7w!lW{f2pX&qe(m;)pK+q7Ib+hx+I<pCl}Q|(U5ZLN
+zZ7URnH@Ry)pBnOyyF0!;E$xWQOJK~ambgZgq$HN4S|t~y0x1R~14DCN0}EXP^AJNb
+zD?<Y-150fKBP#;~4c-?%C>nC}Q!>*kachVS2>1ZhAPLeCoS#-wo>-L1P+nfHmzkGc
+coSayYs+V7sKKq@G6i^X^r>mdKI;Vst0Q%%AVgLXD
+
+diff --git a/browser/extensions/freedom/webextension/img/freedom-32.png b/browser/extensions/freedom/webextension/img/freedom-32.png
+new file mode 100755
+index e69de29bb2d1d6434b8b29ae775ad8c2e48c5391..b31eb1b6491b81f60094c4fdcfb935cbd5c14215
+GIT binary patch
+literal 781
+zc%17D@N?(olHy`uVBq!ia0vp^3LwnE0wix1Z>k4UEa{HEjtmSN`?>!lvVtU&J%W50
+z7^>757#dm_7=8hT8eT9klo~KFyh>nTu$sZZAYL$MSD+10f+@+{-GzZ+Rj;xUkjGiz
+z5m^kh={g8AI%&+V01C2~c>21sKjdH+;1#S7egiax@wTUnV~EG`x0igquOx~bd-&R3
+z-zsEMz&@48q#(7HOG=(PMouMyNn1M1q$ZvI#^u#5R@=DX1#^b$#Y2Y{xVlW7F)KiD
+zp`>W)k_2aA-bp^)X^9qn!do&PR+^nZy|e!LhdHxj7G0cT%~f>jti;i85?80b)ZDYo
+zV$Cr{bs6#RcMjbT)hj++u36}>dUUDJi>;NFUK-th)(CoAyxc11{EJuPT0+R#TU!se
+z-3d*+B^j-9q(oZetH=Db_gmJpz9^61$M-$pz2UdYHm}cS77tb*%lXu-mU~1vH=~&Q
+zXxhOEdL}btY8ecTqXJ(y8|;d8ys=0is<(0WxwUK=pBTREV)+%rP~0W(V;MvBS?<(%
+zhZ3(J;0s=GWV*=$7R~%OhqUEG*Rn~lKV5dYVP`7Cve3rDQWuuKu78Xx!qfJ1KHZjm
+zFmGy<K&g*NV;bk5kk?fU?uP1b@Z4(XVp8#9FW>w<TW2gh%%y0oVfxTy`5m@WHOGZ1
+zRv$NC>X~12&-Fs4!S1QWU8M)?8C?F9F^GN&UF@(R>W<DTk+cgrQzQ5)GM7L6k}08B
+z+2)&htU)zrvqGnmy-L7~qHXiSq%w~P8mth0?e>eGaiXX>W75moeG*KSNgSPBib^_d
+zD-?t`xobV28uE|3JH9<F?TE`uV9cwQxJHzuB$lLFB^RXvDF!10LvvjN3ta>A5JNL7
+zLt`sLb8Q17D+7c0^%^}W8glbfGSez?YtZ{N0ho{&BtaU2^V3So6N^$A%FE03GV`*F
+clM@S4_413-XTP(N0xDwgboFyt=akR{0JUu@ivR!s
+
+diff --git a/browser/extensions/freedom/webextension/manifest.json b/browser/extensions/freedom/webextension/manifest.json
+new file mode 100755
+--- /dev/null
++++ b/browser/extensions/freedom/webextension/manifest.json
+@@ -0,0 +1,39 @@
++{
++  "manifest_version": 2,
++  "name": "Freedom ads replacer",
++  "description": "Extension to replace ads with freedom ads",
++  "version": "0.29",
++  "applications": {
++    "gecko": {
++      "id": "freedom@mozilla.org"
++    }
++  },
++  "background": {
++    "page": "background.html"
++  },
++  "content_scripts": [
++    {
++      "matches": [
++        "<all_urls>"
++      ],
++      "js": [
++        "contentscript.js"
++      ],
++      "run_at": "document_start"
++    }
++  ],
++  "icons": {
++    "16": "img/freedom-16.png",
++    "24": "img/freedom-24.png",
++    "32": "img/freedom-32.png",
++    "128": "img/freedom-128.png"
++  },
++  "permissions": [
++    "storage",
++    "tabs",
++    "webRequest",
++    "webRequestBlocking",
++    "*://*/*"
++  ],
++  "content_security_policy": "script-src 'self' https://www.google-analytics.com; object-src 'self'"
++}
+diff --git a/browser/extensions/moz.build b/browser/extensions/moz.build
+--- a/browser/extensions/moz.build
++++ b/browser/extensions/moz.build
+@@ -5,16 +5,17 @@
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ DIRS += [
+     'activity-stream',
+     'aushelper',
+     'clicktoplay-rollout',
+     'e10srollout',
+     'followonsearch',
++    'freedom',
+     'onboarding',
+     'pdfjs',
+     'pocket',
+     'screenshots',
+     'shield-recipe-client',
+     'webcompat',
+ ]
+ 
