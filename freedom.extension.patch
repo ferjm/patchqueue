@@ -2,6 +2,59 @@
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
 # Parent  4c5fbf49376351679dcc49f4cff26c3c2e055ccc
 
+diff --git a/browser/extensions/freedom/bootstrap.js b/browser/extensions/freedom/bootstrap.js
+new file mode 100644
+--- /dev/null
++++ b/browser/extensions/freedom/bootstrap.js
+@@ -0,0 +1,48 @@
++const ADDON_ID = "freedom@mozilla.org";
++const { interfaces: Ci, utils: Cu } = Components;
++
++Cu.import("resource://gre/modules/XPCOMUtils.jsm");
++
++XPCOMUtils.defineLazyModuleGetter(this, "LegacyExtensionsUtils",
++                                  "resource://gre/modules/LegacyExtensionsUtils.jsm");
++XPCOMUtils.defineLazyModuleGetter(this, "Console",
++                                  "resource://gre/modules/Console.jsm");
++
++function startup(data, reason) {
++  startupReason = reason;
++  if (reason !== APP_STARTUP) return;
++
++  const webExtension = LegacyExtensionsUtils.getEmbeddedExtensionFor({
++    id: ADDON_ID,
++    resourceURI: data.resourceURI
++  });
++
++  if (!webExtension.started) {
++    return start(webExtension);
++  }
++}
++
++function shutdown(data, reason) {
++  const webExtension = LegacyExtensionsUtils.getEmbeddedExtensionFor({
++    id: ADDON_ID,
++    resourceURI: addonResourceURI
++  });
++  appStartupPromise = appStartupPromise.then(() => { stop(webExtension, reason); });
++}
++
++function install(data, reason) {}
++
++function uninstall(data, reason) {}
++
++function start(webExtension) {
++  return webExtension.startup(startupReason).catch((err) => {
++    // The startup() promise will be rejected if the webExtension was
++    // already started (a harmless error), or if initializing the
++    // WebExtension failed and threw (an important error).
++    console.error(err);
++  });
++}
++
++function stop(webExtension, reason) {
++  return Promise.resolve(webExtension.shutdown(reason));
++}
 diff --git a/browser/extensions/freedom/install.rdf b/browser/extensions/freedom/install.rdf
 new file mode 100644
 --- /dev/null
