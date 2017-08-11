@@ -1,8 +1,21 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  4c5fbf49376351679dcc49f4cff26c3c2e055ccc
+# Parent  65826179c86e2a3538bcffd969556937e15688cd
 Bug 1387934 - stylo: inDOMUtils::SelectorMatchesElement should not match with bogus pseudo. r?xidorn
 
+diff --git a/layout/inspector/tests/mochitest.ini b/layout/inspector/tests/mochitest.ini
+--- a/layout/inspector/tests/mochitest.ini
++++ b/layout/inspector/tests/mochitest.ini
+@@ -31,9 +31,8 @@ support-files =
+ fail-if = stylo # bug 1387932
+ [test_get_all_style_sheets.html]
+ [test_is_valid_css_color.html]
+ [test_isinheritableproperty.html]
+ [test_parseStyleSheet.html]
+ [test_parseStyleSheetImport.html]
+ fail-if = stylo # bug 1387933
+ [test_selectormatcheselement.html]
+-fail-if = stylo # bug 1387934
 diff --git a/layout/style/ServoStyleRule.cpp b/layout/style/ServoStyleRule.cpp
 --- a/layout/style/ServoStyleRule.cpp
 +++ b/layout/style/ServoStyleRule.cpp
