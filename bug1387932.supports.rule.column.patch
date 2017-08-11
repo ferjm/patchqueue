@@ -1,7 +1,7 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
 # Parent  65826179c86e2a3538bcffd969556937e15688cd
-Bug 1387932 - stylo: column number of @supports rule is different from Gecko
+Bug 1387932 - stylo: add exception to inspector's test_getRelativeRuleLine. r?xidorn
 
 diff --git a/layout/inspector/tests/mochitest.ini b/layout/inspector/tests/mochitest.ini
 --- a/layout/inspector/tests/mochitest.ini
