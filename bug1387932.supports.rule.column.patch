@@ -1,0 +1,52 @@
+# HG changeset patch
+# User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
+# Parent  65826179c86e2a3538bcffd969556937e15688cd
+Bug 1387932 - stylo: column number of @supports rule is different from Gecko
+
+diff --git a/layout/inspector/tests/mochitest.ini b/layout/inspector/tests/mochitest.ini
+--- a/layout/inspector/tests/mochitest.ini
++++ b/layout/inspector/tests/mochitest.ini
+@@ -23,17 +23,16 @@ fail-if = stylo # bug 1387913
+ [test_getCSSStyleRules.html]
+ support-files =
+   file_getCSSStyleRules-default.html
+   file_getCSSStyleRules-alternate.html
+   getCSSStyleRules-1.css
+   getCSSStyleRules-2.css
+ [test_getCSSPseudoElementNames.html]
+ [test_getRelativeRuleLine.html]
+-fail-if = stylo # bug 1387932
+ [test_get_all_style_sheets.html]
+ [test_is_valid_css_color.html]
+ [test_isinheritableproperty.html]
+ [test_parseStyleSheet.html]
+ [test_parseStyleSheetImport.html]
+ fail-if = stylo # bug 1387933
+ [test_selectormatcheselement.html]
+ fail-if = stylo # bug 1387934
+diff --git a/layout/inspector/tests/test_getRelativeRuleLine.html b/layout/inspector/tests/test_getRelativeRuleLine.html
+--- a/layout/inspector/tests/test_getRelativeRuleLine.html
++++ b/layout/inspector/tests/test_getRelativeRuleLine.html
+@@ -24,19 +24,21 @@
+      #test {
+        color: blue;
+      }
+   </style>
+   <script type="application/javascript">
+   let utils = SpecialPowers.Cc["@mozilla.org/inspector/dom-utils;1"]
+                            .getService(SpecialPowers.Ci.inIDOMUtils);
+ 
++  const supportsRuleColumn = SpecialPowers.DOMWindowUtils.isStyledByServo ? 14
++                                                                          : 15;
+   let tests = [
+     { sheetNo: 0, ruleNo: 0, lineNo: 1, columnNo: 1 },
+-    { sheetNo: 1, ruleNo: 0, lineNo: 2, columnNo: 15 },
++    { sheetNo: 1, ruleNo: 0, lineNo: 2, columnNo: supportsRuleColumn },
+     { sheetNo: 1, ruleNo: 1, lineNo: 8, columnNo: 5 },
+     { sheetNo: 2, ruleNo: 0, lineNo: 1, columnNo: 1 },
+     { sheetNo: 2, ruleNo: 1, lineNo: 0, columnNo: 1 },
+     { sheetNo: 3, ruleNo: 0, lineNo: 5, columnNo: 6 },
+   ];
+ 
+   function doTest() {
+     document.styleSheets[2].insertRule("body{}", 1);
