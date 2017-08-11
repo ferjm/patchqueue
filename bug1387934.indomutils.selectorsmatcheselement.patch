@@ -1,0 +1,51 @@
+# HG changeset patch
+# User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
+# Parent  4c5fbf49376351679dcc49f4cff26c3c2e055ccc
+Bug 1387934 - stylo: inDOMUtils::SelectorMatchesElement should not match with bogus pseudo. r?xidorn
+
+diff --git a/layout/style/ServoStyleRule.cpp b/layout/style/ServoStyleRule.cpp
+--- a/layout/style/ServoStyleRule.cpp
++++ b/layout/style/ServoStyleRule.cpp
+@@ -7,16 +7,17 @@
+ /* representation of CSSStyleRule for stylo */
+ 
+ #include "mozilla/ServoStyleRule.h"
+ 
+ #include "mozilla/DeclarationBlockInlines.h"
+ #include "mozilla/ServoBindings.h"
+ #include "mozilla/ServoDeclarationBlock.h"
+ #include "mozilla/dom/CSSStyleRuleBinding.h"
++#include "nsCSSPseudoClasses.h"
+ 
+ #include "mozAutoDocUpdate.h"
+ 
+ namespace mozilla {
+ 
+ // -- ServoStyleRuleDeclaration ---------------------------------------
+ 
+ ServoStyleRuleDeclaration::ServoStyleRuleDeclaration(
+@@ -278,16 +279,20 @@ ServoStyleRule::SelectorMatchesElement(E
+                                        uint32_t aSelectorIndex,
+                                        const nsAString& aPseudo,
+                                        bool* aMatches)
+ {
+   nsCOMPtr<nsIAtom> pseudoElt = NS_Atomize(aPseudo);
+   const CSSPseudoElementType pseudoType =
+     nsCSSPseudoElements::GetPseudoType(pseudoElt,
+                                        CSSEnabledState::eIgnoreEnabledState);
+-  *aMatches = Servo_StyleRule_SelectorMatchesElement(mRawRule,
+-                                                     aElement,
+-                                                     aSelectorIndex,
+-                                                     pseudoType);
++
++  *aMatches = (aPseudo.IsEmpty() || pseudoType != CSSPseudoElementType::NotPseudo)
++    ? Servo_StyleRule_SelectorMatchesElement(mRawRule,
++                                             aElement,
++                                             aSelectorIndex,
++                                             pseudoType)
++    : false;
++
+   return NS_OK;
+ }
+ 
+ } // namespace mozilla
