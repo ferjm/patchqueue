@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  65826179c86e2a3538bcffd969556937e15688cd
+# Parent  3bfcbdf5c6c381d5a8febb5c209e27a69fb89f9b
 Bug 1387934 - stylo: inDOMUtils::SelectorMatchesElement should not match with bogus pseudo. r?xidorn
 
 diff --git a/layout/inspector/tests/mochitest.ini b/layout/inspector/tests/mochitest.ini
@@ -37,26 +37,37 @@ diff --git a/layout/style/ServoStyleRule.cpp b/layout/style/ServoStyleRule.cpp
  // -- ServoStyleRuleDeclaration ---------------------------------------
  
  ServoStyleRuleDeclaration::ServoStyleRuleDeclaration(
-@@ -278,16 +279,20 @@ ServoStyleRule::SelectorMatchesElement(E
+@@ -274,20 +275,27 @@ ServoStyleRule::GetSpecificity(uint32_t 
+ }
+ 
+ nsresult
+ ServoStyleRule::SelectorMatchesElement(Element* aElement,
                                         uint32_t aSelectorIndex,
                                         const nsAString& aPseudo,
                                         bool* aMatches)
  {
-   nsCOMPtr<nsIAtom> pseudoElt = NS_Atomize(aPseudo);
-   const CSSPseudoElementType pseudoType =
-     nsCSSPseudoElements::GetPseudoType(pseudoElt,
-                                        CSSEnabledState::eIgnoreEnabledState);
+-  nsCOMPtr<nsIAtom> pseudoElt = NS_Atomize(aPseudo);
+-  const CSSPseudoElementType pseudoType =
+-    nsCSSPseudoElements::GetPseudoType(pseudoElt,
+-                                       CSSEnabledState::eIgnoreEnabledState);
 -  *aMatches = Servo_StyleRule_SelectorMatchesElement(mRawRule,
 -                                                     aElement,
 -                                                     aSelectorIndex,
 -                                                     pseudoType);
++  CSSPseudoElementType pseudoType = CSSPseudoElementType::NotPseudo;
++  if (!aPseudo.IsEmpty()) {
++    nsCOMPtr<nsIAtom> pseudoElt = NS_Atomize(aPseudo);
++    pseudoType = nsCSSPseudoElements::GetPseudoType(
++        pseudoElt, CSSEnabledState::eIgnoreEnabledState);
 +
-+  *aMatches = (aPseudo.IsEmpty() || pseudoType != CSSPseudoElementType::NotPseudo)
-+    ? Servo_StyleRule_SelectorMatchesElement(mRawRule,
-+                                             aElement,
-+                                             aSelectorIndex,
-+                                             pseudoType)
-+    : false;
++    if (pseudoType == CSSPseudoElementType::NotPseudo) {
++      *aMatches = false;
++      return NS_OK;
++    }
++  }
++
++  *aMatches = Servo_StyleRule_SelectorMatchesElement(mRawRule, aElement,
++                                                     aSelectorIndex, pseudoType);
 +
    return NS_OK;
  }
