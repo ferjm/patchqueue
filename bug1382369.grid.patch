@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  6ebc251bd288c268b020815025b05854ccde5c08
+# Parent  c86b7150523c10e1d1dbc0be2d8ed96f205be35f
 Bug 1382369 - stylo: store specified value of grid layout repeat() function
 
 diff --git a/servo/components/style/gecko/conversions.rs b/servo/components/style/gecko/conversions.rs
@@ -62,7 +62,7 @@ diff --git a/servo/components/style/gecko/conversions.rs b/servo/components/styl
 diff --git a/servo/components/style/properties/gecko.mako.rs b/servo/components/style/properties/gecko.mako.rs
 --- a/servo/components/style/properties/gecko.mako.rs
 +++ b/servo/components/style/properties/gecko.mako.rs
-@@ -1811,17 +1811,17 @@ fn static_assert() {
+@@ -1819,17 +1819,17 @@ fn static_assert() {
  
      pub fn clone_grid_template_${kind}(&self) -> longhands::grid_template_${kind}::computed_value::T {
          <% self_grid = "self.gecko.mGridTemplate%s" % kind.title() %>
@@ -81,7 +81,7 @@ diff --git a/servo/components/style/properties/gecko.mako.rs b/servo/components/
  
          #[inline]
          fn to_boxed_customident_slice(gecko_names: &nsTArray<nsStringRepr>) -> Box<[CustomIdent]> {
-@@ -1881,17 +1881,17 @@ fn static_assert() {
+@@ -1889,17 +1889,17 @@ fn static_assert() {
                              &value.mRepeatAutoLineNameListAfter));
                          vec.into_boxed_slice()
                      };
@@ -145,7 +145,7 @@ diff --git a/servo/components/style/properties/shorthand/position.mako.rs b/serv
 diff --git a/servo/components/style/values/generics/grid.rs b/servo/components/style/values/generics/grid.rs
 --- a/servo/components/style/values/generics/grid.rs
 +++ b/servo/components/style/values/generics/grid.rs
-@@ -393,55 +393,37 @@ pub struct TrackRepeat<L> {
+@@ -394,55 +394,37 @@ pub struct TrackRepeat<L> {
      /// length is always one value more than that of the `<track-size>`.
      pub line_names: Box<[Box<[CustomIdent]>]>,
      /// `<track-size>` values.
@@ -215,7 +215,7 @@ diff --git a/servo/components/style/values/generics/grid.rs b/servo/components/s
      pub fn expand(&self) -> Self {
          if let RepeatCount::Number(num) = self.count {
              let mut line_names = vec![];
-@@ -499,16 +481,56 @@ impl<L: ToComputedValue> ToComputedValue
+@@ -500,16 +482,56 @@ impl<L: ToComputedValue> ToComputedValue
              track_sizes: computed.track_sizes.iter()
                                               .map(ToComputedValue::from_computed_value)
                                               .collect(),
@@ -272,7 +272,7 @@ diff --git a/servo/components/style/values/generics/grid.rs b/servo/components/s
  pub enum TrackListType {
      /// [`<auto-track-list>`](https://drafts.csswg.org/css-grid/#typedef-auto-track-list)
      ///
-@@ -535,18 +557,18 @@ impl ComputedValueAsSpecified for TrackL
+@@ -536,18 +558,18 @@ impl ComputedValueAsSpecified for TrackL
  #[derive(Clone, PartialEq, Debug)]
  #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
  pub struct TrackList<T> {
@@ -296,7 +296,8 @@ diff --git a/servo/components/style/values/generics/grid.rs b/servo/components/s
 diff --git a/servo/components/style/values/specified/grid.rs b/servo/components/style/values/specified/grid.rs
 --- a/servo/components/style/values/specified/grid.rs
 +++ b/servo/components/style/values/specified/grid.rs
-@@ -3,22 +3,22 @@
+@@ -2,23 +2,23 @@
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
   * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
  
  //! CSS handling for the computed value of
@@ -304,9 +305,9 @@ diff --git a/servo/components/style/values/specified/grid.rs b/servo/components/
  
  use cssparser::{Parser, Token, BasicParseError};
  use parser::{Parse, ParserContext};
++use std::{mem, usize};
  use std::ascii::AsciiExt;
 -use std::mem;
-+use std::{mem, usize};
  use style_traits::{HasViewportPercentage, ParseError, StyleParseError};
  use values::{CSSFloat, CustomIdent};
  use values::computed::{self, Context, ToComputedValue};
