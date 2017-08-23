@@ -1,5 +1,5 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
-# Parent  b38e07d9bd815ede7ecf3c92b64691e166285c89
-try: -b o -p emulator -u none -t none
+# Parent  6e86b8a12c609a26cf2967126847f5613da29d06
+try: -b do -p all -u all[x64]
 
