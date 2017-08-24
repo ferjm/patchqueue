@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  c86b7150523c10e1d1dbc0be2d8ed96f205be35f
+# Parent  892c8916ba32b7733e06bfbfdd4083ffae3ca028
 Bug 1382369 - stylo: store specified value of grid layout repeat() function
 
 diff --git a/servo/components/style/gecko/conversions.rs b/servo/components/style/gecko/conversions.rs
@@ -267,13 +267,13 @@ diff --git a/servo/components/style/values/generics/grid.rs b/servo/components/s
  /// The type of a `<track-list>` as determined during parsing.
  ///
  /// https://drafts.csswg.org/css-grid/#typedef-track-list
- #[derive(Clone, Copy, PartialEq, Debug)]
+ #[derive(Clone, Copy, Debug, PartialEq)]
  #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
  pub enum TrackListType {
      /// [`<auto-track-list>`](https://drafts.csswg.org/css-grid/#typedef-auto-track-list)
      ///
 @@ -536,18 +558,18 @@ impl ComputedValueAsSpecified for TrackL
- #[derive(Clone, PartialEq, Debug)]
+ #[derive(Clone, Debug, PartialEq)]
  #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
  pub struct TrackList<T> {
      /// The type of this `<track-list>` (auto, explicit or general).
