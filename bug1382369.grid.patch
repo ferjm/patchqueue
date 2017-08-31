@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  db7f19e26e571ae1dd309f5d2f387b06ba670c30
+# Parent  04b6be50a2526c7a26a63715f441c47e1aa1f9be
 Bug 1382369 - stylo: store specified value of grid layout repeat() function
 
 diff --git a/servo/components/style/gecko/conversions.rs b/servo/components/style/gecko/conversions.rs
@@ -145,7 +145,7 @@ diff --git a/servo/components/style/properties/shorthand/position.mako.rs b/serv
 diff --git a/servo/components/style/values/generics/grid.rs b/servo/components/style/values/generics/grid.rs
 --- a/servo/components/style/values/generics/grid.rs
 +++ b/servo/components/style/values/generics/grid.rs
-@@ -391,55 +391,37 @@ pub struct TrackRepeat<L> {
+@@ -389,55 +389,37 @@ pub struct TrackRepeat<L> {
      #[compute(clone)]
      pub line_names: Box<[Box<[CustomIdent]>]>,
      /// `<track-size>` values.
@@ -215,7 +215,7 @@ diff --git a/servo/components/style/values/generics/grid.rs b/servo/components/s
      pub fn expand(&self) -> Self {
          if let RepeatCount::Number(num) = self.count {
              let mut line_names = vec![];
-@@ -472,16 +454,26 @@ impl<L: Clone> TrackRepeat<L> {
+@@ -470,16 +452,26 @@ impl<L: Clone> TrackRepeat<L> {
                  count: self.count,
                  track_sizes: self.track_sizes.clone(),
                  line_names: self.line_names.clone(),
@@ -242,7 +242,7 @@ diff --git a/servo/components/style/values/generics/grid.rs b/servo/components/s
  pub enum TrackListType {
      /// [`<auto-track-list>`](https://drafts.csswg.org/css-grid/#typedef-auto-track-list)
      ///
-@@ -501,31 +493,30 @@ pub enum TrackListType {
+@@ -499,31 +491,30 @@ pub enum TrackListType {
  }
  
  impl ComputedValueAsSpecified for TrackListType {}
@@ -287,7 +287,7 @@ diff --git a/servo/components/style/values/specified/grid.rs b/servo/components/
  use parser::{Parse, ParserContext};
  use std::ascii::AsciiExt;
  use std::mem;
- use style_traits::{HasViewportPercentage, ParseError, StyleParseError};
+ use style_traits::{ParseError, StyleParseError};
  use values::{CSSFloat, CustomIdent};
 +use values::computed::{self, Context, ToComputedValue};
  use values::generics::grid::{GridTemplateComponent, RepeatCount, TrackBreadth, TrackKeyword, TrackRepeat};
@@ -301,35 +301,7 @@ diff --git a/servo/components/style/values/specified/grid.rs b/servo/components/
          Token::Dimension { value, ref unit, .. } if unit.eq_ignore_ascii_case("fr") && value.is_sign_positive()
              => Ok(value),
          ref t => Err(BasicParseError::UnexpectedToken(t.clone()).into()),
-@@ -72,16 +73,27 @@ impl Parse for TrackSize<LengthOrPercent
-         }
- 
-         input.expect_function_matching("fit-content")?;
-         let lop = input.parse_nested_block(|i| LengthOrPercentage::parse_non_negative(context, i))?;
-         Ok(TrackSize::FitContent(lop))
-     }
- }
- 
-+impl HasViewportPercentage for TrackListValue<LengthOrPercentage> {
-+    #[inline]
-+    fn has_viewport_percentage(&self) -> bool {
-+        if let TrackListValue::TrackSize(ref size) = *self {
-+            size.has_viewport_percentage()
-+        } else {
-+            false
-+        }
-+    }
-+}
-+
- /// Parse the grid line names into a vector of owned strings.
- ///
- /// https://drafts.csswg.org/css-grid/#typedef-line-names
- pub fn parse_line_names<'i, 't>(input: &mut Parser<'i, 't>) -> Result<Box<[CustomIdent]>, ParseError<'i>> {
-     input.expect_square_bracket_block()?;
-     input.parse_nested_block(|input| {
-         let mut values = vec![];
-         while let Ok(ident) = input.try(|i| i.expect_ident_cloned()) {
-@@ -113,17 +125,17 @@ impl TrackRepeat<LengthOrPercentage> {
+@@ -102,17 +103,17 @@ impl TrackRepeat<LengthOrPercentage> {
          input.try(|i| i.expect_function_matching("repeat").map_err(|e| e.into())).and_then(|_| {
              input.parse_nested_block(|input| {
                  let count = RepeatCount::parse(context, input)?;
@@ -348,10 +320,10 @@ diff --git a/servo/components/style/values/specified/grid.rs b/servo/components/
                  let mut current_names;
  
                  loop {
-@@ -179,51 +191,41 @@ impl HasViewportPercentage for TrackRepe
-     #[inline]
-     fn has_viewport_percentage(&self) -> bool {
-         self.track_sizes.iter().any(|ref v| v.has_viewport_percentage())
+@@ -161,51 +162,41 @@ impl TrackRepeat<LengthOrPercentage> {
+                 Ok((repeat, repeat_type))
+             })
+         })
      }
  }
  
@@ -402,7 +374,7 @@ diff --git a/servo/components/style/values/specified/grid.rs b/servo/components/
                  match type_ {
                      RepeatType::Normal => {
                          atleast_one_not_fixed = true;
-@@ -232,38 +234,31 @@ impl Parse for TrackList<LengthOrPercent
+@@ -214,38 +205,31 @@ impl Parse for TrackList<LengthOrPercent
                          }
                      },
                      RepeatType::Auto => {
@@ -448,12 +420,12 @@ diff --git a/servo/components/style/values/specified/grid.rs b/servo/components/
                  names.push(current_names.into_boxed_slice());
                  break
              }
-@@ -280,16 +275,89 @@ impl Parse for TrackList<LengthOrPercent
- 
- impl HasViewportPercentage for TrackList<LengthOrPercentage> {
-     #[inline]
-     fn has_viewport_percentage(&self) -> bool {
-         self.values.iter().any(|ref v| v.has_viewport_percentage())
+@@ -255,16 +239,89 @@ impl Parse for TrackList<LengthOrPercent
+             list_type: list_type,
+             values: values,
+             line_names: names.into_boxed_slice(),
+             auto_repeat: auto_repeat,
+         })
      }
  }
  
