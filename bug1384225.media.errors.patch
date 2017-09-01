@@ -1,0 +1,402 @@
+# HG changeset patch
+# User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
+# Parent  14eea6bedcf3e2f46ea7c908e1ac9b7d256a42f0
+Bug 1384225 - stylo: Error reporting for unknown media features. r?jdm
+
+diff --git a/servo/components/script/dom/cssmediarule.rs b/servo/components/script/dom/cssmediarule.rs
+--- a/servo/components/script/dom/cssmediarule.rs
++++ b/servo/components/script/dom/cssmediarule.rs
+@@ -67,23 +67,25 @@ impl CSSMediaRule {
+         list.to_css_string().into()
+     }
+ 
+     /// https://drafts.csswg.org/css-conditional-3/#the-cssmediarule-interface
+     pub fn set_condition_text(&self, text: DOMString) {
+         let mut input = ParserInput::new(&text);
+         let mut input = Parser::new(&mut input);
+         let global = self.global();
+-        let win = global.as_window();
+-        let url = win.get_url();
+-        let quirks_mode = win.Document().quirks_mode();
++        let window = global.as_window();
++        let url = window.get_url();
++        let quirks_mode = window.Document().quirks_mode();
+         let context = ParserContext::new_for_cssom(&url, Some(CssRuleType::Media),
+                                                    PARSING_MODE_DEFAULT,
+                                                    quirks_mode);
+-        let new_medialist = parse_media_query_list(&context, &mut input);
++
++        let new_medialist = parse_media_query_list(&context, &mut input
++                                                   window.css_error_reporter());
+         let mut guard = self.cssconditionrule.shared_lock().write();
+ 
+         // Clone an Arc because we can’t borrow `guard` twice at the same time.
+ 
+         // FIXME(SimonSapin): allow access to multiple objects with one write guard?
+         // Would need a set of usize pointer addresses or something,
+         // the same object is not accessed more than once.
+         let mqs = Arc::clone(&self.mediarule.write_with(&mut guard).media_queries);
+diff --git a/servo/components/script/dom/htmllinkelement.rs b/servo/components/script/dom/htmllinkelement.rs
+--- a/servo/components/script/dom/htmllinkelement.rs
++++ b/servo/components/script/dom/htmllinkelement.rs
+@@ -284,17 +284,19 @@ impl HTMLLinkElement {
+         };
+ 
+         let mut input = ParserInput::new(&mq_str);
+         let mut css_parser = CssParser::new(&mut input);
+         let doc_url = document.url();
+         let context = CssParserContext::new_for_cssom(&doc_url, Some(CssRuleType::Media),
+                                                       PARSING_MODE_DEFAULT,
+                                                       document.quirks_mode());
+-        let media = parse_media_query_list(&context, &mut css_parser);
++        let window = document.window();
++        let media = parse_media_query_list(&context, &mut css_parser,
++                                           window.css_error_reporter());
+ 
+         let im_attribute = element.get_attribute(&ns!(), &local_name!("integrity"));
+         let integrity_val = im_attribute.r().map(|a| a.value());
+         let integrity_metadata = match integrity_val {
+             Some(ref value) => &***value,
+             None => "",
+         };
+ 
+diff --git a/servo/components/script/dom/htmlstyleelement.rs b/servo/components/script/dom/htmlstyleelement.rs
+--- a/servo/components/script/dom/htmlstyleelement.rs
++++ b/servo/components/script/dom/htmlstyleelement.rs
+@@ -69,39 +69,41 @@ impl HTMLStyleElement {
+                            HTMLStyleElementBinding::Wrap)
+     }
+ 
+     pub fn parse_own_css(&self) {
+         let node = self.upcast::<Node>();
+         let element = self.upcast::<Element>();
+         assert!(node.is_in_doc());
+ 
+-        let win = window_from_node(node);
++        let window = window_from_node(node);
+         let doc = document_from_node(self);
+ 
+         let mq_attribute = element.get_attribute(&ns!(), &local_name!("media"));
+         let mq_str = match mq_attribute {
+             Some(a) => String::from(&**a.value()),
+             None => String::new(),
+         };
+ 
+         let data = node.GetTextContent().expect("Element.textContent must be a string");
+-        let url = win.get_url();
++        let url = window.get_url();
+         let context = CssParserContext::new_for_cssom(&url,
+                                                       Some(CssRuleType::Media),
+                                                       PARSING_MODE_DEFAULT,
+                                                       doc.quirks_mode());
+         let shared_lock = node.owner_doc().style_shared_lock().clone();
+         let mut input = ParserInput::new(&mq_str);
+-        let mq = Arc::new(shared_lock.wrap(
+-                    parse_media_query_list(&context, &mut CssParser::new(&mut input))));
++        let css_error_reporter = window.css_error_reporter();
++        let mq = Arc::new(shared_lock.wrap(parse_media_query_list(&context,
++                                                                  &mut CssParser::new(&mut input),
++                                                                  css_error_reporter)));
+         let loader = StylesheetLoader::for_element(self.upcast());
+         let sheet = Stylesheet::from_str(&data, win.get_url(), Origin::Author, mq,
+                                          shared_lock, Some(&loader),
+-                                         win.css_error_reporter(),
++                                         css_error_reporter,
+                                          doc.quirks_mode(),
+                                          self.line_number as u32);
+ 
+         let sheet = Arc::new(sheet);
+ 
+         // No subresource loads were triggered, just fire the load event now.
+         if self.pending_loads.get() == 0 {
+             self.upcast::<EventTarget>().fire_event(atom!("load"));
+diff --git a/servo/components/script/dom/medialist.rs b/servo/components/script/dom/medialist.rs
+--- a/servo/components/script/dom/medialist.rs
++++ b/servo/components/script/dom/medialist.rs
+@@ -69,23 +69,24 @@ impl MediaListMethods for MediaList {
+             // Step 1
+             *media_queries = StyleMediaList::empty();
+             return;
+         }
+         // Step 3
+         let mut input = ParserInput::new(&value);
+         let mut parser = Parser::new(&mut input);
+         let global = self.global();
+-        let win = global.as_window();
+-        let url = win.get_url();
++        let window = global.as_window();
++        let url = window.get_url();
+         let quirks_mode = win.Document().quirks_mode();
+         let context = ParserContext::new_for_cssom(&url, Some(CssRuleType::Media),
+                                                    PARSING_MODE_DEFAULT,
+                                                    quirks_mode);
+-        *media_queries = parse_media_query_list(&context, &mut parser);
++        *media_queries = parse_media_query_list(&context, &mut parser,
++                                                window.css_error_reporter());
+     }
+ 
+     // https://drafts.csswg.org/cssom/#dom-medialist-length
+     fn Length(&self) -> u32 {
+         let guard = self.shared_lock().read();
+         self.media_queries.read_with(&guard).media_queries.len() as u32
+     }
+ 
+diff --git a/servo/components/script/dom/window.rs b/servo/components/script/dom/window.rs
+--- a/servo/components/script/dom/window.rs
++++ b/servo/components/script/dom/window.rs
+@@ -1009,17 +1009,18 @@ impl WindowMethods for Window {
+     fn MatchMedia(&self, query: DOMString) -> Root<MediaQueryList> {
+         let mut input = ParserInput::new(&query);
+         let mut parser = Parser::new(&mut input);
+         let url = self.get_url();
+         let quirks_mode = self.Document().quirks_mode();
+         let context = CssParserContext::new_for_cssom(&url, Some(CssRuleType::Media),
+                                                       PARSING_MODE_DEFAULT,
+                                                       quirks_mode);
+-        let media_query_list = media_queries::parse_media_query_list(&context, &mut parser);
++        let media_query_list = media_queries::parse_media_query_list(&context, &mut parser,
++                                                                     &self.css_error_reporter);
+         let document = self.Document();
+         let mql = MediaQueryList::new(&document, media_query_list);
+         self.media_query_lists.push(&*mql);
+         mql
+     }
+ 
+     #[allow(unrooted_must_root)]
+     // https://fetch.spec.whatwg.org/#fetch-method
+diff --git a/servo/components/style/error_reporting.rs b/servo/components/style/error_reporting.rs
+--- a/servo/components/style/error_reporting.rs
++++ b/servo/components/style/error_reporting.rs
+@@ -13,17 +13,17 @@ use style_traits::ParseError;
+ use stylesheets::UrlExtraData;
+ 
+ /// Errors that can be encountered while parsing CSS.
+ pub enum ContextualParseError<'a> {
+     /// A property declaration was not recognized.
+     UnsupportedPropertyDeclaration(&'a str, ParseError<'a>),
+     /// A font face descriptor was not recognized.
+     UnsupportedFontFaceDescriptor(&'a str, ParseError<'a>),
+-    /// A font feature values descroptor was not recognized.
++    /// A font feature values descriptor was not recognized.
+     UnsupportedFontFeatureValuesDescriptor(&'a str, ParseError<'a>),
+     /// A keyframe rule was not valid.
+     InvalidKeyframeRule(&'a str, ParseError<'a>),
+     /// A font feature values rule was not valid.
+     InvalidFontFeatureValuesRule(&'a str, ParseError<'a>),
+     /// A keyframe property declaration was not recognized.
+     UnsupportedKeyframePropertyDeclaration(&'a str, ParseError<'a>),
+     /// A rule was invalid for some reason.
+@@ -38,17 +38,19 @@ pub enum ContextualParseError<'a> {
+     InvalidCounterStyleWithoutSymbols(String),
+     /// A counter style rule had less than two symbols.
+     InvalidCounterStyleNotEnoughSymbols(String),
+     /// A counter style rule did not have additive-symbols.
+     InvalidCounterStyleWithoutAdditiveSymbols,
+     /// A counter style rule had extends with symbols.
+     InvalidCounterStyleExtendsWithSymbols,
+     /// A counter style rule had extends with additive-symbols.
+-    InvalidCounterStyleExtendsWithAdditiveSymbols
++    InvalidCounterStyleExtendsWithAdditiveSymbols,
++    /// A media feature was not recognized.
++    InvalidMediaFeature(&'a str, ParseError<'a>),
+ }
+ 
+ impl<'a> ContextualParseError<'a> {
+     /// Turn a parse error into a string representation.
+     pub fn to_string(&self) -> String {
+         fn token_to_str(t: &Token) -> String {
+             match *t {
+                 Token::Ident(ref i) => format!("identifier {}", i),
+@@ -139,16 +141,19 @@ impl<'a> ContextualParseError<'a> {
+             ContextualParseError::InvalidCounterStyleNotEnoughSymbols(ref system) =>
+                 format!("Invalid @counter-style rule: 'system: {}' less than two 'symbols'", system),
+             ContextualParseError::InvalidCounterStyleWithoutAdditiveSymbols =>
+                 "Invalid @counter-style rule: 'system: additive' without 'additive-symbols'".into(),
+             ContextualParseError::InvalidCounterStyleExtendsWithSymbols =>
+                 "Invalid @counter-style rule: 'system: extends …' with 'symbols'".into(),
+             ContextualParseError::InvalidCounterStyleExtendsWithAdditiveSymbols =>
+                 "Invalid @counter-style rule: 'system: extends …' with 'additive-symbols'".into(),
++            ContextualParseError::InvalidMediaFeature(feature, ref err) =>
++                format!("Expected media feature name but found: '{}', {}", feature,
++                        parse_error_to_str(err)),
+         }
+     }
+ }
+ 
+ /// A generic trait for an error reporter.
+ pub trait ParseErrorReporter {
+     /// Called when the style engine detects an error.
+     ///
+diff --git a/servo/components/style/media_queries.rs b/servo/components/style/media_queries.rs
+--- a/servo/components/style/media_queries.rs
++++ b/servo/components/style/media_queries.rs
+@@ -4,17 +4,18 @@
+ 
+ //! [Media queries][mq].
+ //!
+ //! [mq]: https://drafts.csswg.org/mediaqueries/
+ 
+ use Atom;
+ use context::QuirksMode;
+ use cssparser::{Delimiter, Parser, Token, ParserInput};
+-use parser::ParserContext;
++use error_reporting::{ContextualParseError, ParseErrorReporter};
++use parser::{ParserContext, ParserErrorContext};
+ use selectors::parser::SelectorParseError;
+ use serialize_comma_separated_list;
+ use std::fmt;
+ use str::string_as_ascii_lowercase;
+ use style_traits::{ToCss, ParseError, StyleParseError};
+ use values::CustomIdent;
+ 
+ #[cfg(feature = "servo")]
+@@ -235,29 +236,40 @@ impl MediaQuery {
+ }
+ 
+ /// Parse a media query list from CSS.
+ ///
+ /// Always returns a media query list. If any invalid media query is found, the
+ /// media query list is only filled with the equivalent of "not all", see:
+ ///
+ /// https://drafts.csswg.org/mediaqueries/#error-handling
+-pub fn parse_media_query_list(context: &ParserContext, input: &mut Parser) -> MediaList {
++pub fn parse_media_query_list<R>(context: &ParserContext,
++                                 input: &mut Parser,
++                                 error_reporter: &R) -> MediaList
++    where R: ParseErrorReporter
++{
+     if input.is_exhausted() {
+         return MediaList::empty()
+     }
+ 
+     let mut media_queries = vec![];
+     loop {
++        let start_position = input.position();
++        let start_location = input.current_source_location();
+         match input.parse_until_before(Delimiter::Comma, |i| MediaQuery::parse(context, i)) {
+             Ok(mq) => {
+                 media_queries.push(mq);
+             },
+-            Err(..) => {
++            Err(err) => {
++                println!("ERRRRRRRRR {:?}", err);
+                 media_queries.push(MediaQuery::never_matching());
++                let error = ContextualParseError::InvalidMediaFeature(
++                    input.slice_from(start_position), err);
++                let error_context = ParserErrorContext { error_reporter };
++                context.log_css_error(&error_context, start_location, error);
+             },
+         }
+ 
+         match input.next() {
+             Ok(&Token::Comma) => {},
+             Ok(_) => unreachable!(),
+             Err(_) => break,
+         }
+diff --git a/servo/components/style/stylesheets/rule_parser.rs b/servo/components/style/stylesheets/rule_parser.rs
+--- a/servo/components/style/stylesheets/rule_parser.rs
++++ b/servo/components/style/stylesheets/rule_parser.rs
+@@ -167,17 +167,18 @@ impl<'a, 'i, R: ParseErrorReporter> AtRu
+                     // "@import must be before any rule but @charset"
+                     self.had_hierarchy_error = true;
+                     return Err(StyleParseError::UnexpectedImportRule.into())
+                 }
+ 
+                 let url_string = input.expect_url_or_string()?.as_ref().to_owned();
+                 let specified_url = SpecifiedUrl::parse_from_string(url_string, &self.context)?;
+ 
+-                let media = parse_media_query_list(&self.context, input);
++                let media = parse_media_query_list(&self.context, input,
++                                                   self.error_context.error_reporter);
+                 let media = Arc::new(self.shared_lock.wrap(media));
+ 
+                 let loader =
+                     self.loader.expect("Expected a stylesheet loader for @import");
+ 
+                 let import_rule = loader.request_stylesheet(
+                     specified_url,
+                     location,
+@@ -330,17 +331,18 @@ impl<'a, 'b, 'i, R: ParseErrorReporter> 
+         &mut self,
+         name: CowRcStr<'i>,
+         input: &mut Parser<'i, 't>
+     ) -> Result<AtRuleType<AtRulePrelude, CssRule>, ParseError<'i>> {
+         let location = get_location_with_offset(input.current_source_location());
+ 
+         match_ignore_ascii_case! { &*name,
+             "media" => {
+-                let media_queries = parse_media_query_list(self.context, input);
++                let media_queries = parse_media_query_list(self.context, input,
++                                                           self.error_context.error_reporter);
+                 let arc = Arc::new(self.shared_lock.wrap(media_queries));
+                 Ok(AtRuleType::WithBlock(AtRulePrelude::Media(arc, location)))
+             },
+             "supports" => {
+                 let cond = SupportsCondition::parse(input)?;
+                 Ok(AtRuleType::WithBlock(AtRulePrelude::Supports(cond, location)))
+             },
+             "font-face" => {
+diff --git a/servo/ports/geckolib/error_reporter.rs b/servo/ports/geckolib/error_reporter.rs
+--- a/servo/ports/geckolib/error_reporter.rs
++++ b/servo/ports/geckolib/error_reporter.rs
+@@ -292,17 +292,18 @@ impl<'a> ErrorHelpers<'a> for Contextual
+             ContextualParseError::UnsupportedFontFaceDescriptor(s, err) |
+             ContextualParseError::UnsupportedFontFeatureValuesDescriptor(s, err) |
+             ContextualParseError::InvalidKeyframeRule(s, err) |
+             ContextualParseError::InvalidFontFeatureValuesRule(s, err) |
+             ContextualParseError::UnsupportedKeyframePropertyDeclaration(s, err) |
+             ContextualParseError::InvalidRule(s, err) |
+             ContextualParseError::UnsupportedRule(s, err) |
+             ContextualParseError::UnsupportedViewportDescriptorDeclaration(s, err) |
+-            ContextualParseError::UnsupportedCounterStyleDescriptorDeclaration(s, err) =>
++            ContextualParseError::UnsupportedCounterStyleDescriptorDeclaration(s, err) |
++            ContextualParseError::InvalidMediaFeature(s, err) =>
+                 (s.into(), err),
+             ContextualParseError::InvalidCounterStyleWithoutSymbols(s) |
+             ContextualParseError::InvalidCounterStyleNotEnoughSymbols(s) =>
+                 (s.into(), StyleParseError::UnspecifiedError.into()),
+             ContextualParseError::InvalidCounterStyleWithoutAdditiveSymbols |
+             ContextualParseError::InvalidCounterStyleExtendsWithSymbols |
+             ContextualParseError::InvalidCounterStyleExtendsWithAdditiveSymbols =>
+                 ("".into(), StyleParseError::UnspecifiedError.into())
+@@ -385,16 +386,18 @@ impl<'a> ErrorHelpers<'a> for Contextual
+                     CssParseError::Custom(SelectorParseError::EmptyNegation) =>
+                         Some(&b"PENegationBadArg\0"[..]),
+                     _ => None,
+                 };
+                 return (prefix, b"PEBadSelectorRSIgnored\0", Action::Nothing);
+             }
+             ContextualParseError::UnsupportedRule(..) =>
+                 (b"PEDeclDropped\0", Action::Nothing),
++            ContextualParseError::InvalidMediaFeature(..) =>
++                (b"PEMQExpectedFeatureName\0", Action::Nothing),
+             ContextualParseError::UnsupportedViewportDescriptorDeclaration(..) |
+             ContextualParseError::UnsupportedCounterStyleDescriptorDeclaration(..) |
+             ContextualParseError::InvalidCounterStyleWithoutSymbols(..) |
+             ContextualParseError::InvalidCounterStyleNotEnoughSymbols(..) |
+             ContextualParseError::InvalidCounterStyleWithoutAdditiveSymbols |
+             ContextualParseError::InvalidCounterStyleExtendsWithSymbols |
+             ContextualParseError::InvalidCounterStyleExtendsWithAdditiveSymbols |
+             ContextualParseError::UnsupportedFontFeatureValuesDescriptor(..) |
+diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
+--- a/servo/ports/geckolib/glue.rs
++++ b/servo/ports/geckolib/glue.rs
+@@ -2370,17 +2370,17 @@ pub extern "C" fn Servo_MediaList_SetTex
+     let text = unsafe { text.as_ref().unwrap().as_str_unchecked() };
+     let mut input = ParserInput::new(&text);
+     let mut parser = Parser::new(&mut input);
+     let url_data = unsafe { dummy_url_data() };
+     let context = ParserContext::new_for_cssom(url_data, Some(CssRuleType::Media),
+                                                PARSING_MODE_DEFAULT,
+                                                QuirksMode::NoQuirks);
+      write_locked_arc(list, |list: &mut MediaList| {
+-        *list = parse_media_query_list(&context, &mut parser);
++        *list = parse_media_query_list(&context, &mut parser, &NullReporter);
+     })
+ }
+ 
+ #[no_mangle]
+ pub extern "C" fn Servo_MediaList_GetLength(list: RawServoMediaListBorrowed) -> u32 {
+     read_locked_arc(list, |list: &MediaList| list.media_queries.len() as u32)
+ }
+ 
