@@ -6,7 +6,7 @@ Bug 1384225 - stylo: Error reporting for unknown media features. Tests. r?jdm
 diff --git a/layout/style/test/test_css_parse_error_smoketest.html b/layout/style/test/test_css_parse_error_smoketest.html
 --- a/layout/style/test/test_css_parse_error_smoketest.html
 +++ b/layout/style/test/test_css_parse_error_smoketest.html
-@@ -28,16 +28,19 @@
+@@ -28,16 +28,20 @@
  
      { css: "x| {}", error: "Unknown namespace prefix ‘x’.  Ruleset ignored due to bad selector." },
      { css: "a> {}", error: "Dangling combinator.  Ruleset ignored due to bad selector." },
@@ -18,6 +18,7 @@ diff --git a/layout/style/test/test_css_parse_error_smoketest.html b/layout/styl
 +
 +    { css: "@media (totally-unknown-feature) {}", error: "Expected media feature name but found ‘totally-unknown-feature’." },
 +    { css: "@media (min-width) {}", error: "Media features with min- or max- must have a value." },
++    { css: "@media (orientation landscape) {}", error: "Unrecognized at-rule or error parsing at-rule ‘landscape’.  Skipped to next declaration." },
    ];
  
    var test = -1;
