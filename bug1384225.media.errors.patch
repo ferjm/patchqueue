@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  14eea6bedcf3e2f46ea7c908e1ac9b7d256a42f0
+# Parent  632e42dca494ec3d90b70325d9c359f80cb3f38a
 Bug 1384225 - stylo: Error reporting for unknown media features. r?jdm
 
 diff --git a/servo/components/script/dom/cssmediarule.rs b/servo/components/script/dom/cssmediarule.rs
@@ -147,7 +147,7 @@ diff --git a/servo/components/script/dom/medialist.rs b/servo/components/script/
 diff --git a/servo/components/script/dom/window.rs b/servo/components/script/dom/window.rs
 --- a/servo/components/script/dom/window.rs
 +++ b/servo/components/script/dom/window.rs
-@@ -1009,17 +1009,18 @@ impl WindowMethods for Window {
+@@ -1006,17 +1006,18 @@ impl WindowMethods for Window {
      fn MatchMedia(&self, query: DOMString) -> Root<MediaQueryList> {
          let mut input = ParserInput::new(&query);
          let mut parser = Parser::new(&mut input);
@@ -315,7 +315,7 @@ diff --git a/servo/components/style/media_queries.rs b/servo/components/style/me
 diff --git a/servo/components/style/stylesheets/rule_parser.rs b/servo/components/style/stylesheets/rule_parser.rs
 --- a/servo/components/style/stylesheets/rule_parser.rs
 +++ b/servo/components/style/stylesheets/rule_parser.rs
-@@ -167,17 +167,18 @@ impl<'a, 'i, R: ParseErrorReporter> AtRu
+@@ -173,17 +173,18 @@ impl<'a, 'i, R: ParseErrorReporter> AtRu
                      // "@import must be before any rule but @charset"
                      self.had_hierarchy_error = true;
                      return Err(StyleParseError::UnexpectedImportRule.into())
@@ -329,17 +329,17 @@ diff --git a/servo/components/style/stylesheets/rule_parser.rs b/servo/component
 +                                                   self.error_context.error_reporter);
                  let media = Arc::new(self.shared_lock.wrap(media));
  
-                 let loader =
-                     self.loader.expect("Expected a stylesheet loader for @import");
- 
-                 let import_rule = loader.request_stylesheet(
-                     specified_url,
-                     location,
-@@ -330,17 +331,18 @@ impl<'a, 'b, 'i, R: ParseErrorReporter> 
+                 let prelude = AtRuleNonBlockPrelude::Import(specified_url, media, location);
+                 return Ok(AtRuleType::WithoutBlock(prelude));
+             },
+             "namespace" => {
+                 if self.state > State::Namespaces {
+                     // "@namespace must be before any rule but @charset and @import"
+@@ -349,17 +350,18 @@ impl<'a, 'b, 'i, R: ParseErrorReporter> 
          &mut self,
          name: CowRcStr<'i>,
          input: &mut Parser<'i, 't>
-     ) -> Result<AtRuleType<AtRulePrelude, CssRule>, ParseError<'i>> {
+     ) -> Result<AtRuleType<AtRuleNonBlockPrelude, AtRuleBlockPrelude>, ParseError<'i>> {
          let location = get_location_with_offset(input.current_source_location());
  
          match_ignore_ascii_case! { &*name,
@@ -348,11 +348,11 @@ diff --git a/servo/components/style/stylesheets/rule_parser.rs b/servo/component
 +                let media_queries = parse_media_query_list(self.context, input,
 +                                                           self.error_context.error_reporter);
                  let arc = Arc::new(self.shared_lock.wrap(media_queries));
-                 Ok(AtRuleType::WithBlock(AtRulePrelude::Media(arc, location)))
+                 Ok(AtRuleType::WithBlock(AtRuleBlockPrelude::Media(arc, location)))
              },
              "supports" => {
                  let cond = SupportsCondition::parse(input)?;
-                 Ok(AtRuleType::WithBlock(AtRulePrelude::Supports(cond, location)))
+                 Ok(AtRuleType::WithBlock(AtRuleBlockPrelude::Supports(cond, location)))
              },
              "font-face" => {
 diff --git a/servo/ports/geckolib/error_reporter.rs b/servo/ports/geckolib/error_reporter.rs
@@ -423,7 +423,7 @@ diff --git a/servo/ports/geckolib/error_reporter.rs b/servo/ports/geckolib/error
 diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 --- a/servo/ports/geckolib/glue.rs
 +++ b/servo/ports/geckolib/glue.rs
-@@ -2370,17 +2370,17 @@ pub extern "C" fn Servo_MediaList_SetTex
+@@ -2369,17 +2369,17 @@ pub extern "C" fn Servo_MediaList_SetTex
      let text = unsafe { text.as_ref().unwrap().as_str_unchecked() };
      let mut input = ParserInput::new(&text);
      let mut parser = Parser::new(&mut input);
