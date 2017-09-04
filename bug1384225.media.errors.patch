@@ -239,6 +239,69 @@ diff --git a/servo/components/style/error_reporting.rs b/servo/components/style/
  pub trait ParseErrorReporter {
      /// Called when the style engine detects an error.
      ///
+diff --git a/servo/components/style/gecko/media_queries.rs b/servo/components/style/gecko/media_queries.rs
+--- a/servo/components/style/gecko/media_queries.rs
++++ b/servo/components/style/gecko/media_queries.rs
+@@ -481,17 +481,17 @@ impl Expression {
+ 
+     /// Parse a media expression of the form:
+     ///
+     /// ```
+     /// (media-feature: media-value)
+     /// ```
+     pub fn parse<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>)
+                          -> Result<Self, ParseError<'i>> {
+-        input.expect_parenthesis_block()?;
++        input.expect_parenthesis_block().map_err(|_| StyleParseError::MediaQueryExpectedExpressionStart)?;
+         input.parse_nested_block(|input| {
+             // FIXME: remove extra indented block when lifetimes are non-lexical
+             let feature;
+             let range;
+             {
+                 let ident = input.expect_ident()?;
+ 
+                 let mut flags = 0;
+@@ -523,18 +523,19 @@ impl Expression {
+                         None => Err(()),
+                     }
+                 };
+ 
+                 match result {
+                     Ok((f, r)) => {
+                         feature = f;
+                         range = r;
+-                    }
+-                    Err(()) => return Err(SelectorParseError::UnexpectedIdent(ident.clone()).into()),
++                    },
++                    Err(()) =>
++                        return Err(StyleParseError::MediaQueryExpectedFeatureName.into()),
+                 }
+ 
+                 if (feature.mReqFlags & !flags) != 0 {
+                     return Err(SelectorParseError::UnexpectedIdent(ident.clone()).into());
+                 }
+ 
+                 if range != nsMediaExpression_Range::eEqual &&
+                     feature.mRangeType != nsMediaFeature_RangeType::eMinMaxAllowed {
+@@ -624,16 +625,18 @@ impl Expression {
+ 
+                     MediaExpressionValue::Enumerated(value)
+                 }
+                 nsMediaFeature_ValueType::eIdent => {
+                     MediaExpressionValue::Ident(input.expect_ident()?.as_ref().to_owned())
+                 }
+             };
+ 
++            println!("VALUE {:?}", value);
++
+             Ok(Expression::new(feature, Some(value), range))
+         })
+     }
+ 
+     /// Returns whether this media query evaluates to true for the given device.
+     pub fn matches(&self, device: &Device, quirks_mode: QuirksMode) -> bool {
+         let mut css_value = nsCSSValue::null();
+         unsafe {
 diff --git a/servo/components/style/media_queries.rs b/servo/components/style/media_queries.rs
 --- a/servo/components/style/media_queries.rs
 +++ b/servo/components/style/media_queries.rs
@@ -265,7 +328,7 @@ diff --git a/servo/components/style/media_queries.rs b/servo/components/style/me
  use values::CustomIdent;
  
  #[cfg(feature = "servo")]
-@@ -235,29 +237,44 @@ impl MediaQuery {
+@@ -235,29 +237,45 @@ impl MediaQuery {
  }
  
  /// Parse a media query list from CSS.
@@ -294,9 +357,10 @@ diff --git a/servo/components/style/media_queries.rs b/servo/components/style/me
              },
 -            Err(..) => {
 +            Err(err) => {
++                println!("ERR {:?}", err);
                  media_queries.push(MediaQuery::never_matching());
 +                let error = match err {
-+                    CssParseError::Custom(SelectorParseError::UnexpectedIdent(_)) =>
++                    CssParseError::Custom(SelectorParseError::Custom(StyleParseError::MediaQueryExpectedFeatureName)) =>
 +                        ContextualParseError::MediaQueryExpectedFeatureName(input.slice_from(start_position), err),
 +                    CssParseError::Custom(SelectorParseError::Custom(StyleParseError::RangedExpressionWithNoValue)) =>
 +                        ContextualParseError::MediaQueryNoMinMaxWithoutValue,
@@ -355,6 +419,32 @@ diff --git a/servo/components/style/stylesheets/rule_parser.rs b/servo/component
                  Ok(AtRuleType::WithBlock(AtRuleBlockPrelude::Supports(cond, location)))
              },
              "font-face" => {
+diff --git a/servo/components/style_traits/lib.rs b/servo/components/style_traits/lib.rs
+--- a/servo/components/style_traits/lib.rs
++++ b/servo/components/style_traits/lib.rs
+@@ -102,16 +102,22 @@ pub enum StyleParseError<'i> {
+     /// Unexpected closing curly bracket in a DVB.
+     UnbalancedCloseCurlyBracketInDeclarationValueBlock,
+     /// A property declaration parsing error.
+     PropertyDeclaration(PropertyDeclarationParseError<'i>),
+     /// A property declaration value had input remaining after successfully parsing.
+     PropertyDeclarationValueNotExhausted,
+     /// An unexpected dimension token was encountered.
+     UnexpectedDimension(CowRcStr<'i>),
++    /// Missing media query expression start.
++    MediaQueryExpectedExpressionStart,
++    /// Missing or invalid media feature name.
++    MediaQueryExpectedFeatureName,
++    /// Missing or invalid media feature value.
++    MediaQueryExpectedFeatureValue,
+     /// A media query using a ranged expression with no value was encountered.
+     RangedExpressionWithNoValue,
+     /// A function was encountered that was not expected.
+     UnexpectedFunction(CowRcStr<'i>),
+     /// @namespace must be before any rule but @charset and @import
+     UnexpectedNamespaceRule,
+     /// @import must be before any rule but @charset
+     UnexpectedImportRule,
 diff --git a/servo/ports/geckolib/error_reporter.rs b/servo/ports/geckolib/error_reporter.rs
 --- a/servo/ports/geckolib/error_reporter.rs
 +++ b/servo/ports/geckolib/error_reporter.rs
