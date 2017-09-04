@@ -189,7 +189,7 @@ diff --git a/servo/components/style/error_reporting.rs b/servo/components/style/
      /// A keyframe property declaration was not recognized.
      UnsupportedKeyframePropertyDeclaration(&'a str, ParseError<'a>),
      /// A rule was invalid for some reason.
-@@ -38,17 +38,19 @@ pub enum ContextualParseError<'a> {
+@@ -38,17 +38,23 @@ pub enum ContextualParseError<'a> {
      InvalidCounterStyleWithoutSymbols(String),
      /// A counter style rule had less than two symbols.
      InvalidCounterStyleNotEnoughSymbols(String),
@@ -200,8 +200,12 @@ diff --git a/servo/components/style/error_reporting.rs b/servo/components/style/
      /// A counter style rule had extends with additive-symbols.
 -    InvalidCounterStyleExtendsWithAdditiveSymbols
 +    InvalidCounterStyleExtendsWithAdditiveSymbols,
-+    /// A media feature was not recognized.
-+    InvalidMediaFeature(&'a str, ParseError<'a>),
++    /// A media feature name was not recognized.
++    MediaQueryExpectedFeatureName(&'a str, ParseError<'a>),
++    /// A media feature with min- or max- had no value.
++    MediaQueryNoMinMaxWithoutValue,
++    /// Unrecognized at-rule or error parsing at-rule.
++    UnknownAtRule(&'a str, ParseError<'a>),
  }
  
  impl<'a> ContextualParseError<'a> {
@@ -210,7 +214,7 @@ diff --git a/servo/components/style/error_reporting.rs b/servo/components/style/
          fn token_to_str(t: &Token) -> String {
              match *t {
                  Token::Ident(ref i) => format!("identifier {}", i),
-@@ -139,16 +141,19 @@ impl<'a> ContextualParseError<'a> {
+@@ -139,16 +145,24 @@ impl<'a> ContextualParseError<'a> {
              ContextualParseError::InvalidCounterStyleNotEnoughSymbols(ref system) =>
                  format!("Invalid @counter-style rule: 'system: {}' less than two 'symbols'", system),
              ContextualParseError::InvalidCounterStyleWithoutAdditiveSymbols =>
@@ -219,8 +223,13 @@ diff --git a/servo/components/style/error_reporting.rs b/servo/components/style/
                  "Invalid @counter-style rule: 'system: extends …' with 'symbols'".into(),
              ContextualParseError::InvalidCounterStyleExtendsWithAdditiveSymbols =>
                  "Invalid @counter-style rule: 'system: extends …' with 'additive-symbols'".into(),
-+            ContextualParseError::InvalidMediaFeature(feature, ref err) =>
++            ContextualParseError::MediaQueryExpectedFeatureName(feature, ref err) =>
 +                format!("Expected media feature name but found: '{}', {}", feature,
++                        parse_error_to_str(err)),
++            ContextualParseError::MediaQueryNoMinMaxWithoutValue =>
++                "Media features with min- or max- must have a value".into(),
++            ContextualParseError::UnknownAtRule(at_rule, ref err) =>
++                format!("Unrecognized at-rule or error parsing at-rule '{}', {}", at_rule,
 +                        parse_error_to_str(err)),
          }
      }
@@ -233,7 +242,8 @@ diff --git a/servo/components/style/error_reporting.rs b/servo/components/style/
 diff --git a/servo/components/style/media_queries.rs b/servo/components/style/media_queries.rs
 --- a/servo/components/style/media_queries.rs
 +++ b/servo/components/style/media_queries.rs
-@@ -4,17 +4,18 @@
+@@ -3,18 +3,20 @@
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
  
  //! [Media queries][mq].
  //!
@@ -241,8 +251,10 @@ diff --git a/servo/components/style/media_queries.rs b/servo/components/style/me
  
  use Atom;
  use context::QuirksMode;
- use cssparser::{Delimiter, Parser, Token, ParserInput};
+-use cssparser::{Delimiter, Parser, Token, ParserInput};
 -use parser::ParserContext;
++use cssparser::{Delimiter, ParseError as CssParseError, Parser};
++use cssparser::{Token, ParserInput};
 +use error_reporting::{ContextualParseError, ParseErrorReporter};
 +use parser::{ParserContext, ParserErrorContext};
  use selectors::parser::SelectorParseError;
@@ -253,7 +265,7 @@ diff --git a/servo/components/style/media_queries.rs b/servo/components/style/me
  use values::CustomIdent;
  
  #[cfg(feature = "servo")]
-@@ -235,29 +236,40 @@ impl MediaQuery {
+@@ -235,29 +237,44 @@ impl MediaQuery {
  }
  
  /// Parse a media query list from CSS.
@@ -282,10 +294,14 @@ diff --git a/servo/components/style/media_queries.rs b/servo/components/style/me
              },
 -            Err(..) => {
 +            Err(err) => {
-+                println!("ERRRRRRRRR {:?}", err);
                  media_queries.push(MediaQuery::never_matching());
-+                let error = ContextualParseError::InvalidMediaFeature(
-+                    input.slice_from(start_position), err);
++                let error = match err {
++                    CssParseError::Custom(SelectorParseError::UnexpectedIdent(_)) =>
++                        ContextualParseError::MediaQueryExpectedFeatureName(input.slice_from(start_position), err),
++                    CssParseError::Custom(SelectorParseError::Custom(StyleParseError::RangedExpressionWithNoValue)) =>
++                        ContextualParseError::MediaQueryNoMinMaxWithoutValue,
++                    _ => ContextualParseError::UnknownAtRule(input.slice_from(start_position), err),
++                };
 +                let error_context = ParserErrorContext { error_reporter };
 +                context.log_css_error(&error_context, start_location, error);
              },
@@ -342,7 +358,7 @@ diff --git a/servo/components/style/stylesheets/rule_parser.rs b/servo/component
 diff --git a/servo/ports/geckolib/error_reporter.rs b/servo/ports/geckolib/error_reporter.rs
 --- a/servo/ports/geckolib/error_reporter.rs
 +++ b/servo/ports/geckolib/error_reporter.rs
-@@ -292,17 +292,18 @@ impl<'a> ErrorHelpers<'a> for Contextual
+@@ -292,24 +292,27 @@ impl<'a> ErrorHelpers<'a> for Contextual
              ContextualParseError::UnsupportedFontFaceDescriptor(s, err) |
              ContextualParseError::UnsupportedFontFeatureValuesDescriptor(s, err) |
              ContextualParseError::InvalidKeyframeRule(s, err) |
@@ -353,16 +369,26 @@ diff --git a/servo/ports/geckolib/error_reporter.rs b/servo/ports/geckolib/error
              ContextualParseError::UnsupportedViewportDescriptorDeclaration(s, err) |
 -            ContextualParseError::UnsupportedCounterStyleDescriptorDeclaration(s, err) =>
 +            ContextualParseError::UnsupportedCounterStyleDescriptorDeclaration(s, err) |
-+            ContextualParseError::InvalidMediaFeature(s, err) =>
++            ContextualParseError::MediaQueryExpectedFeatureName(s, err) |
++            ContextualParseError::UnknownAtRule(s, err) =>
                  (s.into(), err),
              ContextualParseError::InvalidCounterStyleWithoutSymbols(s) |
              ContextualParseError::InvalidCounterStyleNotEnoughSymbols(s) =>
                  (s.into(), StyleParseError::UnspecifiedError.into()),
              ContextualParseError::InvalidCounterStyleWithoutAdditiveSymbols |
              ContextualParseError::InvalidCounterStyleExtendsWithSymbols |
-             ContextualParseError::InvalidCounterStyleExtendsWithAdditiveSymbols =>
+-            ContextualParseError::InvalidCounterStyleExtendsWithAdditiveSymbols =>
++            ContextualParseError::InvalidCounterStyleExtendsWithAdditiveSymbols |
++            ContextualParseError::MediaQueryNoMinMaxWithoutValue =>
                  ("".into(), StyleParseError::UnspecifiedError.into())
-@@ -385,16 +386,18 @@ impl<'a> ErrorHelpers<'a> for Contextual
+         }
+     }
+ 
+     fn error_params(self) -> ErrorParams<'a> {
+         let (s, error) = self.error_data();
+         extract_error_params(error).unwrap_or_else(|| ErrorParams {
+             main_param: Some(ErrorString::Snippet(s)),
+@@ -385,25 +388,30 @@ impl<'a> ErrorHelpers<'a> for Contextual
                      CssParseError::Custom(SelectorParseError::EmptyNegation) =>
                          Some(&b"PENegationBadArg\0"[..]),
                      _ => None,
@@ -371,8 +397,10 @@ diff --git a/servo/ports/geckolib/error_reporter.rs b/servo/ports/geckolib/error
              }
              ContextualParseError::UnsupportedRule(..) =>
                  (b"PEDeclDropped\0", Action::Nothing),
-+            ContextualParseError::InvalidMediaFeature(..) =>
++            ContextualParseError::MediaQueryExpectedFeatureName(..) =>
 +                (b"PEMQExpectedFeatureName\0", Action::Nothing),
++            ContextualParseError::MediaQueryNoMinMaxWithoutValue =>
++                (b"PEMQNoMinMaxWithoutValue\0", Action::Nothing),
              ContextualParseError::UnsupportedViewportDescriptorDeclaration(..) |
              ContextualParseError::UnsupportedCounterStyleDescriptorDeclaration(..) |
              ContextualParseError::InvalidCounterStyleWithoutSymbols(..) |
@@ -381,6 +409,17 @@ diff --git a/servo/ports/geckolib/error_reporter.rs b/servo/ports/geckolib/error
              ContextualParseError::InvalidCounterStyleExtendsWithSymbols |
              ContextualParseError::InvalidCounterStyleExtendsWithAdditiveSymbols |
              ContextualParseError::UnsupportedFontFeatureValuesDescriptor(..) |
+-            ContextualParseError::InvalidFontFeatureValuesRule(..) =>
++            ContextualParseError::InvalidFontFeatureValuesRule(..) |
++            ContextualParseError::UnknownAtRule(..) =>
+                 (b"PEUnknownAtRule\0", Action::Skip),
+         };
+         (None, msg, action)
+     }
+ }
+ 
+ impl ParseErrorReporter for ErrorReporter {
+     fn report_error(&self,
 diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 --- a/servo/ports/geckolib/glue.rs
 +++ b/servo/ports/geckolib/glue.rs
