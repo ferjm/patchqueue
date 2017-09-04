@@ -300,7 +300,7 @@ diff --git a/servo/components/style/media_queries.rs b/servo/components/style/me
 +                        ContextualParseError::MediaQueryExpectedFeatureName(input.slice_from(start_position), err),
 +                    CssParseError::Custom(SelectorParseError::Custom(StyleParseError::RangedExpressionWithNoValue)) =>
 +                        ContextualParseError::MediaQueryNoMinMaxWithoutValue,
-+                    _ => ContextualParseError::UnknownAtRule(input.slice_from(start_position), err),
++                    _ => ContextualParseError::UnknownAtRule("@media", err),
 +                };
 +                let error_context = ParserErrorContext { error_reporter };
 +                context.log_css_error(&error_context, start_location, error);
