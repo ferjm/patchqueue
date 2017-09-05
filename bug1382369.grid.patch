@@ -1,20 +1,20 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  04b6be50a2526c7a26a63715f441c47e1aa1f9be
+# Parent  3d07d65ecf977feebf87079d22815fb461012b1e
 Bug 1382369 - stylo: store specified value of grid layout repeat() function
 
 diff --git a/servo/components/style/gecko/conversions.rs b/servo/components/style/gecko/conversions.rs
 --- a/servo/components/style/gecko/conversions.rs
 +++ b/servo/components/style/gecko/conversions.rs
-@@ -14,17 +14,17 @@ use gecko_bindings::bindings::{Gecko_Cre
- use gecko_bindings::bindings::{Gecko_InitializeImageCropRect, Gecko_SetImageElement};
- use gecko_bindings::structs::{nsCSSUnit, nsStyleCoord_CalcValue, nsStyleImage};
- use gecko_bindings::structs::{nsresult, SheetType};
+@@ -15,17 +15,17 @@ use gecko_bindings::bindings::{Gecko_Ini
+ use gecko_bindings::structs::{self, nsCSSUnit, nsStyleCoord_CalcValue};
+ use gecko_bindings::structs::{nsStyleImage, nsresult, SheetType};
  use gecko_bindings::sugar::ns_style_coord::{CoordDataValue, CoordData, CoordDataMut};
  use std::f32::consts::PI;
  use stylesheets::{Origin, RulesMutateError};
  use values::computed::{Angle, CalcLengthOrPercentage, Gradient, Image};
  use values::computed::{LengthOrPercentage, LengthOrPercentageOrAuto, Percentage};
+ use values::generics::box_::VerticalAlign;
 -use values::generics::grid::TrackSize;
 +use values::generics::grid::{TrackListValue, TrackSize};
  use values::generics::image::{CompatMode, Image as GenericImage, GradientItem};
@@ -25,7 +25,7 @@ diff --git a/servo/components/style/gecko/conversions.rs b/servo/components/styl
      fn from(other: CalcLengthOrPercentage) -> nsStyleCoord_CalcValue {
          let has_percentage = other.percentage.is_some();
          nsStyleCoord_CalcValue {
-@@ -890,16 +890,33 @@ impl TrackSize<LengthOrPercentage> {
+@@ -891,16 +891,33 @@ impl TrackSize<LengthOrPercentage> {
              TrackSize::Minmax(ref min, ref max) => {
                  min.to_gecko_style_coord(gecko_min);
                  max.to_gecko_style_coord(gecko_max);
