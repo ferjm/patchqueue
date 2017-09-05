@@ -142,6 +142,81 @@ diff --git a/servo/components/style/properties/shorthand/position.mako.rs b/serv
                  string = match input.try(|i| i.expect_string().map(|s| s.as_ref().into())) {
                      Ok(s) => s,
                      _ => {      // only the named area determines whether we should bail out
+@@ -375,57 +376,67 @@
+                 if areas.strings.len() != template_rows.track_list_len() {
+                     return Ok(());
+                 }
+ 
+                 let track_list = match *template_rows {
+                     GenericGridTemplateComponent::TrackList(ref list) => {
+                         // We should fail if there is a `repeat` function. `grid` and
+                         // `grid-template` shorthands doesn't accept that. Only longhand accepts.
+-                        if list.auto_repeat.is_some() {
++                        if list.auto_repeat.is_some() ||
++                           list.values.iter().any(|v| match *v {
++                               TrackListValue::TrackRepeat(_) => true,
++                               _ => false,
++                           }) {
+                             return Ok(());
+                         }
+                         list
+                     },
+                     // Others template components shouldn't exist with normal shorthand values.
+                     // But if we need to serialize a group of longhand sub-properties for
+                     // the shorthand, we should be able to return empty string instead of crashing.
+                     _ => return Ok(()),
+                 };
+ 
+                 // We need to check some values that longhand accepts but shorthands don't.
+                 match *template_columns {
+                     // We should fail if there is a `repeat` function. `grid` and
+                     // `grid-template` shorthands doesn't accept that. Only longhand accepts that.
+-                    GenericGridTemplateComponent::TrackList(ref list) if list.auto_repeat.is_some() => {
+-                        return Ok(());
++                    GenericGridTemplateComponent::TrackList(ref list) => {
++                        if list.auto_repeat.is_some() ||
++                           list.values.iter().any(|v| match *v {
++                               TrackListValue::TrackRepeat(_) => true,
++                               _ => false,
++                           }) {
++                            return Ok(());
++                        }
+                     },
+                     // Also the shorthands don't accept subgrids unlike longhand.
+                     // We should fail without an error here.
+                     GenericGridTemplateComponent::Subgrid(_) => {
+                         return Ok(());
+                     },
+                     _ => {},
+                 }
+ 
+                 let mut names_iter = track_list.line_names.iter();
+-                for (((i, string), names), size) in areas.strings.iter().enumerate()
+-                                                                 .zip(&mut names_iter)
+-                                                                 .zip(track_list.values.iter()) {
++                for (((i, string), names), value) in areas.strings.iter().enumerate()
++                                                                  .zip(&mut names_iter)
++                                                                  .zip(track_list.values.iter()) {
+                     if i > 0 {
+                         dest.write_str(" ")?;
+                     }
+ 
+                     if !names.is_empty() {
+                         concat_serialize_idents("[", "] ", names, " ", dest)?;
+                     }
+ 
+                     string.to_css(dest)?;
+                     dest.write_str(" ")?;
+-                    size.to_css(dest)?;
++                    value.to_css(dest)?;
+                 }
+ 
+                 if let Some(names) = names_iter.next() {
+                     concat_serialize_idents(" [", "]", names, " ", dest)?;
+                 }
+ 
+                 if let GenericGridTemplateComponent::TrackList(ref list) = *template_columns {
+                     dest.write_str(" / ")?;
 diff --git a/servo/components/style/values/generics/grid.rs b/servo/components/style/values/generics/grid.rs
 --- a/servo/components/style/values/generics/grid.rs
 +++ b/servo/components/style/values/generics/grid.rs
