@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  632e42dca494ec3d90b70325d9c359f80cb3f38a
+# Parent  3ecda4678c49ca255c38b1697142b9118cdd27e7
 Bug 1384225 - stylo: Error reporting for unknown media features. r?jdm
 
 diff --git a/servo/components/script/dom/cssmediarule.rs b/servo/components/script/dom/cssmediarule.rs
@@ -170,7 +170,7 @@ diff --git a/servo/components/script/dom/window.rs b/servo/components/script/dom
 diff --git a/servo/components/style/error_reporting.rs b/servo/components/style/error_reporting.rs
 --- a/servo/components/style/error_reporting.rs
 +++ b/servo/components/style/error_reporting.rs
-@@ -13,17 +13,17 @@ use style_traits::ParseError;
+@@ -14,17 +14,17 @@ use style_traits::ParseError;
  use stylesheets::UrlExtraData;
  
  /// Errors that can be encountered while parsing CSS.
@@ -189,7 +189,7 @@ diff --git a/servo/components/style/error_reporting.rs b/servo/components/style/
      /// A keyframe property declaration was not recognized.
      UnsupportedKeyframePropertyDeclaration(&'a str, ParseError<'a>),
      /// A rule was invalid for some reason.
-@@ -38,17 +38,25 @@ pub enum ContextualParseError<'a> {
+@@ -39,17 +39,25 @@ pub enum ContextualParseError<'a> {
      InvalidCounterStyleWithoutSymbols(String),
      /// A counter style rule had less than two symbols.
      InvalidCounterStyleNotEnoughSymbols(String),
@@ -210,31 +210,35 @@ diff --git a/servo/components/style/error_reporting.rs b/servo/components/style/
 +    UnknownAtRule(&'a str, ParseError<'a>),
  }
  
- impl<'a> ContextualParseError<'a> {
-     /// Turn a parse error into a string representation.
-     pub fn to_string(&self) -> String {
-         fn token_to_str(t: &Token) -> String {
+ impl<'a> fmt::Display for ContextualParseError<'a> {
+     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+         fn token_to_str(t: &Token, f: &mut fmt::Formatter) -> fmt::Result {
              match *t {
-                 Token::Ident(ref i) => format!("identifier {}", i),
-@@ -139,16 +147,26 @@ impl<'a> ContextualParseError<'a> {
-             ContextualParseError::InvalidCounterStyleNotEnoughSymbols(ref system) =>
-                 format!("Invalid @counter-style rule: 'system: {}' less than two 'symbols'", system),
-             ContextualParseError::InvalidCounterStyleWithoutAdditiveSymbols =>
-                 "Invalid @counter-style rule: 'system: additive' without 'additive-symbols'".into(),
-             ContextualParseError::InvalidCounterStyleExtendsWithSymbols =>
-                 "Invalid @counter-style rule: 'system: extends …' with 'symbols'".into(),
-             ContextualParseError::InvalidCounterStyleExtendsWithAdditiveSymbols =>
-                 "Invalid @counter-style rule: 'system: extends …' with 'additive-symbols'".into(),
-+            ContextualParseError::MediaQueryExpectedFeatureName(feature, ref err) =>
-+                format!("Expected media feature name but found: '{}', {}", feature,
-+                        parse_error_to_str(err)),
-+            ContextualParseError::MediaQueryExpectedFeatureValue =>
-+                "Found invalid value for media feature".into(),
-+            ContextualParseError::MediaQueryNoMinMaxWithoutValue =>
-+                "Media features with min- or max- must have a value".into(),
-+            ContextualParseError::UnknownAtRule(at_rule, ref err) =>
-+                format!("Unrecognized at-rule or error parsing at-rule '{}', {}", at_rule,
-+                        parse_error_to_str(err)),
+                 Token::Ident(ref i) => write!(f, "identifier {}", i),
+                 Token::AtKeyword(ref kw) => write!(f, "keyword @{}", kw),
+@@ -163,16 +171,30 @@ impl<'a> fmt::Display for ContextualPars
+                 write!(f, "Invalid @counter-style rule: 'system: additive' without 'additive-symbols'")
+             }
+             ContextualParseError::InvalidCounterStyleExtendsWithSymbols => {
+                 write!(f, "Invalid @counter-style rule: 'system: extends …' with 'symbols'")
+             }
+             ContextualParseError::InvalidCounterStyleExtendsWithAdditiveSymbols => {
+                 write!(f, "Invalid @counter-style rule: 'system: extends …' with 'additive-symbols'")
+             }
++            ContextualParseError::MediaQueryExpectedFeatureName(feature, ref err) => {
++                write!(f, "Expected media feature name but found: '{}', ", feature)?;
++                parse_error_to_str(err, f)
++            }
++            ContextualParseError::MediaQueryExpectedFeatureValue => {
++                write!(f, "Found invalid value for media feature")
++            }
++            ContextualParseError::MediaQueryNoMinMaxWithoutValue => {
++                write!(f, "Media features with min- or max- must have a value")
++            }
++            ContextualParseError::UnknownAtRule(at_rule, ref err) => {
++                write!(f, "Unrecognized at-rule or error parsing at-rule '{}', ", at_rule)?;
++                parse_error_to_str(err, f)
++            }
          }
      }
  }
@@ -246,7 +250,7 @@ diff --git a/servo/components/style/error_reporting.rs b/servo/components/style/
 diff --git a/servo/components/style/gecko/media_queries.rs b/servo/components/style/gecko/media_queries.rs
 --- a/servo/components/style/gecko/media_queries.rs
 +++ b/servo/components/style/gecko/media_queries.rs
-@@ -523,18 +523,19 @@ impl Expression {
+@@ -525,18 +525,19 @@ impl Expression {
                          None => Err(()),
                      }
                  };
@@ -268,7 +272,7 @@ diff --git a/servo/components/style/gecko/media_queries.rs b/servo/components/st
  
                  if range != nsMediaExpression_Range::eEqual &&
                      feature.mRangeType != nsMediaFeature_RangeType::eMinMaxAllowed {
-@@ -557,51 +558,51 @@ impl Expression {
+@@ -559,51 +560,51 @@ impl Expression {
              let value = match feature.mValueType {
                  nsMediaFeature_ValueType::eLength => {
                      let length = Length::parse_non_negative(context, input)?;
@@ -325,7 +329,7 @@ diff --git a/servo/components/style/gecko/media_queries.rs b/servo/components/st
                  }
                  nsMediaFeature_ValueType::eEnumerated => {
                      let keyword = input.expect_ident()?;
-@@ -614,17 +615,17 @@ impl Expression {
+@@ -616,17 +617,17 @@ impl Expression {
                          *feature.mData.mKeywordTable.as_ref()
                      };
  
@@ -489,7 +493,7 @@ diff --git a/servo/components/style_traits/lib.rs b/servo/components/style_trait
 diff --git a/servo/ports/geckolib/error_reporter.rs b/servo/ports/geckolib/error_reporter.rs
 --- a/servo/ports/geckolib/error_reporter.rs
 +++ b/servo/ports/geckolib/error_reporter.rs
-@@ -292,24 +292,28 @@ impl<'a> ErrorHelpers<'a> for Contextual
+@@ -183,24 +183,28 @@ impl<'a> ErrorHelpers<'a> for Contextual
              ContextualParseError::UnsupportedFontFaceDescriptor(s, err) |
              ContextualParseError::UnsupportedFontFeatureValuesDescriptor(s, err) |
              ContextualParseError::InvalidKeyframeRule(s, err) |
@@ -520,7 +524,7 @@ diff --git a/servo/ports/geckolib/error_reporter.rs b/servo/ports/geckolib/error
          let (s, error) = self.error_data();
          extract_error_params(error).unwrap_or_else(|| ErrorParams {
              main_param: Some(ErrorString::Snippet(s)),
-@@ -385,25 +389,32 @@ impl<'a> ErrorHelpers<'a> for Contextual
+@@ -276,25 +280,32 @@ impl<'a> ErrorHelpers<'a> for Contextual
                      CssParseError::Custom(SelectorParseError::EmptyNegation) =>
                          Some(&b"PENegationBadArg\0"[..]),
                      _ => None,
@@ -557,7 +561,7 @@ diff --git a/servo/ports/geckolib/error_reporter.rs b/servo/ports/geckolib/error
 diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 --- a/servo/ports/geckolib/glue.rs
 +++ b/servo/ports/geckolib/glue.rs
-@@ -2369,17 +2369,17 @@ pub extern "C" fn Servo_MediaList_SetTex
+@@ -2388,17 +2388,17 @@ pub extern "C" fn Servo_MediaList_SetTex
      let text = unsafe { text.as_ref().unwrap().as_str_unchecked() };
      let mut input = ParserInput::new(&text);
      let mut parser = Parser::new(&mut input);
