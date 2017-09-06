@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  a68e8607a4ea2561840815962133f60d5ef10275
+# Parent  c1b934aa91686b15669a0f01bbd62ef3b1ea843d
 Bug 1382369 - stylo: store specified value of grid layout repeat() function. Tests. r?emilio
 
 diff --git a/layout/style/test/test_grid_shorthand_serialization.html b/layout/style/test/test_grid_shorthand_serialization.html
@@ -35,14 +35,14 @@ diff --git a/layout/style/test/test_grid_shorthand_serialization.html b/layout/s
          gridTemplateAreas: "\"a\"",
          gridTemplateRows: "[foo] repeat(1, 20px) [bar]",
 -        shorthand: "[foo] \"a\" 20px [bar]",
-+        shorthand: isStylo ? "[foo] \"a\" repeat(1, 20px) [bar]" : "[foo] \"a\" 20px [bar]",
++        shorthand: isStylo ? "" : "[foo] \"a\" 20px [bar]",
      },
      {
          gridTemplateAreas: "\"a a\"",
          gridTemplateColumns: "repeat(2, 100px)",
          gridTemplateRows: "auto",
 -        shorthand: "\"a a\" auto / 100px 100px",
-+        shorthand: isStylo ? "\"a a\" auto / repeat(2, 100px)" : "\"a a\" auto / 100px 100px",
++        shorthand: isStylo ? "" : "\"a a\" auto / 100px 100px",
      },
      // Combinations of longhands that make the shorthand non-serializable:
      {
