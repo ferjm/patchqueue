@@ -1,7 +1,7 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
 # Parent  c1b934aa91686b15669a0f01bbd62ef3b1ea843d
-Bug 1382369 - stylo: store specified value of grid layout repeat() function. Tests. r?emilio
+Bug 1382369 - stylo: store specified value of grid layout repeat() function. Tests. r?mats
 
 diff --git a/layout/style/test/test_grid_shorthand_serialization.html b/layout/style/test/test_grid_shorthand_serialization.html
 --- a/layout/style/test/test_grid_shorthand_serialization.html
