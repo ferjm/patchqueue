@@ -189,7 +189,7 @@ diff --git a/servo/components/style/error_reporting.rs b/servo/components/style/
      /// A keyframe property declaration was not recognized.
      UnsupportedKeyframePropertyDeclaration(&'a str, ParseError<'a>),
      /// A rule was invalid for some reason.
-@@ -39,17 +39,25 @@ pub enum ContextualParseError<'a> {
+@@ -39,17 +39,19 @@ pub enum ContextualParseError<'a> {
      InvalidCounterStyleWithoutSymbols(String),
      /// A counter style rule had less than two symbols.
      InvalidCounterStyleNotEnoughSymbols(String),
@@ -200,14 +200,8 @@ diff --git a/servo/components/style/error_reporting.rs b/servo/components/style/
      /// A counter style rule had extends with additive-symbols.
 -    InvalidCounterStyleExtendsWithAdditiveSymbols
 +    InvalidCounterStyleExtendsWithAdditiveSymbols,
-+    /// A media feature name was not recognized.
-+    MediaQueryExpectedFeatureName(&'a str, ParseError<'a>),
-+    /// A media feature value was not recognized.
-+    MediaQueryExpectedFeatureValue,
-+    /// A media feature with min- or max- had no value.
-+    MediaQueryNoMinMaxWithoutValue,
-+    /// Unrecognized at-rule or error parsing at-rule.
-+    UnknownAtRule(&'a str, ParseError<'a>),
++    /// A media rule was invalid for some reason.
++    InvalidMediaRule(&'a str, ParseError<'a>),
  }
  
  impl<'a> fmt::Display for ContextualParseError<'a> {
@@ -216,7 +210,7 @@ diff --git a/servo/components/style/error_reporting.rs b/servo/components/style/
              match *t {
                  Token::Ident(ref i) => write!(f, "identifier {}", i),
                  Token::AtKeyword(ref kw) => write!(f, "keyword @{}", kw),
-@@ -163,16 +171,30 @@ impl<'a> fmt::Display for ContextualPars
+@@ -163,16 +165,20 @@ impl<'a> fmt::Display for ContextualPars
                  write!(f, "Invalid @counter-style rule: 'system: additive' without 'additive-symbols'")
              }
              ContextualParseError::InvalidCounterStyleExtendsWithSymbols => {
@@ -225,18 +219,8 @@ diff --git a/servo/components/style/error_reporting.rs b/servo/components/style/
              ContextualParseError::InvalidCounterStyleExtendsWithAdditiveSymbols => {
                  write!(f, "Invalid @counter-style rule: 'system: extends …' with 'additive-symbols'")
              }
-+            ContextualParseError::MediaQueryExpectedFeatureName(feature, ref err) => {
-+                write!(f, "Expected media feature name but found: '{}', ", feature)?;
-+                parse_error_to_str(err, f)
-+            }
-+            ContextualParseError::MediaQueryExpectedFeatureValue => {
-+                write!(f, "Found invalid value for media feature")
-+            }
-+            ContextualParseError::MediaQueryNoMinMaxWithoutValue => {
-+                write!(f, "Media features with min- or max- must have a value")
-+            }
-+            ContextualParseError::UnknownAtRule(at_rule, ref err) => {
-+                write!(f, "Unrecognized at-rule or error parsing at-rule '{}', ", at_rule)?;
++            ContextualParseError::InvalidMediaRule(media_rule, ref err) => {
++                write!(f, "Invalid media rule: {}, ", media_rule)?;
 +                parse_error_to_str(err, f)
 +            }
          }
@@ -250,7 +234,155 @@ diff --git a/servo/components/style/error_reporting.rs b/servo/components/style/
 diff --git a/servo/components/style/gecko/media_queries.rs b/servo/components/style/gecko/media_queries.rs
 --- a/servo/components/style/gecko/media_queries.rs
 +++ b/servo/components/style/gecko/media_queries.rs
-@@ -525,18 +525,19 @@ impl Expression {
+@@ -18,17 +18,16 @@ use gecko_bindings::structs::{nsCSSKeywo
+ use gecko_bindings::structs::{nsMediaExpression_Range, nsMediaFeature};
+ use gecko_bindings::structs::{nsMediaFeature_ValueType, nsMediaFeature_RangeType, nsMediaFeature_RequirementFlags};
+ use gecko_bindings::structs::{nsPresContext, RawGeckoPresContextOwned};
+ use gecko_bindings::structs::nsIAtom;
+ use media_queries::MediaType;
+ use parser::ParserContext;
+ use properties::{ComputedValues, StyleBuilder};
+ use properties::longhands::font_size;
+-use selectors::parser::SelectorParseError;
+ use servo_arc::Arc;
+ use std::fmt::{self, Write};
+ use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
+ use str::starts_with_ignore_ascii_case;
+ use string_cache::Atom;
+ use style_traits::{CSSPixel, DevicePixel};
+ use style_traits::{ToCss, ParseError, StyleParseError};
+ use style_traits::viewport::ViewportConstraints;
+@@ -464,16 +463,99 @@ unsafe fn find_in_table<F>(mut current_e
+         if f(keyword, value) {
+             return Some((keyword, value));
+         }
+ 
+         current_entry = current_entry.offset(1);
+     }
+ }
+ 
++fn parse_feature_value<'i, 't>(feature: &nsMediaFeature,
++                               feature_value_type: nsMediaFeature_ValueType,
++                               context: &ParserContext,
++                               input: &mut Parser<'i, 't>)
++                               -> Result<MediaExpressionValue, ParseError<'i>> {
++    let value = match feature_value_type {
++        nsMediaFeature_ValueType::eLength => {
++           let length = Length::parse_non_negative(context, input)?;
++           // FIXME(canaltinova): See bug 1396057. Gecko doesn't support calc
++           // inside media queries. This check is for temporarily remove it
++           // for parity with gecko. We should remove this check when we want
++           // to support it.
++           if let Length::Calc(_) = length {
++               return Err(StyleParseError::UnspecifiedError.into())
++           }
++           MediaExpressionValue::Length(length)
++        },
++        nsMediaFeature_ValueType::eInteger => {
++           // FIXME(emilio): We should use `Integer::parse` to handle `calc`
++           // properly in integer expressions. Note that calc is still not
++           // supported in media queries per FIXME above.
++           let i = input.expect_integer()?;
++           if i < 0 {
++               return Err(StyleParseError::UnspecifiedError.into())
++           }
++           MediaExpressionValue::Integer(i as u32)
++        }
++        nsMediaFeature_ValueType::eBoolInteger => {
++           let i = input.expect_integer()?;
++           if i < 0 || i > 1 {
++               return Err(StyleParseError::UnspecifiedError.into())
++           }
++           MediaExpressionValue::BoolInteger(i == 1)
++        }
++        nsMediaFeature_ValueType::eFloat => {
++           MediaExpressionValue::Float(input.expect_number()?)
++        }
++        nsMediaFeature_ValueType::eIntRatio => {
++           let a = input.expect_integer()?;
++           if a <= 0 {
++               return Err(StyleParseError::UnspecifiedError.into())
++           }
++
++           input.expect_delim('/')?;
++
++           let b = input.expect_integer()?;
++           if b <= 0 {
++               return Err(StyleParseError::UnspecifiedError.into())
++           }
++           MediaExpressionValue::IntRatio(a as u32, b as u32)
++        }
++        nsMediaFeature_ValueType::eResolution => {
++           MediaExpressionValue::Resolution(Resolution::parse(input)?)
++        }
++        nsMediaFeature_ValueType::eEnumerated => {
++           let keyword = input.expect_ident()?;
++           let keyword = unsafe {
++               bindings::Gecko_LookupCSSKeyword(keyword.as_bytes().as_ptr(),
++               keyword.len() as u32)
++           };
++
++           let first_table_entry: *const nsCSSProps_KTableEntry = unsafe {
++               *feature.mData.mKeywordTable.as_ref()
++           };
++
++           let value =
++               match unsafe { find_in_table(first_table_entry, |kw, _| kw == keyword) } {
++                   Some((_kw, value)) => {
++                       value
++                   }
++                   None => return Err(StyleParseError::UnspecifiedError.into()),
++               };
++
++           MediaExpressionValue::Enumerated(value)
++        }
++        nsMediaFeature_ValueType::eIdent => {
++           MediaExpressionValue::Ident(input.expect_ident()?.as_ref().to_owned())
++        }
++    };
++
++    Ok(value)
++}
++
+ impl Expression {
+     /// Trivially construct a new expression.
+     fn new(feature: &'static nsMediaFeature,
+            value: Option<MediaExpressionValue>,
+            range: nsMediaExpression_Range) -> Self {
+         Expression {
+             feature: feature,
+             value: value,
+@@ -483,23 +565,27 @@ impl Expression {
+ 
+     /// Parse a media expression of the form:
+     ///
+     /// ```
+     /// (media-feature: media-value)
+     /// ```
+     pub fn parse<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>)
+                          -> Result<Self, ParseError<'i>> {
+-        input.expect_parenthesis_block()?;
++        input.expect_parenthesis_block().map_err(|_|
++            StyleParseError::MediaQueryExpectedFeatureName
++        )?;
+         input.parse_nested_block(|input| {
+             // FIXME: remove extra indented block when lifetimes are non-lexical
+             let feature;
+             let range;
+             {
+-                let ident = input.expect_ident()?;
++                let ident = input.expect_ident().map_err(|_|
++                    StyleParseError::MediaQueryExpectedFeatureName
++                )?;
+ 
+                 let mut flags = 0;
+                 let result = {
+                     let mut feature_name = &**ident;
+ 
+                     if unsafe { structs::StylePrefs_sWebkitPrefixedAliasesEnabled } &&
+                        starts_with_ignore_ascii_case(feature_name, "-webkit-") {
+                         feature_name = &feature_name[8..];
+@@ -525,116 +611,49 @@ impl Expression {
                          None => Err(()),
                      }
                  };
@@ -262,92 +394,124 @@ diff --git a/servo/components/style/gecko/media_queries.rs b/servo/components/st
 -                    }
 -                    Err(()) => return Err(SelectorParseError::UnexpectedIdent(ident.clone()).into()),
 +                    },
-+                    Err(()) =>
-+                        return Err(StyleParseError::MediaQueryExpectedFeatureName.into()),
++                    Err(()) => {
++                        return Err(StyleParseError::MediaQueryExpectedFeatureName.into())
++                    },
                  }
  
                  if (feature.mReqFlags & !flags) != 0 {
-                     return Err(SelectorParseError::UnexpectedIdent(ident.clone()).into());
+-                    return Err(SelectorParseError::UnexpectedIdent(ident.clone()).into());
++                    return Err(StyleParseError::MediaQueryExpectedFeatureName.into());
                  }
  
                  if range != nsMediaExpression_Range::eEqual &&
-                     feature.mRangeType != nsMediaFeature_RangeType::eMinMaxAllowed {
-@@ -559,51 +560,51 @@ impl Expression {
-             let value = match feature.mValueType {
-                 nsMediaFeature_ValueType::eLength => {
-                     let length = Length::parse_non_negative(context, input)?;
-                     // FIXME(canaltinova): See bug 1396057. Gecko doesn't support calc
-                     // inside media queries. This check is for temporarily remove it
-                     // for parity with gecko. We should remove this check when we want
-                     // to support it.
-                     if let Length::Calc(_) = length {
--                        return Err(StyleParseError::UnspecifiedError.into())
-+                        return Err(StyleParseError::MediaQueryExpectedFeatureValue.into())
-                     }
-                     MediaExpressionValue::Length(length)
-                 },
-                 nsMediaFeature_ValueType::eInteger => {
-                     // FIXME(emilio): We should use `Integer::parse` to handle `calc`
-                     // properly in integer expressions. Note that calc is still not
-                     // supported in media queries per FIXME above.
-                     let i = input.expect_integer()?;
-                     if i < 0 {
--                        return Err(StyleParseError::UnspecifiedError.into())
-+                        return Err(StyleParseError::MediaQueryExpectedFeatureValue.into())
-                     }
-                     MediaExpressionValue::Integer(i as u32)
+-                    feature.mRangeType != nsMediaFeature_RangeType::eMinMaxAllowed {
+-                    return Err(SelectorParseError::UnexpectedIdent(ident.clone()).into());
++                   feature.mRangeType != nsMediaFeature_RangeType::eMinMaxAllowed {
++                    return Err(StyleParseError::MediaQueryExpectedFeatureName.into());
                  }
-                 nsMediaFeature_ValueType::eBoolInteger => {
-                     let i = input.expect_integer()?;
-                     if i < 0 || i > 1 {
--                        return Err(StyleParseError::UnspecifiedError.into())
-+                        return Err(StyleParseError::MediaQueryExpectedFeatureValue.into())
-                     }
-                     MediaExpressionValue::BoolInteger(i == 1)
-                 }
-                 nsMediaFeature_ValueType::eFloat => {
-                     MediaExpressionValue::Float(input.expect_number()?)
-                 }
-                 nsMediaFeature_ValueType::eIntRatio => {
-                     let a = input.expect_integer()?;
-                     if a <= 0 {
--                        return Err(StyleParseError::UnspecifiedError.into())
-+                        return Err(StyleParseError::MediaQueryExpectedFeatureValue.into())
-                     }
+             }
  
-                     input.expect_delim('/')?;
+             // If there's no colon, this is a media query of the form
+             // '(<feature>)', that is, there's no value specified.
+             //
+             // Gecko doesn't allow ranged expressions without a value, so just
+             // reject them here too.
+             if input.try(|i| i.expect_colon()).is_err() {
+                 if range != nsMediaExpression_Range::eEqual {
+-                    return Err(StyleParseError::RangedExpressionWithNoValue.into())
++                    return Err(StyleParseError::MediaQueryExpectedFeatureValue.into())
+                 }
+                 return Ok(Expression::new(feature, None, range));
+             }
  
-                     let b = input.expect_integer()?;
-                     if b <= 0 {
+-            let value = match feature.mValueType {
+-                nsMediaFeature_ValueType::eLength => {
+-                    let length = Length::parse_non_negative(context, input)?;
+-                    // FIXME(canaltinova): See bug 1396057. Gecko doesn't support calc
+-                    // inside media queries. This check is for temporarily remove it
+-                    // for parity with gecko. We should remove this check when we want
+-                    // to support it.
+-                    if let Length::Calc(_) = length {
 -                        return Err(StyleParseError::UnspecifiedError.into())
-+                        return Err(StyleParseError::MediaQueryExpectedFeatureValue.into())
-                     }
-                     MediaExpressionValue::IntRatio(a as u32, b as u32)
-                 }
-                 nsMediaFeature_ValueType::eResolution => {
-                     MediaExpressionValue::Resolution(Resolution::parse(input)?)
-                 }
-                 nsMediaFeature_ValueType::eEnumerated => {
-                     let keyword = input.expect_ident()?;
-@@ -616,17 +617,17 @@ impl Expression {
-                         *feature.mData.mKeywordTable.as_ref()
-                     };
- 
-                     let value =
-                         match unsafe { find_in_table(first_table_entry, |kw, _| kw == keyword) } {
-                             Some((_kw, value)) => {
-                                 value
-                             }
+-                    }
+-                    MediaExpressionValue::Length(length)
+-                },
+-                nsMediaFeature_ValueType::eInteger => {
+-                    // FIXME(emilio): We should use `Integer::parse` to handle `calc`
+-                    // properly in integer expressions. Note that calc is still not
+-                    // supported in media queries per FIXME above.
+-                    let i = input.expect_integer()?;
+-                    if i < 0 {
+-                        return Err(StyleParseError::UnspecifiedError.into())
+-                    }
+-                    MediaExpressionValue::Integer(i as u32)
+-                }
+-                nsMediaFeature_ValueType::eBoolInteger => {
+-                    let i = input.expect_integer()?;
+-                    if i < 0 || i > 1 {
+-                        return Err(StyleParseError::UnspecifiedError.into())
+-                    }
+-                    MediaExpressionValue::BoolInteger(i == 1)
+-                }
+-                nsMediaFeature_ValueType::eFloat => {
+-                    MediaExpressionValue::Float(input.expect_number()?)
+-                }
+-                nsMediaFeature_ValueType::eIntRatio => {
+-                    let a = input.expect_integer()?;
+-                    if a <= 0 {
+-                        return Err(StyleParseError::UnspecifiedError.into())
+-                    }
+-
+-                    input.expect_delim('/')?;
+-
+-                    let b = input.expect_integer()?;
+-                    if b <= 0 {
+-                        return Err(StyleParseError::UnspecifiedError.into())
+-                    }
+-                    MediaExpressionValue::IntRatio(a as u32, b as u32)
+-                }
+-                nsMediaFeature_ValueType::eResolution => {
+-                    MediaExpressionValue::Resolution(Resolution::parse(input)?)
+-                }
+-                nsMediaFeature_ValueType::eEnumerated => {
+-                    let keyword = input.expect_ident()?;
+-                    let keyword = unsafe {
+-                        bindings::Gecko_LookupCSSKeyword(keyword.as_bytes().as_ptr(),
+-                                                         keyword.len() as u32)
+-                    };
+-
+-                    let first_table_entry: *const nsCSSProps_KTableEntry = unsafe {
+-                        *feature.mData.mKeywordTable.as_ref()
+-                    };
+-
+-                    let value =
+-                        match unsafe { find_in_table(first_table_entry, |kw, _| kw == keyword) } {
+-                            Some((_kw, value)) => {
+-                                value
+-                            }
 -                            None => return Err(StyleParseError::UnspecifiedError.into()),
-+                            None => return Err(StyleParseError::MediaQueryExpectedFeatureValue.into()),
-                         };
+-                        };
+-
+-                    MediaExpressionValue::Enumerated(value)
+-                }
+-                nsMediaFeature_ValueType::eIdent => {
+-                    MediaExpressionValue::Ident(input.expect_ident()?.as_ref().to_owned())
+-                }
+-            };
++            let value = parse_feature_value(feature,
++                                            feature.mValueType,
++                                            context, input).map_err(|_|
++                StyleParseError::MediaQueryExpectedFeatureValue
++            )?;
  
-                     MediaExpressionValue::Enumerated(value)
-                 }
-                 nsMediaFeature_ValueType::eIdent => {
-                     MediaExpressionValue::Ident(input.expect_ident()?.as_ref().to_owned())
-                 }
-             };
+             Ok(Expression::new(feature, Some(value), range))
+         })
+     }
+ 
+     /// Returns whether this media query evaluates to true for the given device.
+     pub fn matches(&self, device: &Device, quirks_mode: QuirksMode) -> bool {
+         let mut css_value = nsCSSValue::null();
 diff --git a/servo/components/style/media_queries.rs b/servo/components/style/media_queries.rs
 --- a/servo/components/style/media_queries.rs
 +++ b/servo/components/style/media_queries.rs
@@ -362,7 +526,7 @@ diff --git a/servo/components/style/media_queries.rs b/servo/components/style/me
  use context::QuirksMode;
 -use cssparser::{Delimiter, Parser, Token, ParserInput};
 -use parser::ParserContext;
-+use cssparser::{Delimiter, ParseError as CssParseError, Parser};
++use cssparser::{Delimiter, Parser};
 +use cssparser::{Token, ParserInput};
 +use error_reporting::{ContextualParseError, ParseErrorReporter};
 +use parser::{ParserContext, ParserErrorContext};
@@ -374,7 +538,7 @@ diff --git a/servo/components/style/media_queries.rs b/servo/components/style/me
  use values::CustomIdent;
  
  #[cfg(feature = "servo")]
-@@ -235,29 +237,50 @@ impl MediaQuery {
+@@ -235,29 +237,39 @@ impl MediaQuery {
  }
  
  /// Parse a media query list from CSS.
@@ -404,19 +568,8 @@ diff --git a/servo/components/style/media_queries.rs b/servo/components/style/me
 -            Err(..) => {
 +            Err(err) => {
                  media_queries.push(MediaQuery::never_matching());
-+                let error = match err {
-+                    CssParseError::Custom(SelectorParseError::Custom(
-+                            StyleParseError::MediaQueryExpectedFeatureName)) =>
-+                        ContextualParseError::MediaQueryExpectedFeatureName(
-+                            input.slice_from(start_position), err),
-+                    CssParseError::Custom(SelectorParseError::Custom(
-+                            StyleParseError::RangedExpressionWithNoValue)) =>
-+                        ContextualParseError::MediaQueryNoMinMaxWithoutValue,
-+                    CssParseError::Custom(SelectorParseError::Custom(
-+                            StyleParseError::MediaQueryExpectedFeatureValue)) =>
-+                        ContextualParseError::MediaQueryExpectedFeatureValue,
-+                    _ => ContextualParseError::UnknownAtRule(input.slice_from(start_position), err),
-+                };
++                let error = ContextualParseError::InvalidMediaRule(
++                    input.slice_from(start_position), err);
 +                let error_context = ParserErrorContext { error_reporter };
 +                context.log_css_error(&error_context, start_location, error);
              },
@@ -473,7 +626,7 @@ diff --git a/servo/components/style/stylesheets/rule_parser.rs b/servo/component
 diff --git a/servo/components/style_traits/lib.rs b/servo/components/style_traits/lib.rs
 --- a/servo/components/style_traits/lib.rs
 +++ b/servo/components/style_traits/lib.rs
-@@ -102,16 +102,20 @@ pub enum StyleParseError<'i> {
+@@ -102,18 +102,20 @@ pub enum StyleParseError<'i> {
      /// Unexpected closing curly bracket in a DVB.
      UnbalancedCloseCurlyBracketInDeclarationValueBlock,
      /// A property declaration parsing error.
@@ -482,22 +635,24 @@ diff --git a/servo/components/style_traits/lib.rs b/servo/components/style_trait
      PropertyDeclarationValueNotExhausted,
      /// An unexpected dimension token was encountered.
      UnexpectedDimension(CowRcStr<'i>),
+-    /// A media query using a ranged expression with no value was encountered.
+-    RangedExpressionWithNoValue,
 +    /// Missing or invalid media feature name.
 +    MediaQueryExpectedFeatureName,
 +    /// Missing or invalid media feature value.
 +    MediaQueryExpectedFeatureValue,
-     /// A media query using a ranged expression with no value was encountered.
-     RangedExpressionWithNoValue,
      /// A function was encountered that was not expected.
      UnexpectedFunction(CowRcStr<'i>),
      /// @namespace must be before any rule but @charset and @import
      UnexpectedNamespaceRule,
      /// @import must be before any rule but @charset
      UnexpectedImportRule,
+     /// Unexpected @charset rule encountered.
+     UnexpectedCharsetRule,
 diff --git a/servo/ports/geckolib/error_reporter.rs b/servo/ports/geckolib/error_reporter.rs
 --- a/servo/ports/geckolib/error_reporter.rs
 +++ b/servo/ports/geckolib/error_reporter.rs
-@@ -183,24 +183,28 @@ impl<'a> ErrorHelpers<'a> for Contextual
+@@ -183,17 +183,18 @@ impl<'a> ErrorHelpers<'a> for Contextual
              ContextualParseError::UnsupportedFontFaceDescriptor(s, err) |
              ContextualParseError::UnsupportedFontFeatureValuesDescriptor(s, err) |
              ContextualParseError::InvalidKeyframeRule(s, err) |
@@ -508,60 +663,48 @@ diff --git a/servo/ports/geckolib/error_reporter.rs b/servo/ports/geckolib/error
              ContextualParseError::UnsupportedViewportDescriptorDeclaration(s, err) |
 -            ContextualParseError::UnsupportedCounterStyleDescriptorDeclaration(s, err) =>
 +            ContextualParseError::UnsupportedCounterStyleDescriptorDeclaration(s, err) |
-+            ContextualParseError::MediaQueryExpectedFeatureName(s, err) |
-+            ContextualParseError::UnknownAtRule(s, err) =>
++            ContextualParseError::InvalidMediaRule(s, err) =>
                  (s.into(), err),
              ContextualParseError::InvalidCounterStyleWithoutSymbols(s) |
              ContextualParseError::InvalidCounterStyleNotEnoughSymbols(s) =>
                  (s.into(), StyleParseError::UnspecifiedError.into()),
              ContextualParseError::InvalidCounterStyleWithoutAdditiveSymbols |
              ContextualParseError::InvalidCounterStyleExtendsWithSymbols |
--            ContextualParseError::InvalidCounterStyleExtendsWithAdditiveSymbols =>
-+            ContextualParseError::InvalidCounterStyleExtendsWithAdditiveSymbols |
-+            ContextualParseError::MediaQueryNoMinMaxWithoutValue |
-+            ContextualParseError::MediaQueryExpectedFeatureValue =>
+             ContextualParseError::InvalidCounterStyleExtendsWithAdditiveSymbols =>
                  ("".into(), StyleParseError::UnspecifiedError.into())
-         }
-     }
- 
-     fn error_params(self) -> ErrorParams<'a> {
-         let (s, error) = self.error_data();
-         extract_error_params(error).unwrap_or_else(|| ErrorParams {
-             main_param: Some(ErrorString::Snippet(s)),
-@@ -276,25 +280,32 @@ impl<'a> ErrorHelpers<'a> for Contextual
+@@ -274,16 +275,32 @@ impl<'a> ErrorHelpers<'a> for Contextual
+                     CssParseError::Custom(SelectorParseError::ClassNeedsIdent(_)) =>
+                         Some(&b"PEClassSelNotIdent\0"[..]),
                      CssParseError::Custom(SelectorParseError::EmptyNegation) =>
                          Some(&b"PENegationBadArg\0"[..]),
                      _ => None,
                  };
                  return (prefix, b"PEBadSelectorRSIgnored\0", Action::Nothing);
              }
++            ContextualParseError::InvalidMediaRule(_, ref err) => {
++                let err: &[u8] = match *err {
++                    CssParseError::Custom(SelectorParseError::Custom(
++                            StyleParseError::MediaQueryExpectedFeatureName)) => {
++                        b"PEMQExpectedFeatureName\0"
++                    },
++                    CssParseError::Custom(SelectorParseError::Custom(
++                            StyleParseError::MediaQueryExpectedFeatureValue)) => {
++                        b"PEMQExpectedFeatureValue\0"
++                    },
++                    _ => {
++                        b"PEDeclDropped\0"
++                    },
++                };
++                (err, Action::Nothing)
++            }
              ContextualParseError::UnsupportedRule(..) =>
                  (b"PEDeclDropped\0", Action::Nothing),
-+            ContextualParseError::MediaQueryExpectedFeatureName(..) =>
-+                (b"PEMQExpectedFeatureName\0", Action::Nothing),
-+            ContextualParseError::MediaQueryExpectedFeatureValue =>
-+                (b"PEMQExpectedFeatureValue\0", Action::Nothing),
-+            ContextualParseError::MediaQueryNoMinMaxWithoutValue =>
-+                (b"PEMQNoMinMaxWithoutValue\0", Action::Nothing),
              ContextualParseError::UnsupportedViewportDescriptorDeclaration(..) |
              ContextualParseError::UnsupportedCounterStyleDescriptorDeclaration(..) |
              ContextualParseError::InvalidCounterStyleWithoutSymbols(..) |
              ContextualParseError::InvalidCounterStyleNotEnoughSymbols(..) |
              ContextualParseError::InvalidCounterStyleWithoutAdditiveSymbols |
              ContextualParseError::InvalidCounterStyleExtendsWithSymbols |
-             ContextualParseError::InvalidCounterStyleExtendsWithAdditiveSymbols |
-             ContextualParseError::UnsupportedFontFeatureValuesDescriptor(..) |
--            ContextualParseError::InvalidFontFeatureValuesRule(..) =>
-+            ContextualParseError::InvalidFontFeatureValuesRule(..) |
-+            ContextualParseError::UnknownAtRule(..) =>
-                 (b"PEUnknownAtRule\0", Action::Skip),
-         };
-         (None, msg, action)
-     }
- }
- 
- impl ParseErrorReporter for ErrorReporter {
-     fn report_error(&self,
 diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 --- a/servo/ports/geckolib/glue.rs
 +++ b/servo/ports/geckolib/glue.rs
