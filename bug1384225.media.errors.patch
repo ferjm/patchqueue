@@ -538,7 +538,7 @@ diff --git a/servo/components/style/media_queries.rs b/servo/components/style/me
  use values::CustomIdent;
  
  #[cfg(feature = "servo")]
-@@ -235,29 +237,39 @@ impl MediaQuery {
+@@ -235,29 +237,42 @@ impl MediaQuery {
  }
  
  /// Parse a media query list from CSS.
@@ -548,10 +548,13 @@ diff --git a/servo/components/style/media_queries.rs b/servo/components/style/me
  ///
  /// https://drafts.csswg.org/mediaqueries/#error-handling
 -pub fn parse_media_query_list(context: &ParserContext, input: &mut Parser) -> MediaList {
-+pub fn parse_media_query_list<R>(context: &ParserContext,
-+                                 input: &mut Parser,
-+                                 error_reporter: &R) -> MediaList
-+    where R: ParseErrorReporter
++pub fn parse_media_query_list<R>(
++    context: &ParserContext,
++    input: &mut Parser,
++    error_reporter: &R,
++) -> MediaList
++where
++    R: ParseErrorReporter,
 +{
      if input.is_exhausted() {
          return MediaList::empty()
