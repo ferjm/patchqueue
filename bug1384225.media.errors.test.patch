@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  fe6dbfe0e62b08a48d3642508a3d7de97153147b
+# Parent  b983f2638d4cce63129ffb8e1043f4b7f578bcae
 Bug 1384225 - stylo: Error reporting for unknown media features. Tests. r?jdm
 
 diff --git a/layout/style/test/test_css_parse_error_smoketest.html b/layout/style/test/test_css_parse_error_smoketest.html
@@ -40,7 +40,7 @@ diff --git a/layout/style/test/test_css_parse_error_smoketest.html b/layout/styl
 +             : "Expected media feature name but found ‘totally-unknown-feature’." },
 +    { css: "@media \"foo\" {}",
 +      error: isStylo
-+             ? "Expected media feature name but found ‘ \"foo\" ’."
++             ? "Expected identifier in media list but found ‘ \"foo\" ’."
 +             : "Expected identifier in media list but found ‘\"foo\"’." },
 +    { css: "@media (min-width) {}",
 +      error: isStylo
