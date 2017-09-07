@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  9f6ee3c093d5252a5abc0e647fc329154198d012
+# Parent  fe6dbfe0e62b08a48d3642508a3d7de97153147b
 Bug 1384225 - stylo: Error reporting for unknown media features. Tests. r?jdm
 
 diff --git a/layout/style/test/test_css_parse_error_smoketest.html b/layout/style/test/test_css_parse_error_smoketest.html
@@ -24,7 +24,7 @@ diff --git a/layout/style/test/test_css_parse_error_smoketest.html b/layout/styl
      { css: "::unknown {}", error: "Unknown pseudo-class or pseudo-element ‘unknown’.  Ruleset ignored due to bad selector." },
      { css: ":unknown {}", error: "Unknown pseudo-class or pseudo-element ‘unknown’.  Ruleset ignored due to bad selector." },
      { css: "::5 {}", error: "Expected identifier for pseudo-class or pseudo-element but found ‘5’.  Ruleset ignored due to bad selector." },
-@@ -28,16 +29,31 @@
+@@ -28,16 +29,41 @@
  
      { css: "x| {}", error: "Unknown namespace prefix ‘x’.  Ruleset ignored due to bad selector." },
      { css: "a> {}", error: "Dangling combinator.  Ruleset ignored due to bad selector." },
@@ -46,6 +46,16 @@ diff --git a/layout/style/test/test_css_parse_error_smoketest.html b/layout/styl
 +      error: isStylo
 +             ? "Found invalid value for media feature."
 +             : "Media features with min- or max- must have a value." },
++    { css: "@media (device-height: -1px) {}",
++      error: "Found invalid value for media feature." },
++    { css: "@media (min-width: -1px) {}",
++      error: "Found invalid value for media feature." },
++    { css: "@media (min-resolution: 2) {}",
++      error: "Found invalid value for media feature." },
++    { css: "@media (min-monochrome: 1.1) {}",
++      error: "Found invalid value for media feature." },
++    { css: "@media (min-aspect-ratio: 1) {}",
++      error: "Found invalid value for media feature." },
 +    { css: "@media (orientation: invalid-orientation-value) {}",
 +      error: "Found invalid value for media feature." },
    ];
