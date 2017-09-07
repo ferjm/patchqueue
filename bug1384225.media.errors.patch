@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  3ecda4678c49ca255c38b1697142b9118cdd27e7
+# Parent  d8e238b811d3dc74515065ae8cab6c74baf0295f
 Bug 1384225 - stylo: Error reporting for unknown media features. r?jdm
 
 diff --git a/servo/components/script/dom/cssmediarule.rs b/servo/components/script/dom/cssmediarule.rs
@@ -147,7 +147,7 @@ diff --git a/servo/components/script/dom/medialist.rs b/servo/components/script/
 diff --git a/servo/components/script/dom/window.rs b/servo/components/script/dom/window.rs
 --- a/servo/components/script/dom/window.rs
 +++ b/servo/components/script/dom/window.rs
-@@ -1006,17 +1006,18 @@ impl WindowMethods for Window {
+@@ -1007,17 +1007,18 @@ impl WindowMethods for Window {
      fn MatchMedia(&self, query: DOMString) -> Root<MediaQueryList> {
          let mut input = ParserInput::new(&query);
          let mut parser = Parser::new(&mut input);
@@ -363,7 +363,7 @@ diff --git a/servo/components/style/gecko/media_queries.rs b/servo/components/st
                           -> Result<Self, ParseError<'i>> {
 -        input.expect_parenthesis_block()?;
 +        input.expect_parenthesis_block().map_err(|_|
-+            StyleParseError::MediaQueryExpectedFeatureName
++            StyleParseError::MediaQueryExpectedIdentifier
 +        )?;
          input.parse_nested_block(|input| {
              // FIXME: remove extra indented block when lifetimes are non-lexical
@@ -626,7 +626,7 @@ diff --git a/servo/components/style/stylesheets/rule_parser.rs b/servo/component
 diff --git a/servo/components/style_traits/lib.rs b/servo/components/style_traits/lib.rs
 --- a/servo/components/style_traits/lib.rs
 +++ b/servo/components/style_traits/lib.rs
-@@ -102,18 +102,20 @@ pub enum StyleParseError<'i> {
+@@ -102,18 +102,22 @@ pub enum StyleParseError<'i> {
      /// Unexpected closing curly bracket in a DVB.
      UnbalancedCloseCurlyBracketInDeclarationValueBlock,
      /// A property declaration parsing error.
@@ -637,6 +637,8 @@ diff --git a/servo/components/style_traits/lib.rs b/servo/components/style_trait
      UnexpectedDimension(CowRcStr<'i>),
 -    /// A media query using a ranged expression with no value was encountered.
 -    RangedExpressionWithNoValue,
++    /// Expected identifier in media list.
++    MediaQueryExpectedIdentifier,
 +    /// Missing or invalid media feature name.
 +    MediaQueryExpectedFeatureName,
 +    /// Missing or invalid media feature value.
@@ -672,7 +674,7 @@ diff --git a/servo/ports/geckolib/error_reporter.rs b/servo/ports/geckolib/error
              ContextualParseError::InvalidCounterStyleExtendsWithSymbols |
              ContextualParseError::InvalidCounterStyleExtendsWithAdditiveSymbols =>
                  ("".into(), StyleParseError::UnspecifiedError.into())
-@@ -274,16 +275,32 @@ impl<'a> ErrorHelpers<'a> for Contextual
+@@ -274,16 +275,36 @@ impl<'a> ErrorHelpers<'a> for Contextual
                      CssParseError::Custom(SelectorParseError::ClassNeedsIdent(_)) =>
                          Some(&b"PEClassSelNotIdent\0"[..]),
                      CssParseError::Custom(SelectorParseError::EmptyNegation) =>
@@ -683,6 +685,10 @@ diff --git a/servo/ports/geckolib/error_reporter.rs b/servo/ports/geckolib/error
              }
 +            ContextualParseError::InvalidMediaRule(_, ref err) => {
 +                let err: &[u8] = match *err {
++                    CssParseError::Custom(SelectorParseError::Custom(
++                            StyleParseError::MediaQueryExpectedIdentifier)) => {
++                        b"PEGatherMediaNotIdent\0"
++                    },
 +                    CssParseError::Custom(SelectorParseError::Custom(
 +                            StyleParseError::MediaQueryExpectedFeatureName)) => {
 +                        b"PEMQExpectedFeatureName\0"
@@ -708,7 +714,7 @@ diff --git a/servo/ports/geckolib/error_reporter.rs b/servo/ports/geckolib/error
 diff --git a/servo/ports/geckolib/glue.rs b/servo/ports/geckolib/glue.rs
 --- a/servo/ports/geckolib/glue.rs
 +++ b/servo/ports/geckolib/glue.rs
-@@ -2388,17 +2388,17 @@ pub extern "C" fn Servo_MediaList_SetTex
+@@ -2413,17 +2413,17 @@ pub extern "C" fn Servo_MediaList_SetTex
      let text = unsafe { text.as_ref().unwrap().as_str_unchecked() };
      let mut input = ParserInput::new(&text);
      let mut parser = Parser::new(&mut input);
