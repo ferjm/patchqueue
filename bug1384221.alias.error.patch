@@ -19,7 +19,7 @@ diff --git a/servo/components/style/properties/declaration_block.rs b/servo/comp
 +                .map_err(|e|
 +                    PropertyDeclarationParseError::InvalidValue(
 +                        name,
-+                        ValueParseError::from_parse_error(e)
++                        ValueParseError::from_parse_error(e.into())
 +                    ).into()
 +                )
          })?;
