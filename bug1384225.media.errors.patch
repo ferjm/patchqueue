@@ -352,7 +352,7 @@ diff --git a/servo/components/style/gecko/media_queries.rs b/servo/components/st
          Expression {
              feature: feature,
              value: value,
-@@ -483,23 +565,27 @@ impl Expression {
+@@ -483,23 +565,34 @@ impl Expression {
  
      /// Parse a media expression of the form:
      ///
@@ -362,17 +362,24 @@ diff --git a/servo/components/style/gecko/media_queries.rs b/servo/components/st
      pub fn parse<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>)
                           -> Result<Self, ParseError<'i>> {
 -        input.expect_parenthesis_block()?;
-+        input.expect_parenthesis_block().map_err(|_|
-+            StyleParseError::MediaQueryExpectedIdentifier
++        input.expect_parenthesis_block().map_err(|err|
++            match err {
++                BasicParseError::UnexpectedToken(t) => StyleParseError::ExpectedIdentifier(t),
++                _ => StyleParseError::UnspecifiedError,
++            }
 +        )?;
++
          input.parse_nested_block(|input| {
              // FIXME: remove extra indented block when lifetimes are non-lexical
              let feature;
              let range;
              {
 -                let ident = input.expect_ident()?;
-+                let ident = input.expect_ident().map_err(|_|
-+                    StyleParseError::MediaQueryExpectedFeatureName
++                let ident = input.expect_ident().map_err(|err|
++                    match err {
++                        BasicParseError::UnexpectedToken(t) => StyleParseError::ExpectedIdentifier(t),
++                        _ => StyleParseError::UnspecifiedError,
++                    }
 +                )?;
  
                  let mut flags = 0;
@@ -382,7 +389,7 @@ diff --git a/servo/components/style/gecko/media_queries.rs b/servo/components/st
                      if unsafe { structs::StylePrefs_sWebkitPrefixedAliasesEnabled } &&
                         starts_with_ignore_ascii_case(feature_name, "-webkit-") {
                          feature_name = &feature_name[8..];
-@@ -525,116 +611,49 @@ impl Expression {
+@@ -525,116 +618,49 @@ impl Expression {
                          None => Err(()),
                      }
                  };
@@ -395,20 +402,20 @@ diff --git a/servo/components/style/gecko/media_queries.rs b/servo/components/st
 -                    Err(()) => return Err(SelectorParseError::UnexpectedIdent(ident.clone()).into()),
 +                    },
 +                    Err(()) => {
-+                        return Err(StyleParseError::MediaQueryExpectedFeatureName.into())
++                        return Err(StyleParseError::MediaQueryExpectedFeatureName(ident.clone()).into())
 +                    },
                  }
  
                  if (feature.mReqFlags & !flags) != 0 {
 -                    return Err(SelectorParseError::UnexpectedIdent(ident.clone()).into());
-+                    return Err(StyleParseError::MediaQueryExpectedFeatureName.into());
++                    return Err(StyleParseError::MediaQueryExpectedFeatureName(ident.clone()).into());
                  }
  
                  if range != nsMediaExpression_Range::eEqual &&
 -                    feature.mRangeType != nsMediaFeature_RangeType::eMinMaxAllowed {
 -                    return Err(SelectorParseError::UnexpectedIdent(ident.clone()).into());
 +                   feature.mRangeType != nsMediaFeature_RangeType::eMinMaxAllowed {
-+                    return Err(StyleParseError::MediaQueryExpectedFeatureName.into());
++                    return Err(StyleParseError::MediaQueryExpectedFeatureName(ident.clone()).into());
                  }
              }
  
@@ -419,8 +426,7 @@ diff --git a/servo/components/style/gecko/media_queries.rs b/servo/components/st
              // reject them here too.
              if input.try(|i| i.expect_colon()).is_err() {
                  if range != nsMediaExpression_Range::eEqual {
--                    return Err(StyleParseError::RangedExpressionWithNoValue.into())
-+                    return Err(StyleParseError::MediaQueryExpectedFeatureValue.into())
+                     return Err(StyleParseError::RangedExpressionWithNoValue.into())
                  }
                  return Ok(Expression::new(feature, None, range));
              }
@@ -629,7 +635,7 @@ diff --git a/servo/components/style/stylesheets/rule_parser.rs b/servo/component
 diff --git a/servo/components/style_traits/lib.rs b/servo/components/style_traits/lib.rs
 --- a/servo/components/style_traits/lib.rs
 +++ b/servo/components/style_traits/lib.rs
-@@ -102,18 +102,22 @@ pub enum StyleParseError<'i> {
+@@ -102,17 +102,23 @@ pub enum StyleParseError<'i> {
      /// Unexpected closing curly bracket in a DVB.
      UnbalancedCloseCurlyBracketInDeclarationValueBlock,
      /// A property declaration parsing error.
@@ -639,13 +645,14 @@ diff --git a/servo/components/style_traits/lib.rs b/servo/components/style_trait
      /// An unexpected dimension token was encountered.
      UnexpectedDimension(CowRcStr<'i>),
 -    /// A media query using a ranged expression with no value was encountered.
--    RangedExpressionWithNoValue,
-+    /// Expected identifier in media list.
-+    MediaQueryExpectedIdentifier,
++    /// Expected identifier not found.
++    ExpectedIdentifier(Token<'i>),
 +    /// Missing or invalid media feature name.
-+    MediaQueryExpectedFeatureName,
++    MediaQueryExpectedFeatureName(CowRcStr<'i>),
 +    /// Missing or invalid media feature value.
 +    MediaQueryExpectedFeatureValue,
++    /// min- or max- properties must have a value.
+     RangedExpressionWithNoValue,
      /// A function was encountered that was not expected.
      UnexpectedFunction(CowRcStr<'i>),
      /// @namespace must be before any rule but @charset and @import
@@ -653,11 +660,35 @@ diff --git a/servo/components/style_traits/lib.rs b/servo/components/style_trait
      /// @import must be before any rule but @charset
      UnexpectedImportRule,
      /// Unexpected @charset rule encountered.
-     UnexpectedCharsetRule,
 diff --git a/servo/ports/geckolib/error_reporter.rs b/servo/ports/geckolib/error_reporter.rs
 --- a/servo/ports/geckolib/error_reporter.rs
 +++ b/servo/ports/geckolib/error_reporter.rs
-@@ -183,17 +183,18 @@ impl<'a> ErrorHelpers<'a> for Contextual
+@@ -135,16 +135,24 @@ struct ErrorParams<'a> {
+ /// a second parameter if it exists, for use in the prefix for the eventual error message.
+ fn extract_error_params<'a>(err: ParseError<'a>) -> Option<ErrorParams<'a>> {
+     let (main, prefix) = match err {
+         CssParseError::Custom(SelectorParseError::Custom(
+             StyleParseError::PropertyDeclaration(
+                 PropertyDeclarationParseError::InvalidValue(property, Some(e))))) =>
+             (Some(ErrorString::Snippet(property.into())), Some(extract_value_error_param(e))),
+ 
++        CssParseError::Custom(SelectorParseError::Custom(
++            StyleParseError::MediaQueryExpectedFeatureName(ident))) =>
++            (Some(ErrorString::Ident(ident)), None),
++
++        CssParseError::Custom(SelectorParseError::Custom(
++            StyleParseError::ExpectedIdentifier(token))) =>
++            (Some(ErrorString::UnexpectedToken(token)), None),
++
+         CssParseError::Custom(SelectorParseError::UnexpectedTokenInAttributeSelector(t)) |
+         CssParseError::Custom(SelectorParseError::BadValueInAttr(t)) |
+         CssParseError::Custom(SelectorParseError::ExpectedBarInAttr(t)) |
+         CssParseError::Custom(SelectorParseError::NoQualifiedNameInAttributeSelector(t)) |
+         CssParseError::Custom(SelectorParseError::InvalidQualNameInAttr(t)) |
+         CssParseError::Custom(SelectorParseError::ExplicitNamespaceUnexpectedToken(t)) |
+         CssParseError::Custom(SelectorParseError::PseudoElementExpectedIdent(t)) |
+         CssParseError::Custom(SelectorParseError::NoIdentForPseudo(t)) |
+@@ -183,17 +191,18 @@ impl<'a> ErrorHelpers<'a> for Contextual
              ContextualParseError::UnsupportedFontFaceDescriptor(s, err) |
              ContextualParseError::UnsupportedFontFeatureValuesDescriptor(s, err) |
              ContextualParseError::InvalidKeyframeRule(s, err) |
@@ -677,7 +708,7 @@ diff --git a/servo/ports/geckolib/error_reporter.rs b/servo/ports/geckolib/error
              ContextualParseError::InvalidCounterStyleExtendsWithSymbols |
              ContextualParseError::InvalidCounterStyleExtendsWithAdditiveSymbols =>
                  ("".into(), StyleParseError::UnspecifiedError.into())
-@@ -274,16 +275,36 @@ impl<'a> ErrorHelpers<'a> for Contextual
+@@ -274,16 +283,40 @@ impl<'a> ErrorHelpers<'a> for Contextual
                      CssParseError::Custom(SelectorParseError::ClassNeedsIdent(_)) =>
                          Some(&b"PEClassSelNotIdent\0"[..]),
                      CssParseError::Custom(SelectorParseError::EmptyNegation) =>
@@ -689,16 +720,20 @@ diff --git a/servo/ports/geckolib/error_reporter.rs b/servo/ports/geckolib/error
 +            ContextualParseError::InvalidMediaRule(_, ref err) => {
 +                let err: &[u8] = match *err {
 +                    CssParseError::Custom(SelectorParseError::Custom(
-+                            StyleParseError::MediaQueryExpectedIdentifier)) => {
++                            StyleParseError::ExpectedIdentifier(..))) => {
 +                        b"PEGatherMediaNotIdent\0"
 +                    },
 +                    CssParseError::Custom(SelectorParseError::Custom(
-+                            StyleParseError::MediaQueryExpectedFeatureName)) => {
++                            StyleParseError::MediaQueryExpectedFeatureName(..))) => {
 +                        b"PEMQExpectedFeatureName\0"
 +                    },
 +                    CssParseError::Custom(SelectorParseError::Custom(
 +                            StyleParseError::MediaQueryExpectedFeatureValue)) => {
 +                        b"PEMQExpectedFeatureValue\0"
++                    },
++                    CssParseError::Custom(SelectorParseError::Custom(
++                            StyleParseError::RangedExpressionWithNoValue)) => {
++                        b"PEMQNoMinMaxWithoutValue\0"
 +                    },
 +                    _ => {
 +                        b"PEDeclDropped\0"

@@ -1,0 +1,277 @@
+# HG changeset patch
+# User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
+# Parent  a99c0cf9658477bfa536a1996d0a3a5f728468ab
+
+diff --git a/servo/components/style/Cargo.toml b/servo/components/style/Cargo.toml
+--- a/servo/components/style/Cargo.toml
++++ b/servo/components/style/Cargo.toml
+@@ -32,17 +32,17 @@ gecko_debug = ["nsstring_vendor/gecko_de
+ app_units = "0.5.3"
+ arrayvec = "0.3.20"
+ arraydeque = "0.2.3"
+ atomic_refcell = "0.1"
+ bitflags = "0.7"
+ bit-vec = "0.4.3"
+ byteorder = "1.0"
+ cfg-if = "0.1.0"
+-cssparser = "0.20"
++cssparser = { path = "../../../../rust-cssparser" }
+ encoding = {version = "0.2", optional = true}
+ euclid = "0.15"
+ fnv = "1.0"
+ hashglobe = { path = "../hashglobe" }
+ heapsize = {version = "0.4", optional = true}
+ heapsize_derive = {version = "0.1", optional = true}
+ itertools = "0.5"
+ itoa = "0.3"
+diff --git a/servo/components/style/properties/declaration_block.rs b/servo/components/style/properties/declaration_block.rs
+--- a/servo/components/style/properties/declaration_block.rs
++++ b/servo/components/style/properties/declaration_block.rs
+@@ -932,16 +932,17 @@ pub fn parse_one_declaration_into<R>(dec
+     let mut input = ParserInput::new(input);
+     let mut parser = Parser::new(&mut input);
+     let start_position = parser.position();
+     let start_location = parser.current_source_location();
+     parser.parse_entirely(|parser| {
+         PropertyDeclaration::parse_into(declarations, id, &context, parser)
+             .map_err(|e| e.into())
+     }).map_err(|err| {
++        println!("parse_one_declaration_into");
+         let error = ContextualParseError::UnsupportedPropertyDeclaration(
+             parser.slice_from(start_position), err);
+         let error_context = ParserErrorContext { error_reporter: error_reporter };
+         context.log_css_error(&error_context, start_location, error);
+     })
+ }
+ 
+ /// A struct to parse property declarations.
+@@ -1013,25 +1014,27 @@ pub fn parse_property_declaration_list<R
+     };
+     let mut iter = DeclarationListParser::new(input, parser);
+     while let Some(declaration) = iter.next() {
+         match declaration {
+             Ok(importance) => {
+                 block.extend(iter.parser.declarations.drain(), importance);
+             }
+             Err(err) => {
++                println!("err {:?} {:?}", err.slice, err.error);
+                 iter.parser.declarations.clear();
+ 
+                 // If the unrecognized property looks like a vendor-specific property,
+                 // silently ignore it instead of polluting the error output.
+                 if let CssParseError::Custom(SelectorParseError::Custom(
+                     StyleParseError::PropertyDeclaration(
+                         PropertyDeclarationParseError::UnknownVendorProperty))) = err.error {
+                     continue;
+                 }
+ 
++                println!("parse_property_declaration_list");
+                 let error = ContextualParseError::UnsupportedPropertyDeclaration(err.slice, err.error);
+                 context.log_css_error(error_context, err.location, error);
+             }
+         }
+     }
+     block
+ }
+diff --git a/toolkit/library/gtest/rust/Cargo.lock b/toolkit/library/gtest/rust/Cargo.lock
+--- a/toolkit/library/gtest/rust/Cargo.lock
++++ b/toolkit/library/gtest/rust/Cargo.lock
+@@ -292,32 +292,57 @@ dependencies = [
+  "core-foundation 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
+  "core-graphics 0.8.1 (registry+https://github.com/rust-lang/crates.io-index)",
+  "libc 0.2.24 (registry+https://github.com/rust-lang/crates.io-index)",
+ ]
+ 
+ [[package]]
+ name = "cssparser"
+ version = "0.20.1"
++dependencies = [
++ "cssparser-macros 0.3.0",
++ "dtoa-short 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
++ "itoa 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
++ "matches 0.1.4 (registry+https://github.com/rust-lang/crates.io-index)",
++ "phf 0.7.21 (registry+https://github.com/rust-lang/crates.io-index)",
++ "procedural-masquerade 0.1.2",
++ "quote 0.3.15 (registry+https://github.com/rust-lang/crates.io-index)",
++ "smallvec 0.4.3 (registry+https://github.com/rust-lang/crates.io-index)",
++ "syn 0.11.11 (registry+https://github.com/rust-lang/crates.io-index)",
++]
++
++[[package]]
++name = "cssparser"
++version = "0.20.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ dependencies = [
+  "cssparser-macros 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
+  "dtoa-short 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
+  "itoa 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
+  "matches 0.1.4 (registry+https://github.com/rust-lang/crates.io-index)",
+  "phf 0.7.21 (registry+https://github.com/rust-lang/crates.io-index)",
+  "procedural-masquerade 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+  "quote 0.3.15 (registry+https://github.com/rust-lang/crates.io-index)",
+  "smallvec 0.4.3 (registry+https://github.com/rust-lang/crates.io-index)",
+  "syn 0.11.11 (registry+https://github.com/rust-lang/crates.io-index)",
+ ]
+ 
+ [[package]]
+ name = "cssparser-macros"
+ version = "0.3.0"
++dependencies = [
++ "phf_codegen 0.7.21 (registry+https://github.com/rust-lang/crates.io-index)",
++ "procedural-masquerade 0.1.2",
++ "quote 0.3.15 (registry+https://github.com/rust-lang/crates.io-index)",
++ "syn 0.11.11 (registry+https://github.com/rust-lang/crates.io-index)",
++]
++
++[[package]]
++name = "cssparser-macros"
++version = "0.3.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ dependencies = [
+  "phf_codegen 0.7.21 (registry+https://github.com/rust-lang/crates.io-index)",
+  "procedural-masquerade 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+  "quote 0.3.15 (registry+https://github.com/rust-lang/crates.io-index)",
+  "syn 0.11.11 (registry+https://github.com/rust-lang/crates.io-index)",
+ ]
+ 
+@@ -976,16 +1001,20 @@ version = "0.1.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ 
+ [[package]]
+ name = "procedural-masquerade"
+ version = "0.1.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ 
+ [[package]]
++name = "procedural-masquerade"
++version = "0.1.2"
++
++[[package]]
+ name = "pulse"
+ version = "0.1.0"
+ dependencies = [
+  "bitflags 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
+  "pulse-ffi 0.1.0",
+ ]
+ 
+ [[package]]
+@@ -1207,17 +1236,17 @@ dependencies = [
+  "arraydeque 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
+  "arrayvec 0.3.23 (registry+https://github.com/rust-lang/crates.io-index)",
+  "atomic_refcell 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+  "bindgen 0.29.0 (registry+https://github.com/rust-lang/crates.io-index)",
+  "bit-vec 0.4.3 (registry+https://github.com/rust-lang/crates.io-index)",
+  "bitflags 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
+  "byteorder 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+  "cfg-if 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+- "cssparser 0.20.1 (registry+https://github.com/rust-lang/crates.io-index)",
++ "cssparser 0.20.1",
+  "euclid 0.15.1 (registry+https://github.com/rust-lang/crates.io-index)",
+  "fnv 1.0.5 (registry+https://github.com/rust-lang/crates.io-index)",
+  "hashglobe 0.1.0",
+  "itertools 0.5.10 (registry+https://github.com/rust-lang/crates.io-index)",
+  "itoa 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
+  "kernel32-sys 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
+  "lazy_static 0.2.8 (registry+https://github.com/rust-lang/crates.io-index)",
+  "log 0.3.6 (registry+https://github.com/rust-lang/crates.io-index)",
+diff --git a/toolkit/library/rust/Cargo.lock b/toolkit/library/rust/Cargo.lock
+--- a/toolkit/library/rust/Cargo.lock
++++ b/toolkit/library/rust/Cargo.lock
+@@ -290,32 +290,57 @@ dependencies = [
+  "core-foundation 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
+  "core-graphics 0.8.1 (registry+https://github.com/rust-lang/crates.io-index)",
+  "libc 0.2.24 (registry+https://github.com/rust-lang/crates.io-index)",
+ ]
+ 
+ [[package]]
+ name = "cssparser"
+ version = "0.20.1"
++dependencies = [
++ "cssparser-macros 0.3.0",
++ "dtoa-short 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
++ "itoa 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
++ "matches 0.1.4 (registry+https://github.com/rust-lang/crates.io-index)",
++ "phf 0.7.21 (registry+https://github.com/rust-lang/crates.io-index)",
++ "procedural-masquerade 0.1.2",
++ "quote 0.3.15 (registry+https://github.com/rust-lang/crates.io-index)",
++ "smallvec 0.4.3 (registry+https://github.com/rust-lang/crates.io-index)",
++ "syn 0.11.11 (registry+https://github.com/rust-lang/crates.io-index)",
++]
++
++[[package]]
++name = "cssparser"
++version = "0.20.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ dependencies = [
+  "cssparser-macros 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
+  "dtoa-short 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
+  "itoa 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
+  "matches 0.1.4 (registry+https://github.com/rust-lang/crates.io-index)",
+  "phf 0.7.21 (registry+https://github.com/rust-lang/crates.io-index)",
+  "procedural-masquerade 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+  "quote 0.3.15 (registry+https://github.com/rust-lang/crates.io-index)",
+  "smallvec 0.4.3 (registry+https://github.com/rust-lang/crates.io-index)",
+  "syn 0.11.11 (registry+https://github.com/rust-lang/crates.io-index)",
+ ]
+ 
+ [[package]]
+ name = "cssparser-macros"
+ version = "0.3.0"
++dependencies = [
++ "phf_codegen 0.7.21 (registry+https://github.com/rust-lang/crates.io-index)",
++ "procedural-masquerade 0.1.2",
++ "quote 0.3.15 (registry+https://github.com/rust-lang/crates.io-index)",
++ "syn 0.11.11 (registry+https://github.com/rust-lang/crates.io-index)",
++]
++
++[[package]]
++name = "cssparser-macros"
++version = "0.3.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ dependencies = [
+  "phf_codegen 0.7.21 (registry+https://github.com/rust-lang/crates.io-index)",
+  "procedural-masquerade 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+  "quote 0.3.15 (registry+https://github.com/rust-lang/crates.io-index)",
+  "syn 0.11.11 (registry+https://github.com/rust-lang/crates.io-index)",
+ ]
+ 
+@@ -963,16 +988,20 @@ version = "0.1.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ 
+ [[package]]
+ name = "procedural-masquerade"
+ version = "0.1.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ 
+ [[package]]
++name = "procedural-masquerade"
++version = "0.1.2"
++
++[[package]]
+ name = "pulse"
+ version = "0.1.0"
+ dependencies = [
+  "bitflags 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
+  "pulse-ffi 0.1.0",
+ ]
+ 
+ [[package]]
+@@ -1194,17 +1223,17 @@ dependencies = [
+  "arraydeque 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
+  "arrayvec 0.3.23 (registry+https://github.com/rust-lang/crates.io-index)",
+  "atomic_refcell 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+  "bindgen 0.29.0 (registry+https://github.com/rust-lang/crates.io-index)",
+  "bit-vec 0.4.3 (registry+https://github.com/rust-lang/crates.io-index)",
+  "bitflags 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
+  "byteorder 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+  "cfg-if 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+- "cssparser 0.20.1 (registry+https://github.com/rust-lang/crates.io-index)",
++ "cssparser 0.20.1",
+  "euclid 0.15.1 (registry+https://github.com/rust-lang/crates.io-index)",
+  "fnv 1.0.5 (registry+https://github.com/rust-lang/crates.io-index)",
+  "hashglobe 0.1.0",
+  "itertools 0.5.10 (registry+https://github.com/rust-lang/crates.io-index)",
+  "itoa 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
+  "kernel32-sys 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
+  "lazy_static 0.2.8 (registry+https://github.com/rust-lang/crates.io-index)",
+  "log 0.3.6 (registry+https://github.com/rust-lang/crates.io-index)",
