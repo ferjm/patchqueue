@@ -1,30 +1,12 @@
 # HG changeset patch
 # User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
-# Parent  b983f2638d4cce63129ffb8e1043f4b7f578bcae
+# Parent  6fb3a6ef1dedb8c2b6975f69d9944cdf6f06d727
 Bug 1384225 - stylo: Error reporting for unknown media features. Tests. r?jdm
 
 diff --git a/layout/style/test/test_css_parse_error_smoketest.html b/layout/style/test/test_css_parse_error_smoketest.html
 --- a/layout/style/test/test_css_parse_error_smoketest.html
 +++ b/layout/style/test/test_css_parse_error_smoketest.html
-@@ -4,16 +4,17 @@
-   <meta charset="utf-8">
-   <title>Test for CSS parser reporting parsing errors with expected precision</title>
-   <script src="/tests/SimpleTest/SimpleTest.js"></script>
-   <link rel="stylesheet" href="/tests/SimpleTest/test.css">
- </head>
- <body>
- <style id="testbench"></style>
- <script>
-+  const isStylo = SpecialPowers.DOMWindowUtils.isStyledByServo;
-   var tests = [
-     { css: "@unknown {}", error: "Unrecognized at-rule or error parsing at-rule ‘@unknown’." },
- 
-     { css: "x { color: invalid; }", error: "Expected color but found ‘invalid’.  Error in parsing value for ‘color’.  Declaration dropped." },
- 
-     { css: "::unknown {}", error: "Unknown pseudo-class or pseudo-element ‘unknown’.  Ruleset ignored due to bad selector." },
-     { css: ":unknown {}", error: "Unknown pseudo-class or pseudo-element ‘unknown’.  Ruleset ignored due to bad selector." },
-     { css: "::5 {}", error: "Expected identifier for pseudo-class or pseudo-element but found ‘5’.  Ruleset ignored due to bad selector." },
-@@ -28,16 +29,41 @@
+@@ -28,16 +28,26 @@
  
      { css: "x| {}", error: "Unknown namespace prefix ‘x’.  Ruleset ignored due to bad selector." },
      { css: "a> {}", error: "Dangling combinator.  Ruleset ignored due to bad selector." },
@@ -34,30 +16,15 @@ diff --git a/layout/style/test/test_css_parse_error_smoketest.html b/layout/styl
  
      { css: ":not() {}", error: "Missing argument in negation pseudo-class ‘)’.  Ruleset ignored due to bad selector." },
 +
-+    { css: "@media (totally-unknown-feature) {}",
-+      error: isStylo
-+             ? "Expected media feature name but found ‘ (totally-unknown-feature) ’."
-+             : "Expected media feature name but found ‘totally-unknown-feature’." },
-+    { css: "@media \"foo\" {}",
-+      error: isStylo
-+             ? "Expected identifier in media list but found ‘ \"foo\" ’."
-+             : "Expected identifier in media list but found ‘\"foo\"’." },
-+    { css: "@media (min-width) {}",
-+      error: isStylo
-+             ? "Found invalid value for media feature."
-+             : "Media features with min- or max- must have a value." },
-+    { css: "@media (device-height: -1px) {}",
-+      error: "Found invalid value for media feature." },
-+    { css: "@media (min-width: -1px) {}",
-+      error: "Found invalid value for media feature." },
-+    { css: "@media (min-resolution: 2) {}",
-+      error: "Found invalid value for media feature." },
-+    { css: "@media (min-monochrome: 1.1) {}",
-+      error: "Found invalid value for media feature." },
-+    { css: "@media (min-aspect-ratio: 1) {}",
-+      error: "Found invalid value for media feature." },
-+    { css: "@media (orientation: invalid-orientation-value) {}",
-+      error: "Found invalid value for media feature." },
++    { css: "@media (totally-unknown-feature) {}", error: "Expected media feature name but found ‘totally-unknown-feature’." },
++    { css: "@media \"foo\" {}", error: "Expected identifier in media list but found ‘\"foo\"’." },
++    { css: "@media (min-width) {}", error: "Media features with min- or max- must have a value." },
++    { css: "@media (device-height: -1px) {}", error: "Found invalid value for media feature." },
++    { css: "@media (min-width: -1px) {}", error: "Found invalid value for media feature." },
++    { css: "@media (min-resolution: 2) {}", error: "Found invalid value for media feature." },
++    { css: "@media (min-monochrome: 1.1) {}", error: "Found invalid value for media feature." },
++    { css: "@media (min-aspect-ratio: 1) {}", error: "Found invalid value for media feature." },
++    { css: "@media (orientation: invalid-orientation-value) {}", error: "Found invalid value for media feature." },
    ];
  
    var test = -1;
