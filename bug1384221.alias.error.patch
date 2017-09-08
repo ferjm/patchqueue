@@ -1,0 +1,32 @@
+# HG changeset patch
+# User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
+# Parent  50857982881ae7803ceb438fee90650a282f7f05
+Bug 1384221 - stylo: error reporting lies about property names in some cases
+
+diff --git a/servo/components/style/properties/declaration_block.rs b/servo/components/style/properties/declaration_block.rs
+--- a/servo/components/style/properties/declaration_block.rs
++++ b/servo/components/style/properties/declaration_block.rs
+@@ -979,17 +979,22 @@ impl<'a, 'b, 'i> DeclarationParser<'i> f
+                     PropertyDeclarationParseError::UnknownVendorProperty
+                 } else {
+                     PropertyDeclarationParseError::UnknownProperty(name)
+                 }.into());
+             }
+         };
+         input.parse_until_before(Delimiter::Bang, |input| {
+             PropertyDeclaration::parse_into(self.declarations, id, self.context, input)
+-                .map_err(|e| e.into())
++                .map_err(|e|
++                    PropertyDeclarationParseError::InvalidValue(
++                        name,
++                        ValueParseError::from_parse_error(e)
++                    ).into()
++                )
+         })?;
+         let importance = match input.try(parse_important) {
+             Ok(()) => Importance::Important,
+             Err(_) => Importance::Normal,
+         };
+         // In case there is still unparsed text in the declaration, we should roll back.
+         input.expect_exhausted()?;
+         Ok(importance)
