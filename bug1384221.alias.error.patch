@@ -6,7 +6,28 @@ Bug 1384221 - stylo: error reporting lies about property names in some cases
 diff --git a/servo/components/style/properties/declaration_block.rs b/servo/components/style/properties/declaration_block.rs
 --- a/servo/components/style/properties/declaration_block.rs
 +++ b/servo/components/style/properties/declaration_block.rs
-@@ -979,17 +979,23 @@ impl<'a, 'b, 'i> DeclarationParser<'i> f
+@@ -929,17 +929,18 @@ pub fn parse_one_declaration_into<R>(dec
+                                      Some(CssRuleType::Style),
+                                      parsing_mode,
+                                      quirks_mode);
+     let mut input = ParserInput::new(input);
+     let mut parser = Parser::new(&mut input);
+     let start_position = parser.position();
+     let start_location = parser.current_source_location();
+     parser.parse_entirely(|parser| {
+-        PropertyDeclaration::parse_into(declarations, id, &context, parser)
++        let name = id.name().into();
++        PropertyDeclaration::parse_into(declarations, id, name, &context, parser)
+             .map_err(|e| e.into())
+     }).map_err(|err| {
+         let error = ContextualParseError::UnsupportedPropertyDeclaration(
+             parser.slice_from(start_position), err);
+         let error_context = ParserErrorContext { error_reporter: error_reporter };
+         context.log_css_error(&error_context, start_location, error);
+     })
+ }
+@@ -978,17 +979,17 @@ impl<'a, 'b, 'i> DeclarationParser<'i> f
+                 return Err(if is_non_mozilla_vendor_identifier(&name) {
                      PropertyDeclarationParseError::UnknownVendorProperty
                  } else {
                      PropertyDeclarationParseError::UnknownProperty(name)
@@ -14,15 +35,9 @@ diff --git a/servo/components/style/properties/declaration_block.rs b/servo/comp
              }
          };
          input.parse_until_before(Delimiter::Bang, |input| {
-             PropertyDeclaration::parse_into(self.declarations, id, self.context, input)
--                .map_err(|e| e.into())
-+                .map_err(|e| {
-+                    if let PropertyDeclarationParseError::InvalidValue(_, e) = e {
-+                        PropertyDeclarationParseError::InvalidValue(name, e).into()
-+                    } else {
-+                        e.into()
-+                    }
-+                })
+-            PropertyDeclaration::parse_into(self.declarations, id, self.context, input)
++            PropertyDeclaration::parse_into(self.declarations, id, name, self.context, input)
+                 .map_err(|e| e.into())
          })?;
          let importance = match input.try(parse_important) {
              Ok(()) => Importance::Important,
@@ -30,4 +45,175 @@ diff --git a/servo/components/style/properties/declaration_block.rs b/servo/comp
          };
          // In case there is still unparsed text in the declaration, we should roll back.
          input.expect_exhausted()?;
-         Ok(importance)
+diff --git a/servo/components/style/properties/properties.mako.rs b/servo/components/style/properties/properties.mako.rs
+--- a/servo/components/style/properties/properties.mako.rs
++++ b/servo/components/style/properties/properties.mako.rs
+@@ -13,17 +13,17 @@
+ #[cfg(feature = "servo")] use app_units::Au;
+ use servo_arc::{Arc, UniqueArc};
+ use std::borrow::Cow;
+ use hash::HashSet;
+ use std::{fmt, mem, ops};
+ #[cfg(feature = "gecko")] use std::ptr;
+ 
+ #[cfg(feature = "servo")] use cssparser::RGBA;
+-use cssparser::{Parser, TokenSerializationType, serialize_identifier};
++use cssparser::{CowRcStr, Parser, TokenSerializationType, serialize_identifier};
+ use cssparser::ParserInput;
+ #[cfg(feature = "servo")] use euclid::SideOffsets2D;
+ use computed_values;
+ use context::QuirksMode;
+ use font_metrics::FontMetricsProvider;
+ #[cfg(feature = "gecko")] use gecko_bindings::bindings;
+ #[cfg(feature = "gecko")] use gecko_bindings::structs::{self, nsCSSPropertyID};
+ #[cfg(feature = "servo")] use logical_geometry::{LogicalMargin, PhysicalSide};
+@@ -1505,60 +1505,61 @@ impl PropertyDeclaration {
+     /// > The <declaration-list> inside of <keyframe-block> accepts any CSS property
+     /// > except those defined in this specification,
+     /// > but does accept the `animation-play-state` property and interprets it specially.
+     ///
+     /// This will not actually parse Importance values, and will always set things
+     /// to Importance::Normal. Parsing Importance values is the job of PropertyDeclarationParser,
+     /// we only set them here so that we don't have to reallocate
+     pub fn parse_into<'i, 't>(declarations: &mut SourcePropertyDeclaration,
+-                              id: PropertyId, context: &ParserContext, input: &mut Parser<'i, 't>)
++                              id: PropertyId, name: CowRcStr<'i>,
++                              context: &ParserContext, input: &mut Parser<'i, 't>)
+                               -> Result<(), PropertyDeclarationParseError<'i>> {
+         assert!(declarations.is_empty());
+         let start = input.state();
+         match id {
+-            PropertyId::Custom(name) => {
++            PropertyId::Custom(property_name) => {
+                 // FIXME: fully implement https://github.com/w3c/csswg-drafts/issues/774
+                 // before adding skip_whitespace here.
+                 // This probably affects some test results.
+                 let value = match input.try(|i| CSSWideKeyword::parse(i)) {
+                     Ok(keyword) => DeclaredValueOwned::CSSWideKeyword(keyword),
+                     Err(()) => match ::custom_properties::SpecifiedValue::parse(context, input) {
+                         Ok(value) => DeclaredValueOwned::Value(value),
+                         Err(e) => return Err(PropertyDeclarationParseError::InvalidValue(name.to_string().into(),
+                         ValueParseError::from_parse_error(e))),
+                     }
+                 };
+-                declarations.push(PropertyDeclaration::Custom(name, value));
++                declarations.push(PropertyDeclaration::Custom(property_name, value));
+                 Ok(())
+             }
+             PropertyId::Longhand(id) => {
+                 input.skip_whitespace();  // Unnecessary for correctness, but may help try() rewind less.
+                 input.try(|i| CSSWideKeyword::parse(i)).map(|keyword| {
+                     PropertyDeclaration::CSSWideKeyword(id, keyword)
+                 }).or_else(|()| {
+                     input.look_for_var_functions();
+                     input.parse_entirely(|input| id.parse_value(context, input))
+                     .or_else(|err| {
+                         while let Ok(_) = input.next() {}  // Look for var() after the error.
+                         if input.seen_var_functions() {
+                             input.reset(&start);
+                             let (first_token_type, css) =
+                                 ::custom_properties::parse_non_custom_with_var(input).map_err(|e| {
+-                                    PropertyDeclarationParseError::InvalidValue(id.name().into(),
++                                    PropertyDeclarationParseError::InvalidValue(name,
+                                         ValueParseError::from_parse_error(e))
+                                 })?;
+                             Ok(PropertyDeclaration::WithVariables(id, Arc::new(UnparsedValue {
+                                 css: css.into_owned(),
+                                 first_token_type: first_token_type,
+                                 url_data: context.url_data.clone(),
+                                 from_shorthand: None,
+                             })))
+                         } else {
+-                            Err(PropertyDeclarationParseError::InvalidValue(id.name().into(),
++                            Err(PropertyDeclarationParseError::InvalidValue(name,
+                                 ValueParseError::from_parse_error(err)))
+                         }
+                     })
+                 }).map(|declaration| {
+                     declarations.push(declaration)
+                 })
+             }
+             PropertyId::Shorthand(id) => {
+@@ -1577,17 +1578,17 @@ impl PropertyDeclaration {
+                     // Not using parse_entirely here: each ${shorthand.ident}::parse_into function
+                     // needs to do so *before* pushing to `declarations`.
+                     id.parse_into(declarations, context, input).or_else(|err| {
+                         while let Ok(_) = input.next() {}  // Look for var() after the error.
+                         if input.seen_var_functions() {
+                             input.reset(&start);
+                             let (first_token_type, css) =
+                                 ::custom_properties::parse_non_custom_with_var(input).map_err(|e| {
+-                                    PropertyDeclarationParseError::InvalidValue(id.name().into(),
++                                    PropertyDeclarationParseError::InvalidValue(name,
+                                         ValueParseError::from_parse_error(e))
+                                 })?;
+                             let unparsed = Arc::new(UnparsedValue {
+                                 css: css.into_owned(),
+                                 first_token_type: first_token_type,
+                                 url_data: context.url_data.clone(),
+                                 from_shorthand: Some(id),
+                             });
+@@ -1597,17 +1598,17 @@ impl PropertyDeclaration {
+                                 for &longhand in id.longhands() {
+                                     declarations.push(
+                                         PropertyDeclaration::WithVariables(longhand, unparsed.clone())
+                                     )
+                                 }
+                             }
+                             Ok(())
+                         } else {
+-                            Err(PropertyDeclarationParseError::InvalidValue(id.name().into(),
++                            Err(PropertyDeclarationParseError::InvalidValue(name,
+                                 ValueParseError::from_parse_error(err)))
+                         }
+                     })
+                 }
+             }
+         }
+     }
+ }
+diff --git a/servo/components/style/stylesheets/keyframes_rule.rs b/servo/components/style/stylesheets/keyframes_rule.rs
+--- a/servo/components/style/stylesheets/keyframes_rule.rs
++++ b/servo/components/style/stylesheets/keyframes_rule.rs
+@@ -578,18 +578,18 @@ impl<'a, 'b, 'i> DeclarationParser<'i> f
+     type Declaration = ();
+     type Error = SelectorParseError<'i, StyleParseError<'i>>;
+ 
+     fn parse_value<'t>(&mut self, name: CowRcStr<'i>, input: &mut Parser<'i, 't>)
+                        -> Result<(), ParseError<'i>> {
+         let property_context = PropertyParserContext::new(self.context);
+ 
+         let id = PropertyId::parse(&name, Some(&property_context))
+-            .map_err(|()| PropertyDeclarationParseError::UnknownProperty(name))?;
+-        match PropertyDeclaration::parse_into(self.declarations, id, self.context, input) {
++            .map_err(|()| PropertyDeclarationParseError::UnknownProperty(name.clone()))?;
++        match PropertyDeclaration::parse_into(self.declarations, id, name, self.context, input) {
+             Ok(()) => {
+                 // In case there is still unparsed text in the declaration, we should roll back.
+                 input.expect_exhausted().map_err(|e| e.into())
+             }
+             Err(_e) => Err(StyleParseError::UnspecifiedError.into())
+         }
+     }
+ }
+diff --git a/servo/components/style/stylesheets/supports_rule.rs b/servo/components/style/stylesheets/supports_rule.rs
+--- a/servo/components/style/stylesheets/supports_rule.rs
++++ b/servo/components/style/stylesheets/supports_rule.rs
+@@ -260,16 +260,16 @@ impl Declaration {
+             input.expect_colon().unwrap();
+ 
+             let property_context = PropertyParserContext::new(&context);
+             let id = PropertyId::parse(&prop, Some(&property_context))
+                         .map_err(|_| StyleParseError::UnspecifiedError)?;
+ 
+             let mut declarations = SourcePropertyDeclaration::new();
+             input.parse_until_before(Delimiter::Bang, |input| {
+-                PropertyDeclaration::parse_into(&mut declarations, id, &context, input)
++                PropertyDeclaration::parse_into(&mut declarations, id, prop.into(), &context, input)
+                     .map_err(|e| StyleParseError::PropertyDeclaration(e).into())
+             })?;
+             let _ = input.try(parse_important);
+             Ok(())
+         }).is_ok()
+     }
+ }
