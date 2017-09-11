@@ -1,0 +1,27 @@
+# HG changeset patch
+# User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
+# Parent  dda615b8994d72d3a3a95618f44463fc80f42c90
+Bug 1384221 - stylo: error reporting lies about property names in some cases. r=jdm
+
+diff --git a/layout/style/test/test_css_parse_error_smoketest.html b/layout/style/test/test_css_parse_error_smoketest.html
+--- a/layout/style/test/test_css_parse_error_smoketest.html
++++ b/layout/style/test/test_css_parse_error_smoketest.html
+@@ -31,16 +31,18 @@
+ 
+     { css: "x| {}", error: "Unknown namespace prefix ‘x’.  Ruleset ignored due to bad selector." },
+     { css: "a> {}", error: "Dangling combinator.  Ruleset ignored due to bad selector." },
+     { css: "~ {}", error: "Selector expected.  Ruleset ignored due to bad selector." },
+     { css: "| {}", error: "Expected element name or ‘*’ but found ‘ ’.  Ruleset ignored due to bad selector." },
+     { css: ". {}", error: "Expected identifier for class selector but found ‘ ’.  Ruleset ignored due to bad selector." },
+ 
+     { css: ":not() {}", error: "Missing argument in negation pseudo-class ‘)’.  Ruleset ignored due to bad selector." },
++
++    { css: "* { -webkit-text-size-adjust: 100% }", error: "Error in parsing value for ‘-webkit-text-size-adjust’.  Declaration dropped." },
+   ];
+ 
+   var test = -1;
+   function nextTest() {
+     test++;
+     if (test == tests.length) {
+       SimpleTest.finish();
+       return;
