@@ -1,0 +1,229 @@
+# HG changeset patch
+# User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
+# Parent  23460e4be9f2f3ef757d7dec02f6632178cdf204
+Bug 1397619 - Part 1. stylo: fix border-radius longhand specified values serialization. r?emilio
+
+diff --git a/servo/components/style/gecko/conversions.rs b/servo/components/style/gecko/conversions.rs
+--- a/servo/components/style/gecko/conversions.rs
++++ b/servo/components/style/gecko/conversions.rs
+@@ -695,17 +695,18 @@ pub mod basic_shape {
+ 
+     impl<'a> From<&'a nsStyleCorners> for BorderRadius {
+         fn from(other: &'a nsStyleCorners) -> Self {
+             let get_corner = |index| {
+                 BorderCornerRadius::new(
+                     LengthOrPercentage::from_gecko_style_coord(&other.data_at(index))
+                         .expect("<border-radius> should be a length, percentage, or calc value"),
+                     LengthOrPercentage::from_gecko_style_coord(&other.data_at(index + 1))
+-                        .expect("<border-radius> should be a length, percentage, or calc value"))
++                        .expect("<border-radius> should be a length, percentage, or calc value"),
++                    true /* height specified */)
+             };
+ 
+             GenericBorderRadius {
+                 top_left: get_corner(0),
+                 top_right: get_corner(2),
+                 bottom_right: get_corner(4),
+                 bottom_left: get_corner(6),
+             }
+diff --git a/servo/components/style/properties/gecko.mako.rs b/servo/components/style/properties/gecko.mako.rs
+--- a/servo/components/style/properties/gecko.mako.rs
++++ b/servo/components/style/properties/gecko.mako.rs
+@@ -962,17 +962,17 @@ def set_gecko_property(ffi_name, expr):
+         pub fn clone_${ident}(&self) -> longhands::${ident}::computed_value::T {
+             use values::computed::border::BorderCornerRadius;
+             let width = GeckoStyleCoordConvertible::from_gecko_style_coord(
+                             &self.gecko.${gecko_ffi_name}.data_at(${x_index}))
+                             .expect("Failed to clone ${ident}");
+             let height = GeckoStyleCoordConvertible::from_gecko_style_coord(
+                             &self.gecko.${gecko_ffi_name}.data_at(${y_index}))
+                             .expect("Failed to clone ${ident}");
+-            BorderCornerRadius::new(width, height)
++            BorderCornerRadius::new(width, height, true /* height specified */)
+         }
+     % endif
+ </%def>
+ 
+ <%def name="impl_css_url(ident, gecko_ffi_name, need_clone=False)">
+     #[allow(non_snake_case)]
+     pub fn set_${ident}(&mut self, v: longhands::${ident}::computed_value::T) {
+         use gecko_bindings::sugar::refptr::RefPtr;
+diff --git a/servo/components/style/values/animated/mod.rs b/servo/components/style/values/animated/mod.rs
+--- a/servo/components/style/values/animated/mod.rs
++++ b/servo/components/style/values/animated/mod.rs
+@@ -344,17 +344,18 @@ impl ToAnimatedValue for ComputedBorderC
+     #[inline]
+     fn to_animated_value(self) -> Self {
+         self
+     }
+ 
+     #[inline]
+     fn from_animated_value(animated: Self::AnimatedValue) -> Self {
+         ComputedBorderCornerRadius::new(animated.0.width.clamp_to_non_negative(),
+-                                        animated.0.height.clamp_to_non_negative())
++                                        animated.0.height.clamp_to_non_negative(),
++                                        true /* height specified */)
+     }
+ }
+ 
+ impl ToAnimatedValue for ComputedMaxLength {
+     type AnimatedValue = Self;
+ 
+     #[inline]
+     fn to_animated_value(self) -> Self {
+diff --git a/servo/components/style/values/generics/border.rs b/servo/components/style/values/generics/border.rs
+--- a/servo/components/style/values/generics/border.rs
++++ b/servo/components/style/values/generics/border.rs
+@@ -2,16 +2,18 @@
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ //! Generic types for CSS values related to borders.
+ 
+ use euclid::Size2D;
+ use std::fmt;
+ use style_traits::ToCss;
++use values::animated::{Animate, Procedure};
++use values::distance::{ComputeSquaredDistance, SquaredDistance};
+ use values::generics::rect::Rect;
+ 
+ /// A generic value for a single side of a `border-image-width` property.
+ #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+ #[derive(Clone, Copy, Debug, PartialEq, ToComputedValue, ToCss)]
+ pub enum BorderImageSideWidth<LengthOrPercentage, Number> {
+     /// `<length-or-percentage>`
+     Length(LengthOrPercentage),
+@@ -45,19 +47,40 @@ pub struct BorderRadius<LengthOrPercenta
+     /// The bottom right radius.
+     pub bottom_right: BorderCornerRadius<LengthOrPercentage>,
+     /// The bottom left radius.
+     pub bottom_left: BorderCornerRadius<LengthOrPercentage>,
+ }
+ 
+ /// A generic value for `border-*-radius` longhand properties.
+ #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
+-#[derive(Animate, Clone, ComputeSquaredDistance, Copy, Debug)]
++#[derive(Clone, Copy, Debug)]
+ #[derive(PartialEq, ToComputedValue)]
+-pub struct BorderCornerRadius<L>(pub Size2D<L>);
++pub struct BorderCornerRadius<L>(pub Size2D<L>, pub bool);
++
++impl<L> Animate for BorderCornerRadius<L>
++where
++    L: Animate + Copy,
++{
++    fn animate(&self, other: &Self, procedure: Procedure) -> Result<Self, ()> {
++        self.0.animate(&other.0, procedure).map(|s|
++            BorderCornerRadius::new(s.width, s.height, self.1)
++        )
++    }
++}
++
++impl<L> ComputeSquaredDistance for BorderCornerRadius<L>
++where
++    L: ComputeSquaredDistance,
++{
++    #[inline]
++    fn compute_squared_distance(&self, other: &Self) -> Result<SquaredDistance, ()> {
++        self.0.compute_squared_distance(&other.0)
++    }
++}
+ 
+ impl<N> From<N> for BorderImageSlice<N>
+     where N: Clone,
+ {
+     #[inline]
+     fn from(value: N) -> Self {
+         Self {
+             offsets: value.into(),
+@@ -130,30 +153,36 @@ impl<L> ToCss for BorderRadius<L>
+ 
+         Self::serialize_rects(widths, heights, dest)
+     }
+ }
+ 
+ impl<L> BorderCornerRadius<L> {
+     #[inline]
+     /// Create a new `BorderCornerRadius` for an area of given width and height.
+-    pub fn new(width: L, height: L) -> BorderCornerRadius<L> {
+-        BorderCornerRadius(Size2D::new(width, height))
++    pub fn new(width: L, height: L, height_specified: bool) -> BorderCornerRadius<L> {
++        BorderCornerRadius(Size2D::new(width, height), height_specified)
+     }
+ }
+ 
+ impl<L: Clone> From<L> for BorderCornerRadius<L> {
+     fn from(radius: L) -> Self {
+-        Self::new(radius.clone(), radius)
++        Self::new(radius.clone(), radius, false)
+     }
+ }
+ 
+ impl<L> ToCss for BorderCornerRadius<L>
+     where L: ToCss,
+ {
+     fn to_css<W>(&self, dest: &mut W) -> fmt::Result
+         where W: fmt::Write
+     {
+-        self.0.width.to_css(dest)?;
+-        dest.write_str(" ")?;
+-        self.0.height.to_css(dest)
++        let result = self.0.width.to_css(dest)?;
++        // If the height was specified, we serialize it, otherwise,
++        // we just bail out.
++        if self.1 {
++            dest.write_str(" ")?;
++            self.0.height.to_css(dest)
++        } else {
++            Ok(result)
++        }
+     }
+ }
+diff --git a/servo/components/style/values/specified/border.rs b/servo/components/style/values/specified/border.rs
+--- a/servo/components/style/values/specified/border.rs
++++ b/servo/components/style/values/specified/border.rs
+@@ -127,32 +127,38 @@ impl Parse for BorderImageSlice {
+             fill: fill,
+         })
+     }
+ }
+ 
+ impl Parse for BorderRadius {
+     fn parse<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>) -> Result<Self, ParseError<'i>> {
+         let widths = Rect::parse_with(context, input, LengthOrPercentage::parse_non_negative)?;
++        let mut heights_specified = true;
+         let heights = if input.try(|i| i.expect_delim('/')).is_ok() {
+             Rect::parse_with(context, input, LengthOrPercentage::parse_non_negative)?
+         } else {
++            heights_specified = false;
+             widths.clone()
+         };
+ 
+         Ok(GenericBorderRadius {
+-            top_left: BorderCornerRadius::new(widths.0, heights.0),
+-            top_right: BorderCornerRadius::new(widths.1, heights.1),
+-            bottom_right: BorderCornerRadius::new(widths.2, heights.2),
+-            bottom_left: BorderCornerRadius::new(widths.3, heights.3),
++            top_left: BorderCornerRadius::new(widths.0, heights.0, heights_specified),
++            top_right: BorderCornerRadius::new(widths.1, heights.1, heights_specified),
++            bottom_right: BorderCornerRadius::new(widths.2, heights.2, heights_specified),
++            bottom_left: BorderCornerRadius::new(widths.3, heights.3, heights_specified),
+         })
+     }
+ }
+ 
+ impl Parse for BorderCornerRadius {
+     fn parse<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>) -> Result<Self, ParseError<'i>> {
+         let first = LengthOrPercentage::parse_non_negative(context, input)?;
++        let mut heights_specified = true;
+         let second = input
+             .try(|i| LengthOrPercentage::parse_non_negative(context, i))
+-            .unwrap_or_else(|_| first.clone());
+-        Ok(Self::new(first, second))
++            .unwrap_or_else(|_| {
++                heights_specified = false;
++                first.clone()
++            });
++        Ok(Self::new(first, second, heights_specified))
+     }
+ }
