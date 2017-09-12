@@ -1,0 +1,49 @@
+# HG changeset patch
+# User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
+# Parent  d0eb6c1ce7a60a2d0c2b0a70a8a11a221cda4c9a
+Bug 1397619 - stylo: test border-radius longhand specified values serialization. r?emilio
+
+diff --git a/layout/style/test/test_specified_value_serialization.html b/layout/style/test/test_specified_value_serialization.html
+--- a/layout/style/test/test_specified_value_serialization.html
++++ b/layout/style/test/test_specified_value_serialization.html
+@@ -233,12 +233,40 @@
+         p.style.removeProperty(prop);
+       }
+     }
+   }
+ 
+   p.remove();
+ })();
+ 
++(function test_bug_1397619() {
++  var borderRadius = [
++    // [ specified style,
++    //   expected serialization,
++    //   descriptionOfTestcase ],
++    [ "10px 10px",
++      "10px 10px",
++      "Width and height specified for border radius" ],
++    [ "10px",
++      "10px",
++      "Only width specified for border radius" ],
++  ];
++
++  var property = "border-top-left-radius";
++
++  var frame_container = document.getElementById("display");
++  var p = document.createElement("p");
++  frame_container.appendChild(p);
++
++  for (var i = 0; i < borderRadius.length; ++i) {
++    var test = borderRadius[i];
++    p.style.setProperty(property, test[0]);
++    is(p.style.getPropertyValue(property), test[1], test[2]);
++  }
++
++  p.remove();
++})();
++
+ </script>
+ </pre>
+ </body>
+ </html>

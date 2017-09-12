@@ -2,4 +2,5 @@ bug1384221.alias.error.patch
 bug1384221.alias.error.test.patch
 try
 bug1397619.border.radius.longhand.serialization.patch
+bug1397619.border.radius.longhand.serialization.test.patch
 cssparser.patch
