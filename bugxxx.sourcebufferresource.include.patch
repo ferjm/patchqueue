@@ -1,0 +1,26 @@
+# HG changeset patch
+# User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
+# Parent  f41930a869a84af81df1a88d8e82323ff3a6509a
+Bug 1418244 - MSE SourceBufferResource uses AbstractThread without including its header. r?cpearce
+
+diff --git a/dom/media/mediasource/SourceBufferResource.h b/dom/media/mediasource/SourceBufferResource.h
+--- a/dom/media/mediasource/SourceBufferResource.h
++++ b/dom/media/mediasource/SourceBufferResource.h
+@@ -2,16 +2,17 @@
+ /* vim: set ts=8 sts=2 et sw=2 tw=80: */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #ifndef MOZILLA_SOURCEBUFFERRESOURCE_H_
+ #define MOZILLA_SOURCEBUFFERRESOURCE_H_
+ 
++#include "mozilla/AbstractThread.h"
+ #include "mozilla/Logging.h"
+ #include "MediaResource.h"
+ #include "nsIPrincipal.h"
+ #include "ResourceQueue.h"
+ 
+ #define UNIMPLEMENTED() { /* Logging this is too spammy to do by default */ }
+ 
+ namespace mozilla {
