@@ -24,3 +24,24 @@ diff --git a/dom/media/mediasource/SourceBufferResource.h b/dom/media/mediasourc
  #define UNIMPLEMENTED() { /* Logging this is too spammy to do by default */ }
  
  namespace mozilla {
+diff --git a/dom/media/mediasource/TrackBuffersManager.cpp b/dom/media/mediasource/TrackBuffersManager.cpp
+--- a/dom/media/mediasource/TrackBuffersManager.cpp
++++ b/dom/media/mediasource/TrackBuffersManager.cpp
+@@ -4,16 +4,17 @@
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "TrackBuffersManager.h"
+ #include "ContainerParser.h"
+ #include "MediaPrefs.h"
+ #include "MediaSourceDemuxer.h"
+ #include "MediaSourceUtils.h"
++#include "mozilla/ErrorResult.h"
+ #include "mozilla/Preferences.h"
+ #include "SourceBuffer.h"
+ #include "SourceBufferResource.h"
+ #include "SourceBufferTask.h"
+ #include "WebMDemuxer.h"
+ 
+ #ifdef MOZ_FMP4
+ #include "MP4Demuxer.h"
