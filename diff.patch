@@ -1,0 +1,26 @@
+# HG changeset patch
+# User Fernando Jimenez Moreno <ferjmoreno@gmail.com>
+# Parent  8697764fdb68ae0865469da5dfda1cfc3a448d24
+
+diff --git a/dom/media/MediaStreamGraph.cpp b/dom/media/MediaStreamGraph.cpp
+--- a/dom/media/MediaStreamGraph.cpp
++++ b/dom/media/MediaStreamGraph.cpp
+@@ -46,16 +46,18 @@ using namespace mozilla::media;
+ namespace mozilla {
+ 
+ LazyLogModule gMediaStreamGraphLog("MediaStreamGraph");
+ #ifdef LOG
+ #undef LOG
+ #endif // LOG
+ #define LOG(type, msg) MOZ_LOG(gMediaStreamGraphLog, type, msg)
+ 
++// BANANA
++//
+ enum SourceMediaStream::TrackCommands : uint32_t {
+   TRACK_CREATE = TrackEventCommand::TRACK_EVENT_CREATED,
+   TRACK_END = TrackEventCommand::TRACK_EVENT_ENDED,
+   TRACK_UNUSED = TrackEventCommand::TRACK_EVENT_UNUSED,
+ };
+ 
+ /**
+  * A hash table containing the graph instances, one per document.
