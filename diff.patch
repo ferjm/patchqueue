@@ -24,3 +24,22 @@ diff --git a/dom/media/MediaStreamGraph.cpp b/dom/media/MediaStreamGraph.cpp
  
  /**
   * A hash table containing the graph instances, one per document.
+diff --git a/dom/media/platforms/agnostic/AgnosticDecoderModule.cpp b/dom/media/platforms/agnostic/AgnosticDecoderModule.cpp
+--- a/dom/media/platforms/agnostic/AgnosticDecoderModule.cpp
++++ b/dom/media/platforms/agnostic/AgnosticDecoderModule.cpp
+@@ -1,14 +1,15 @@
+ /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+ /* vim:set ts=2 sw=2 sts=2 et cindent: */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
++/// Banana
+ #include "AgnosticDecoderModule.h"
+ #include "OpusDecoder.h"
+ #include "TheoraDecoder.h"
+ #include "VPXDecoder.h"
+ #include "VorbisDecoder.h"
+ #include "WAVDecoder.h"
+ #include "mozilla/Logging.h"
+ 
