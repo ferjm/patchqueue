@@ -1,0 +1,25 @@
+# HG changeset patch
+# User Fernando Jimenez <ferjmoreno@gmail.com>
+# Parent  5b33b070378ae0806bed0b5e5e34de429a29e7db
+
+diff --git a/dom/media/mediasource/MediaSourceDecoder.cpp b/dom/media/mediasource/MediaSourceDecoder.cpp
+--- a/dom/media/mediasource/MediaSourceDecoder.cpp
++++ b/dom/media/mediasource/MediaSourceDecoder.cpp
+@@ -6,16 +6,17 @@
+ #include "MediaSourceDecoder.h"
+ 
+ #include "mozilla/Logging.h"
+ #include "MediaDecoderStateMachine.h"
+ #include "MediaShutdownManager.h"
+ #include "MediaSource.h"
+ #include "MediaSourceDemuxer.h"
+ #include "MediaSourceUtils.h"
++#include "SourceBuffer.h"
+ #include "SourceBufferList.h"
+ #include "VideoUtils.h"
+ #include <algorithm>
+ 
+ extern mozilla::LogModule* GetMediaSourceLog();
+ 
+ #define MSE_DEBUG(arg, ...) MOZ_LOG(GetMediaSourceLog(), mozilla::LogLevel::Debug, ("MediaSourceDecoder(%p)::%s: " arg, this, __func__, ##__VA_ARGS__))
+ #define MSE_DEBUGV(arg, ...) MOZ_LOG(GetMediaSourceLog(), mozilla::LogLevel::Verbose, ("MediaSourceDecoder(%p)::%s: " arg, this, __func__, ##__VA_ARGS__))
