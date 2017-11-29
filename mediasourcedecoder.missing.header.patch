@@ -1,6 +1,7 @@
 # HG changeset patch
 # User Fernando Jimenez <ferjmoreno@gmail.com>
 # Parent  5b33b070378ae0806bed0b5e5e34de429a29e7db
+Bug 1421343 - MediaSourceDecoder uses SourceBuffer without including its header. r?cpearce
 
 diff --git a/dom/media/mediasource/MediaSourceDecoder.cpp b/dom/media/mediasource/MediaSourceDecoder.cpp
 --- a/dom/media/mediasource/MediaSourceDecoder.cpp
