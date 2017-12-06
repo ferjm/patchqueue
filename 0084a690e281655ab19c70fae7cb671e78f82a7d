@@ -1,0 +1,547 @@
+
+# HG changeset patch
+# User Markus Stange <mstange@themasta.com>
+# Date 1492036199 14400
+# Node ID 0084a690e281655ab19c70fae7cb671e78f82a7d
+# Parent  b4cef8d1dff06a1ec2b9bb17211c0c3c7f5b76fa
+Bug 1299117 - Measure time to first meaningful paint and report it to Telemetry. r?smaug
+
+This implements the detection of the first "meaningful" paint as described in
+the definition in FirstMeaningfulPaintDetector.h.
+What's implemented here closely matches Chrome's code at
+https://cs.chromium.org/chromium/src/third_party/WebKit/Source/core/paint/FirstMeaningfulPaintDetector.cpp
+except for the following differences:
+ - We don't check for "blank characters" (i.e. pending web fonts).
+ - We compute "layout significance" per paint, and not per layout, using the
+   page height at the time of the paint. Chrome respects the page height in
+   each layout's significance computation individually.
+These differences are not intentional; I just haven't implemented the missing
+pieces yet.
+
+This patch does not add any profiler markers.
+
+The value reported via telemetry is the time between non-blank paint and first
+meaningful paint, in milliseconds.
+
+MozReview-Commit-ID: GJyeCesguvy
+
+diff --git a/dom/base/nsDOMNavigationTiming.cpp b/dom/base/nsDOMNavigationTiming.cpp
+--- a/dom/base/nsDOMNavigationTiming.cpp
++++ b/dom/base/nsDOMNavigationTiming.cpp
+@@ -292,16 +292,39 @@ nsDOMNavigationTiming::NotifyNonBlankPai
+ 
+     Telemetry::AccumulateTimeDelta(Telemetry::TIME_TO_NON_BLANK_PAINT_MS,
+                                    mNavigationStart,
+                                    mNonBlankPaint);
+   }
+ }
+ 
+ void
++nsDOMNavigationTiming::NotifyFirstMeaningfulPaintForRootContentDocument(const TimeStamp& aTimeStamp)
++{
++  MOZ_ASSERT(NS_IsMainThread());
++  MOZ_ASSERT(!mNavigationStart.IsNull());
++
++  if (mNonBlankPaint.IsNull() ||
++      !mFirstMeaningfulPaint.IsNull()) {
++    return;
++  }
++
++  mFirstMeaningfulPaint = aTimeStamp;
++
++  if (mDocShellHasBeenActiveSinceNavigationStart) {
++    Telemetry::AccumulateTimeDelta(Telemetry::TIME_TO_FIRST_MEANINGFUL_PAINT_MS,
++                                   mNavigationStart,
++                                   mFirstMeaningfulPaint);
++    Telemetry::AccumulateTimeDelta(Telemetry::TIME_TO_FIRST_MEANINGFUL_PAINT_SINCE_NON_BLANK_PAINT_MS,
++                                   mNonBlankPaint,
++                                   mFirstMeaningfulPaint);
++  }
++}
++
++void
+ nsDOMNavigationTiming::NotifyDocShellStateChanged(DocShellState aDocShellState)
+ {
+   mDocShellHasBeenActiveSinceNavigationStart &=
+     (aDocShellState == DocShellState::eActive);
+ }
+ 
+ mozilla::TimeStamp
+ nsDOMNavigationTiming::GetUnloadEventStartTimeStamp() const
+diff --git a/dom/base/nsDOMNavigationTiming.h b/dom/base/nsDOMNavigationTiming.h
+--- a/dom/base/nsDOMNavigationTiming.h
++++ b/dom/base/nsDOMNavigationTiming.h
+@@ -154,16 +154,17 @@ public:
+   void SetDOMLoadingTimeStamp(nsIURI* aURI, mozilla::TimeStamp aValue);
+   void NotifyDOMLoading(nsIURI* aURI);
+   void NotifyDOMInteractive(nsIURI* aURI);
+   void NotifyDOMComplete(nsIURI* aURI);
+   void NotifyDOMContentLoadedStart(nsIURI* aURI);
+   void NotifyDOMContentLoadedEnd(nsIURI* aURI);
+ 
+   void NotifyNonBlankPaintForRootContentDocument();
++  void NotifyFirstMeaningfulPaintForRootContentDocument(const mozilla::TimeStamp& aTimeStamp);
+   void NotifyDocShellStateChanged(DocShellState aDocShellState);
+ 
+   DOMTimeMilliSec TimeStampToDOM(mozilla::TimeStamp aStamp) const;
+ 
+   inline DOMHighResTimeStamp TimeStampToDOMHighRes(mozilla::TimeStamp aStamp) const
+   {
+     if (aStamp.IsNull()) {
+       return 0;
+@@ -187,16 +188,17 @@ private:
+ 
+   nsCOMPtr<nsIURI> mUnloadedURI;
+   nsCOMPtr<nsIURI> mLoadedURI;
+ 
+   Type mNavigationType;
+   DOMHighResTimeStamp mNavigationStartHighRes;
+   mozilla::TimeStamp mNavigationStart;
+   mozilla::TimeStamp mNonBlankPaint;
++  mozilla::TimeStamp mFirstMeaningfulPaint;
+ 
+   mozilla::TimeStamp mBeforeUnloadStart;
+   mozilla::TimeStamp mUnloadStart;
+   mozilla::TimeStamp mUnloadEnd;
+   mozilla::TimeStamp mLoadEventStart;
+   mozilla::TimeStamp mLoadEventEnd;
+ 
+   mozilla::TimeStamp mDOMLoading;
+diff --git a/layout/base/nsPresContext.cpp b/layout/base/nsPresContext.cpp
+--- a/layout/base/nsPresContext.cpp
++++ b/layout/base/nsPresContext.cpp
+@@ -81,16 +81,17 @@
+ #include "nsFontFaceUtils.h"
+ #include "nsLayoutStylesheetCache.h"
+ #include "mozilla/ServoBindings.h"
+ #include "mozilla/StyleSheet.h"
+ #include "mozilla/StyleSheetInlines.h"
+ #include "mozilla/Telemetry.h"
+ #include "mozilla/dom/Performance.h"
+ #include "mozilla/dom/PerformanceTiming.h"
++#include "mozilla/FirstMeaningfulPaintDetector.h"
+ #include "mozilla/layers/APZThreadUtils.h"
+ 
+ // Needed for Start/Stop of Image Animation
+ #include "imgIContainer.h"
+ #include "nsIImageLoadingContent.h"
+ 
+ #include "nsCSSParser.h"
+ #include "nsBidiUtils.h"
+@@ -340,31 +341,45 @@ nsPresContext::nsPresContext(nsIDocument
+   }
+ 
+   if (Preferences::GetBool(GFX_MISSING_FONTS_NOTIFY_PREF)) {
+     mMissingFonts = new gfxMissingFontRecorder();
+   }
+ }
+ 
+ void
++nsPresContext::NotifyPaint()
++{
++  if (mFirstMeaningfulPaintDetector && mShell) {
++    if (nsIScrollableFrame* rootScrollFrame = mShell->GetRootScrollFrameAsScrollable()) {
++      mFirstMeaningfulPaintDetector->NotifyPaint(mFramesConstructed,
++                                                 rootScrollFrame->GetScrolledRect().height,
++                                                 rootScrollFrame->GetScrollPortRect().height);
++    }
++  }
++}
++
++void
+ nsPresContext::Destroy()
+ {
+   if (mEventManager) {
+     // unclear if these are needed, but can't hurt
+     mEventManager->NotifyDestroyPresContext(this);
+     mEventManager->SetPresContext(nullptr);
+     mEventManager = nullptr;
+   }
+ 
+   if (mPrefChangedTimer)
+   {
+     mPrefChangedTimer->Cancel();
+     mPrefChangedTimer = nullptr;
+   }
+ 
++  mFirstMeaningfulPaintDetector = nullptr;
++
+   // Unregister preference callbacks
+   Preferences::UnregisterPrefixCallback(nsPresContext::PrefChangedCallback,
+                                         "font.",
+                                         this);
+   Preferences::UnregisterPrefixCallback(nsPresContext::PrefChangedCallback,
+                                         "browser.display.",
+                                         this);
+   Preferences::UnregisterCallback(nsPresContext::PrefChangedCallback,
+@@ -1040,16 +1055,20 @@ nsPresContext::AttachShell(nsIPresShell*
+ 
+       if (!isChrome && !isRes)
+         mImageAnimationMode = mImageAnimationModePref;
+       else
+         mImageAnimationMode = imgIContainer::kNormalAnimMode;
+     }
+ 
+     UpdateCharSet(doc->GetDocumentCharacterSet());
++
++    if (IsRootContentDocument()) {
++      mFirstMeaningfulPaintDetector = MakeUnique<FirstMeaningfulPaintDetector>(this);
++    }
+   }
+ }
+ 
+ void
+ nsPresContext::DetachShell()
+ {
+   // The counter style manager's destructor needs to deallocate with the
+   // presshell arena. Disconnect it before nulling out the shell.
+diff --git a/layout/base/nsPresContext.h b/layout/base/nsPresContext.h
+--- a/layout/base/nsPresContext.h
++++ b/layout/base/nsPresContext.h
+@@ -1119,16 +1119,18 @@ public:
+   bool IsRootContentDocument() const;
+ 
+   bool HadNonBlankPaint() const {
+     return mHadNonBlankPaint;
+   }
+ 
+   void NotifyNonBlankPaint();
+ 
++  void NotifyPaint();
++
+   bool IsGlyph() const {
+     return mIsGlyph;
+   }
+ 
+   void SetIsGlyph(bool aValue) {
+     mIsGlyph = aValue;
+   }
+ 
+diff --git a/layout/painting/FirstMeaningfulPaintDetector.cpp b/layout/painting/FirstMeaningfulPaintDetector.cpp
+new file mode 100644
+--- /dev/null
++++ b/layout/painting/FirstMeaningfulPaintDetector.cpp
+@@ -0,0 +1,221 @@
++/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*-
++ * This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#include "FirstMeaningfulPaintDetector.h"
++
++#include "mozilla/Unused.h"
++
++#include "nsDocShell.h"
++#include "nsDOMNavigationTiming.h"
++#include "nsIInterfaceRequestorUtils.h"
++#include "nsITimer.h"
++#include "nsIWebProgress.h"
++#include "nsIWebProgressListener.h"
++#include "nsISimpleEnumerator.h"
++#include "nsILoadGroup.h"
++#include "nsWeakReference.h"
++
++namespace mozilla {
++
++const int32_t kMillisecondsWithoutNetworkActivityThreshold = 500;
++
++class FMPDListener final : public nsITimerCallback,
++                           public nsIWebProgressListener,
++                           public nsSupportsWeakReference
++{
++public:
++  explicit FMPDListener(FirstMeaningfulPaintDetector& aDetector)
++    : mDetector(aDetector)
++  {}
++  NS_DECL_ISUPPORTS
++  NS_DECL_NSITIMERCALLBACK
++  NS_DECL_NSIWEBPROGRESSLISTENER
++private:
++  ~FMPDListener() {}
++  FirstMeaningfulPaintDetector& mDetector;
++};
++
++NS_IMPL_ISUPPORTS(FMPDListener, nsITimerCallback, nsIWebProgressListener, nsISupportsWeakReference)
++
++FirstMeaningfulPaintDetector::FirstMeaningfulPaintDetector(nsPresContext* aPresContext)
++  : mPresContext(aPresContext)
++  , mCandidateLayoutSignificance(0.0)
++  , mLastPaintTotalFramesConstructedCount(0)
++  , mDone(false)
++{
++  MOZ_COUNT_CTOR(FirstMeaningfulPaintDetector);
++  mDocShell = static_cast<nsDocShell*>(mPresContext->GetDocShell());
++  nsCOMPtr<nsIWebProgress> webProgress = do_GetInterface(static_cast<nsIDocShell*>(mDocShell));
++  if (webProgress) {
++    mListener = new FMPDListener(*this);
++    nsresult rv = webProgress->AddProgressListener(mListener,
++                                                   nsIWebProgress::NOTIFY_STATE_REQUEST);
++    if (NS_FAILED(rv)) {
++      mListener = nullptr;
++    }
++  }
++  mNetworkStableTimer = do_CreateInstance(NS_TIMER_CONTRACTID);
++}
++
++FirstMeaningfulPaintDetector::~FirstMeaningfulPaintDetector()
++{
++  MOZ_COUNT_DTOR(FirstMeaningfulPaintDetector);
++  if (mNetworkStableTimer) {
++    Unused << mNetworkStableTimer->Cancel();
++    mNetworkStableTimer = nullptr;
++  }
++  nsCOMPtr<nsIWebProgress> webProgress = do_GetInterface(static_cast<nsIDocShell*>(mDocShell));
++  if (webProgress && mListener) {
++    Unused << webProgress->RemoveProgressListener(mListener);
++    mListener = nullptr;
++  }
++}
++
++// from https://github.com/tdresser/time-to-first-meaningful-paint
++static double
++ComputeLayoutSignificance(uint64_t aFramesConstructedCount,
++                          nscoord aScrolledHeight,
++                          nscoord aScrollPortHeight)
++{
++  return aFramesConstructedCount / std::max(1.0, double(aScrolledHeight) / aScrollPortHeight);
++}
++
++void
++FirstMeaningfulPaintDetector::NotifyPaint(uint64_t aTotalFramesConstructedCount,
++                                          nscoord aScrolledHeight,
++                                          nscoord aScrollPortHeight)
++{
++  if (mDone) {
++    return;
++  }
++
++  uint64_t framesConstructedCountSinceLastPaint =
++    aTotalFramesConstructedCount - mLastPaintTotalFramesConstructedCount;
++  double paintLayoutSignificance =
++    ComputeLayoutSignificance(framesConstructedCountSinceLastPaint,
++                              aScrolledHeight, aScrollPortHeight);
++  mLastPaintTotalFramesConstructedCount = aTotalFramesConstructedCount;
++
++  if (paintLayoutSignificance > mCandidateLayoutSignificance) {
++    mCandidateLayoutSignificance = paintLayoutSignificance;
++    mCandidateTimeStamp = TimeStamp::Now();
++  }
++}
++
++void
++FirstMeaningfulPaintDetector::CheckNetworkStable()
++{
++  if (mDone || HasPendingRequest()) {
++    return;
++  }
++
++  if (mNetworkStableTimer) {
++    Unused << mNetworkStableTimer->Cancel();
++    Unused << mNetworkStableTimer->InitWithCallback(mListener,
++                                                    kMillisecondsWithoutNetworkActivityThreshold,
++                                                    nsITimer::TYPE_ONE_SHOT);
++  }
++}
++
++void
++FirstMeaningfulPaintDetector::NetworkIdleTimerFired()
++{
++  if (mDone || HasPendingRequest() || !mPresContext->HadNonBlankPaint()) {
++    return;
++  }
++
++  if (!mCandidateTimeStamp.IsNull()) {
++    RefPtr<nsDOMNavigationTiming> timing =
++      mPresContext->Document()->GetNavigationTiming();
++    if (timing) {
++      timing->NotifyFirstMeaningfulPaintForRootContentDocument(mCandidateTimeStamp);
++    }
++  }
++  mDone = true;
++}
++
++bool
++FirstMeaningfulPaintDetector::HasPendingRequest()
++{
++  nsCOMPtr<nsILoadGroup> loadGroup =
++    mPresContext->Document()->GetDocumentLoadGroup();
++  if (loadGroup) {
++    nsCOMPtr<nsISimpleEnumerator> requests;
++    loadGroup->GetRequests(getter_AddRefs(requests));
++
++    bool hasMore = false;
++    while (NS_SUCCEEDED(requests->HasMoreElements(&hasMore)) && hasMore) {
++      nsCOMPtr<nsISupports> elem;
++      requests->GetNext(getter_AddRefs(elem));
++
++      nsCOMPtr<nsIRequest> request = do_QueryInterface(elem);
++      if (request) {
++        return true;
++      }
++    }
++  }
++  return false;
++}
++
++NS_IMETHODIMP
++FMPDListener::Notify(nsITimer* aTimer)
++{
++  mDetector.NetworkIdleTimerFired();
++  return NS_OK;
++}
++
++NS_IMETHODIMP
++FMPDListener::OnStateChange(nsIWebProgress* aWebProgress,
++                            nsIRequest* aRequest,
++                            uint32_t aStateFlags, nsresult aStatus)
++{
++  if ((aStateFlags & nsIWebProgressListener::STATE_IS_REQUEST) &&
++      (aStateFlags & nsIWebProgressListener::STATE_STOP)) {
++    mDetector.CheckNetworkStable();
++  }
++  return NS_OK;
++}
++
++NS_IMETHODIMP
++FMPDListener::OnProgressChange(nsIWebProgress* aWebProgress,
++                               nsIRequest* aRequest,
++                               int32_t aCurSelfProgress,
++                               int32_t aMaxSelfProgress,
++                               int32_t aCurTotalProgress,
++                               int32_t aMaxTotalProgress)
++{
++  MOZ_ASSERT(false, "Unexpected notification.");
++  return NS_OK;
++}
++
++NS_IMETHODIMP
++FMPDListener::OnLocationChange(nsIWebProgress* aWebProgress,
++                               nsIRequest* aRequest,
++                               nsIURI* aLocation,
++                               uint32_t aFlags)
++{
++  MOZ_ASSERT(false, "Unexpected notification.");
++  return NS_OK;
++}
++
++NS_IMETHODIMP
++FMPDListener::OnStatusChange(nsIWebProgress* aWebProgress,
++                             nsIRequest* aRequest,
++                             nsresult aStatus, const char16_t* aMessage)
++{
++  MOZ_ASSERT(false, "Unexpected notification.");
++  return NS_OK;
++}
++
++NS_IMETHODIMP
++FMPDListener::OnSecurityChange(nsIWebProgress* aWebProgress,
++                               nsIRequest* aRequest,
++                               uint32_t aState)
++{
++  MOZ_ASSERT(false, "Unexpected notification.");
++  return NS_OK;
++}
++
++} // namespace mozilla
+diff --git a/layout/painting/FirstMeaningfulPaintDetector.h b/layout/painting/FirstMeaningfulPaintDetector.h
+new file mode 100644
+--- /dev/null
++++ b/layout/painting/FirstMeaningfulPaintDetector.h
+@@ -0,0 +1,97 @@
++/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*-
++ * This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#ifndef FIRSTMEANINGFULPAINTDETECTOR_H_
++#define FIRSTMEANINGFULPAINTDETECTOR_H_
++
++#include "mozilla/TimeStamp.h"
++#include "mozilla/WeakPtr.h"
++
++class nsILoadGroup;
++class nsITimer;
++class nsDocShell;
++class nsPresContext;
++
++namespace mozilla {
++
++class FMPDListener;
++
++/**
++ * This class detects and reports the "first meaningful paint" of a document.
++ * It uses a heuristic which is still in flux; the current definition is
++ * described below. We only compute the first meaningful paint for root
++ * content documents.
++ * The first meaningful paint is defined as the paint with the highest "layout
++ * significance", out of all the paints that happen between between navigation
++ * start and "network stable".
++ * The layout significance of a paint is a number that's based on the scroll
++ * height of the document's root scrollable frame during that paint and on the
++ * number of layout objects that have been created for this document since the
++ * last paint.
++ * The network stable time is defined as the end of the first 500ms interval
++ * during a document's life cycle during which there were no pending network
++ * requests for this document. If there is no such interval, then no first
++ * meaningful paint will be reported.
++ */
++class FirstMeaningfulPaintDetector final
++{
++public:
++  friend class FMPDListener;
++
++  /**
++   * Create a FirstMeaningfulPaintDetector instance for a given prescontext.
++   * The constructor will set a progress listener on the docshell that
++   * contains this prescontext, so that network stable time can be detected.
++   * We store a pointer to the prescontext and will notify the prescontext's
++   * document's nsDOMNavigationTiming once we know the first meaningful
++   * paint's timestamp.
++   * The prescontext is expected to outlast this object. In other words, this
++   * object has to be destroyed before the prescontext is destroyed.
++   */
++  explicit FirstMeaningfulPaintDetector(nsPresContext* aPresContext);
++
++  ~FirstMeaningfulPaintDetector();
++
++  /**
++   * Needs to be called for every paint in the prescontext that this instance
++   * was initialized with.
++   */
++  void NotifyPaint(uint64_t aTotalFramesConstructedCount,
++                   nscoord aScrolledHeight,
++                   nscoord aScrollPortHeight);
++
++private:
++  /**
++   * Called whenever a request in mPresContext's docshell finishes. Retriggers
++   * the check for stable network.
++   */
++  void CheckNetworkStable();
++
++  /**
++   * Called when mNetworkStableTimer fires. If there were no pending requests
++   * both at the start and at the end of the timer interval, and no other
++   * request completed in between, then we've found a window of idle network.
++   */
++  void NetworkIdleTimerFired();
++
++  /**
++   * Returns whether the load group of mPresContext's document has any pending
++   * requests.
++   */
++  bool HasPendingRequest();
++
++  nsPresContext* mPresContext; // always valid because the prescontext outlasts us
++  mozilla::WeakPtr<nsDocShell> mDocShell;
++  RefPtr<FMPDListener> mListener;
++  RefPtr<nsITimer> mNetworkStableTimer;
++  mozilla::TimeStamp mCandidateTimeStamp;
++  double mCandidateLayoutSignificance;
++  uint64_t mLastPaintTotalFramesConstructedCount;
++  bool mDone;
++};
++
++} // namespace mozilla
++
++#endif // FIRSTMEANINGFULPAINTDETECTOR_H_
